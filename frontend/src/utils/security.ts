@@ -13,13 +13,17 @@ export function isSuspiciousFrontend(input: string): boolean {
   );
 }
 
-export function validateFrontendField(
-  name: string,
-  value: string,
-  maxLen = 255,
-): string | null {
-  if (isSuspiciousFrontend(value))
-    return `Suspicious input in ${name} — not saved`;
-  if (value.length > maxLen) return `${name} too long`;
+/**
+ * Validate password against strength policy.
+ * @param pwd - Candidate password
+ * @returns Error message or null if valid
+ * @example getPasswordError("weak")
+ */
+export function getPasswordError(pwd: string): string | null {
+  if (pwd.length < 8) return "Password must be at least 8 characters";
+  if (!/[A-Z]/.test(pwd)) return "Password must contain 1 uppercase letter";
+  if (!/\d/.test(pwd)) return "Password must contain 1 number";
+  if (!/[^A-Za-z0-9]/.test(pwd))
+    return "Password must contain 1 special character";
   return null;
 }

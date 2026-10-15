@@ -5,7 +5,7 @@
 import { useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { isSuspiciousFrontend } from "../utils/security";
+import { isSuspiciousFrontend, getPasswordError } from "../utils/security";
 import { useToastContext } from "../context/ToastContext";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
@@ -17,21 +17,6 @@ import authStyles from "./Auth.module.scss";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Validate password against strength policy.
- * @param pwd - Candidate password
- * @returns Error message or null if valid
- * @example getPasswordError("weak") // "Password must be..."
- */
-function getPasswordErrorLocal(pwd: string): string | null {
-  if (pwd.length < 8) return "Password must be at least 8 characters";
-  if (!/[A-Z]/.test(pwd)) return "Password must contain 1 uppercase letter";
-  if (!/\d/.test(pwd)) return "Password must contain 1 number";
-  if (!/[^A-Za-z0-9]/.test(pwd))
-    return "Password must contain 1 special character";
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -79,7 +64,7 @@ export default function Register() {
         show("warning", "Suspicious input detected — not saved");
         return;
       }
-      const pwErr = getPasswordErrorLocal(password);
+      const pwErr = getPasswordError(password);
       if (pwErr) {
         setErr(pwErr);
         show("warning", pwErr);

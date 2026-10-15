@@ -8,11 +8,8 @@ import { useAuth } from "../context/AuthContext";
 import { useToastContext } from "../context/ToastContext";
 import { Avatar } from "../components/Avatar";
 import { processAvatarFile } from "../utils/avatar";
+import { normalizePhone } from "../utils/format";
 import authStyles from "./Auth.module.scss";
-
-function normalizePhone(v: string): string {
-  return v.trim().replace(/[\s\-()]/g, "");
-}
 
 /**
  * User profile page.

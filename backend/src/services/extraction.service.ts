@@ -375,7 +375,8 @@ async function runLocalStage(
         }
         const filled = Object.keys(seed.data).length;
         data = seed.data;
-        ((conf = ruleBasedConfidence(filled)), (type = localRes.documentType));
+        conf = ruleBasedConfidence(filled);
+        type = localRes.documentType;
         typeConf = localRes.confidence;
         logger.info("Local LLM filled rules-first gaps", {
           filledByFlan,

@@ -1,43 +1,10 @@
 /**
- * services/confidence.service.ts — Explainable confidence model v1.
+ * services/confidence.service.ts — Refinement gating + required-field map.
  *
- * Score = weighted sum of runtime-observable field signals (no ground truth,
- * no LLM self-report). Weights are grid-fit on fixtures — see
- * eval/confidence-fit.json for provenance. DEFAULT_WEIGHTS mirrors the
- * last fit so the pipeline runs without the fit artifact present.
+ * NOTE: an earlier grid-fit scoring experiment (computeConfidence and its
+ * signal/weight tables) was removed — it never shipped (filled-ratio won)
+ * and had zero callers. Only the gating logic below is live.
  */
-
-export interface ConfidenceSignals {
-  vendorFound: number;
-  dateValid: number;
-  totalValid: number;
-  typeAgreement: number;
-  requiredFields: number;
-}
-
-export interface ConfidenceWeights {
-  vendorFound: number;
-  dateValid: number;
-  totalValid: number;
-  typeAgreement: number;
-  requiredFields: number;
-}
-
-export const SIGNAL_KEYS: Array<keyof ConfidenceSignals> = [
-  "vendorFound",
-  "dateValid",
-  "totalValid",
-  "typeAgreement",
-  "requiredFields",
-];
-
-export const DEFAULT_WEIGHTS: ConfidenceWeights = {
-  vendorFound: 0.2,
-  dateValid: 0.2,
-  totalValid: 0.25,
-  typeAgreement: 0.15,
-  requiredFields: 0.2,
-};
 
 export const REQUIRED_FIELDS: Record<string, string[]> = {
   invoice: ["totalAmount", "invoiceDate"],
@@ -65,62 +32,6 @@ export function isValidDate(s: unknown): boolean {
     dt.getUTCMonth() === m - 1 &&
     dt.getUTCDate() === d
   );
-}
-
-/**
- * Computes observable signals for extracted data.
- * @param data Extracted fields
- * @param finalType Decided document type
- * @param stageTypes Type votes from stages that ran (light, local, cloud)
- * @returns Signal vector (0/1 each, requiredFields fractional)
- */
-export function computeSignals(
-  data: Record<string, unknown>,
-  finalType: string,
-  stageTypes: string[],
-): ConfidenceSignals {
-  const vendorFound =
-    typeof data.vendor === "string" && data.vendor.trim().length >= 3 ? 1 : 0;
-  const dateValid = isValidDate(data.invoiceDate) ? 1 : 0;
-  const totalValid =
-    typeof data.totalAmount === "number" &&
-    isFinite(data.totalAmount) &&
-    (data.totalAmount as number) >= 0
-      ? 1
-      : 0;
-  const req = REQUIRED_FIELDS[finalType] ?? REQUIRED_FIELDS.unknown;
-  const met = req.filter((k) =>
-    k === "totalAmount"
-      ? totalValid === 1
-      : k === "invoiceDate"
-        ? dateValid === 1
-        : data[k] != null,
-  ).length;
-  const requiredFields = req.length > 0 ? met / req.length : 1;
-  const typeAgreement =
-    stageTypes.length === 0
-      ? 0
-      : stageTypes.filter((t) => t === finalType).length / stageTypes.length;
-  return { vendorFound, dateValid, totalValid, typeAgreement, requiredFields };
-}
-
-/**
- * Scores extracted data with given weights.
- * @param data Extracted fields
- * @param finalType Decided document type
- * @param stageTypes Type votes from stages that ran
- * @param weights Weight vector (default: last fit)
- * @returns Score 0-1 plus signals
- */
-export function computeConfidence(
-  data: Record<string, unknown>,
-  finalType: string,
-  stageTypes: string[],
-  weights: ConfidenceWeights = DEFAULT_WEIGHTS,
-): { score: number; signals: ConfidenceSignals } {
-  const signals = computeSignals(data, finalType, stageTypes);
-  const score = SIGNAL_KEYS.reduce((a, k) => a + weights[k] * signals[k], 0);
-  return { score, signals };
 }
 
 /**

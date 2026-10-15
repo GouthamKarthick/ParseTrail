@@ -1,8 +1,7 @@
 /**
- * @fileoverview Toast primitives — standalone hook and container for transient messages.
+ * @fileoverview Toast container — renders transient messages owned by ToastContext.
  */
 
-import { useState } from "react";
 import styles from "./Toast.module.scss";
 
 // ---------------------------------------------------------------------------
@@ -20,32 +19,7 @@ export interface ToastItem {
 }
 
 // ---------------------------------------------------------------------------
-// Hooks
-// ---------------------------------------------------------------------------
-
-/**
- * Local toast state for isolated component usage.
- * @returns Toast list plus show/dismiss helpers
- * @example const { toasts, show } = useToast();
- */
-export function useToast() {
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-
-  const show = (kind: ToastKind, message: string) => {
-    const id = crypto.randomUUID();
-    setToasts((t) => [...t, { id, kind, message }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
-  };
-
-  return {
-    toasts,
-    show,
-    dismiss: (id: string) => setToasts((t) => t.filter((x) => x.id !== id)),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Component
+// Component (state lives in context/ToastContext; this file only renders)
 // ---------------------------------------------------------------------------
 
 /**

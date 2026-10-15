@@ -5,26 +5,12 @@
 import { useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { resetPassword } from "../api/client";
+import { getPasswordError } from "../utils/security";
 import authStyles from "./Auth.module.scss";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Validate password against policy.
- * @param v - Password candidate
- * @returns Error message or null
- * @example getPasswordError("short")
- */
-function getPasswordError(v: string): string | null {
-  if (v.length < 8) return "Password must be at least 8 characters";
-  if (!/[A-Z]/.test(v)) return "Password must contain 1 uppercase letter";
-  if (!/\d/.test(v)) return "Password must contain 1 number";
-  if (!/[^A-Za-z0-9]/.test(v))
-    return "Password must contain 1 special character";
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Component

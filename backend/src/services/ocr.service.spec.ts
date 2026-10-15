@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
 describe("ocr.service — unit skips heavy deps", () => {
   it("module exports ocrBuffer and terminateOcr", async () => {

@@ -4,7 +4,6 @@
 
 import { pool } from "../db/pool.js";
 import { config } from "../config.js";
-import { parseJsonColumn } from "../utils/json.js";
 
 export interface Summary {
   totalDocs: number;
@@ -36,8 +35,6 @@ export async function getSummary(
   const catParam: unknown[] = catFilter ? [category] : [];
   const target = config.currencyConversion.targetCurrency;
   const amountExpr = `COALESCE(SUM(CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data,'$.currencyConverted')),JSON_UNQUOTE(JSON_EXTRACT(data,'$.currency'))) = '${target}' THEN CAST(COALESCE(JSON_EXTRACT(data,'$.totalAmountConverted'),JSON_EXTRACT(data,'$.totalAmount')) AS DECIMAL(12,2)) ELSE 0 END),0)`;
-  const catForConf = category ? " AND document_category = ? " : "";
-  const catConfParam: unknown[] = category ? [category] : [];
   const [[totalRows], [byType], [trend], [vendors], [confRows]] =
     await Promise.all([
       pool.query(
@@ -57,32 +54,15 @@ export async function getSummary(
         [userId, days, ...catParam],
       ),
       pool.query(
-        `SELECT data FROM documents WHERE user_id=? AND status='done' AND expires_at > NOW() AND created_at >= NOW() - INTERVAL ? DAY ${catForConf}`,
-        [userId, days, ...catConfParam],
+        `SELECT COALESCE(AVG(((JSON_EXTRACT(data,'$.vendor') IS NOT NULL) + (JSON_EXTRACT(data,'$.invoiceNumber') IS NOT NULL) + (JSON_EXTRACT(data,'$.invoiceDate') IS NOT NULL) + (JSON_EXTRACT(data,'$.totalAmount') IS NOT NULL)) / 4), 0) as avgConf FROM documents WHERE user_id=? AND status='done' AND expires_at > NOW() AND created_at >= NOW() - INTERVAL ? DAY ${catFilter}`,
+        [userId, days, ...catParam],
       ),
     ]);
   const total = (totalRows as Array<{ cnt: number; sum: string }>)[0];
 
-  let avgConfidence = 0;
-  const datas = confRows as Array<{ data: string }>;
-  if (datas.length) {
-    let sum = 0;
-    for (const r of datas) {
-      const d = parseJsonColumn<Record<string, unknown> | null>(
-        r.data as string,
-        null,
-      );
-      if (!d) continue;
-      const filled = [
-        "vendor",
-        "invoiceNumber",
-        "invoiceDate",
-        "totalAmount",
-      ].filter((k) => d[k] != null).length;
-      sum += filled / 4;
-    }
-    avgConfidence = sum / datas.length;
-  }
+  const avgConfidence = Number(
+    (confRows as Array<{ avgConf: number | string }>)[0]?.avgConf ?? 0,
+  );
 
   const totalDocs = Number(total?.cnt ?? 0);
   const sumTotal = Number(total?.sum ?? 0);

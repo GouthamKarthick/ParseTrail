@@ -17,7 +17,6 @@ export type ViewMode = "list" | "grid";
 
 interface Props {
   documents: Document[];
-  total: number;
   view: ViewMode;
   loading?: boolean;
   hasFilters?: boolean;
@@ -36,7 +35,7 @@ interface Props {
  * @param props.hasFilters - Whether filters are active
  * @param props.filterLabel - Active filter label for empty message
  * @returns Document list element
- * @example <DocumentList documents={docs} view="grid" total={10} />
+ * @example <DocumentList documents={docs} view="grid" />
  */
 export function DocumentList({
   documents,

@@ -295,7 +295,6 @@ export default function List() {
       ) : (
         <DocumentList
           documents={docs}
-          total={total}
           view={view}
           loading={loading}
           hasFilters={hasFilters}

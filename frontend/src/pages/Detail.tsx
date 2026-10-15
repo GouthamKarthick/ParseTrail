@@ -23,10 +23,6 @@ import { FormattedDate } from "../components/FormattedDate";
 import styles from "./Detail.module.scss";
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -74,15 +70,19 @@ export default function Detail() {
         ? "dead"
         : doc?.refine_status;
 
+  const docId = doc?.id;
+  const docStatus = doc?.status;
+  const docRefine = doc?.refine_status;
   useEffect(() => {
-    if (!doc || (doc.status !== "done" && doc.status !== "failed")) return;
+    if (!docId) return;
+    if (docStatus !== "done" && docStatus !== "failed") return;
     let cancelled = false;
-    getAttempts(doc.id)
+    getAttempts(docId)
       .then((a) => {
         if (!cancelled) setAttempts(a);
       })
       .catch(() => {});
-    listCorrections(doc.id)
+    listCorrections(docId)
       .then((c) => {
         if (!cancelled) setHistory(c);
       })
@@ -90,7 +90,7 @@ export default function Detail() {
     return () => {
       cancelled = true;
     };
-  }, [doc]);
+  }, [docId, docStatus, docRefine]);
 
   async function retryDocumentRefinement() {
     if (!id || retrying) return;
@@ -114,6 +114,9 @@ export default function Detail() {
       show("success", r.changed ? `Corrected ${field}` : "No change");
       setEditing(null);
       refresh();
+      listCorrections(id)
+        .then((c) => setHistory(c))
+        .catch(() => {});
     } catch (e) {
       show("error", (e as Error).message);
     } finally {

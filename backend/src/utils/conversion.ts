@@ -14,6 +14,9 @@ interface RateCacheEntry {
 
 const rateCache = new Map<string, RateCacheEntry>();
 
+/** In-flight rate fetches keyed by pair — concurrent callers share one HTTP round-trip. */
+const inflight = new Map<string, Promise<number>>();
+
 async function fetchFrankfurterRate(from: string, to: string): Promise<number> {
   const base = config.currencyConversion.url.replace(/\/$/, "");
   const url = `${base}/latest?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
@@ -66,15 +69,27 @@ export async function convertWithMeta(
   if (cached && now - cached.timestamp < config.currencyConversion.cacheTtlMs) {
     return { converted: amount * cached.rate, rate: cached.rate };
   }
-  try {
-    let rate: number;
+  const pending = inflight.get(cacheKey);
+  if (pending) {
     try {
-      rate = await fetchFrankfurterRate(fromNorm, toNorm);
+      const rate = await pending;
+      return { converted: amount * rate, rate };
+    } catch {
+      return null;
+    }
+  }
+  const task = (async (): Promise<number> => {
+    try {
+      return await fetchFrankfurterRate(fromNorm, toNorm);
     } catch (e) {
       logger.warn("Frankfurter failed, trying ER-API fallback", { error: (e as Error).message });
-      rate = await fetchErApiRate(fromNorm, toNorm);
+      return fetchErApiRate(fromNorm, toNorm);
     }
-    rateCache.set(cacheKey, { rate, timestamp: now });
+  })();
+  inflight.set(cacheKey, task);
+  try {
+    const rate = await task;
+    rateCache.set(cacheKey, { rate, timestamp: Date.now() });
     return { converted: amount * rate, rate };
   } catch (err) {
     logger.warn("Currency conversion failed", {
@@ -84,6 +99,8 @@ export async function convertWithMeta(
       error: (err as Error).message,
     });
     return null;
+  } finally {
+    if (inflight.get(cacheKey) === task) inflight.delete(cacheKey);
   }
 }
 

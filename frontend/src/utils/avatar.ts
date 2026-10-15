@@ -68,8 +68,7 @@ export async function processAvatarFile(file: File): Promise<string> {
     throw new Error("Photo must be jpeg, png or webp");
   }
 
-  // Small enough already — still normalize through canvas to jpeg for consistency,
-  // unless the file is tiny (skip work for trivial sizes).
+  // Always normalize through canvas to jpeg for consistency.
   const img = await loadImage(file);
   let { width, height } = img;
   const scale = Math.min(1, MAX_DIM / Math.max(width, height));
@@ -92,6 +91,3 @@ export async function processAvatarFile(file: File): Promise<string> {
   }
   throw new Error("Photo is too large even after compression (must be ≤1MB)");
 }
-
-/** Max avatar bytes accepted by client and server. */
-export const AVATAR_MAX_BYTES = MAX_BYTES;

@@ -7,8 +7,8 @@ import {
   cleanInvoiceNumber,
   extractInvoiceNumberFallback,
   extractCurrencyFallback,
-  extractRulesOnly,
-} from "./transformers.service.js";
+} from "../utils/regex-utils.js";
+import { extractRulesOnly } from "./transformers.service.js";
 
 describe("transformers — extractAmountFallback", () => {
   it("parses settlement slip NET PAY with parenthesized symbol", () => {

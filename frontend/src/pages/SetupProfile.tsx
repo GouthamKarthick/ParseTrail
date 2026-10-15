@@ -9,13 +9,10 @@ import { useAuth } from "../context/AuthContext";
 import { useToastContext } from "../context/ToastContext";
 import { Avatar } from "../components/Avatar";
 import { processAvatarFile } from "../utils/avatar";
+import { normalizePhone } from "../utils/format";
 import authStyles from "./Auth.module.scss";
 
 /** Normalize phone: strip spaces/dashes/parens. */
-function normalizePhone(v: string): string {
-  return v.trim().replace(/[\s\-()]/g, "");
-}
-
 /**
  * Optional profile setup with Skip.
  */

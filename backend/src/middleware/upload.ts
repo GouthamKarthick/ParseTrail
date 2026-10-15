@@ -3,7 +3,6 @@
  */
 
 import multer from "multer";
-import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
 import { config } from "../config.js";

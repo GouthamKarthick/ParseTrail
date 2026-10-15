@@ -20,16 +20,7 @@ import {
   firstVendorLine,
 } from "../utils/regex-utils.js";
 import { getStrategy } from "./strategies.js";
-
-export {
-  cleanInvoiceNumber,
-  cleanVendorCandidate,
-  extractAmountFallback,
-  extractCurrencyFallback,
-  extractDateFallback,
-  extractInvoiceNumberFallback,
-  firstVendorLine,
-};
+import { localLlmConfidence, ruleBasedConfidence } from "../utils/confidence.js";
 
 type Text2TextPipeline = (prompt: string, opts?: { max_new_tokens?: number; temperature?: number }) => Promise<Array<{ generated_text: string }>>;
 
@@ -118,7 +109,7 @@ export async function runLocalLLMExtraction(text: string, documentType: string):
       const filledF = Object.keys(dataFallback).length;
       if (filledF > 0) {
         logger.info("Local LLM non-JSON fallback used", { raw: raw.slice(0, 80), dataFallback });
-        return { data: dataFallback, confidence: Math.min(1, filledF / 5) * 0.5, documentType };
+        return { data: dataFallback, confidence: localLlmConfidence(filledF), documentType };
       }
       throw new Error(`Invalid JSON from Flan: ${raw.slice(0, 80)}`);
     }
@@ -137,19 +128,11 @@ export async function runLocalLLMExtraction(text: string, documentType: string):
       for (const [k, v] of Object.entries(rules.data)) if (data[k] == null && v != null) data[k] = v;
     }
     const filled = Object.keys(data).length;
-    const confidence = Math.min(1, filled / 5) * 0.85;
+    const confidence = ruleBasedConfidence(filled);
     logger.info("Local LLM extraction", { documentType, filled, confidence, data });
     return { data, confidence, documentType };
   } catch (e) {
     logger.warn("Local LLM extraction failed", { error: (e as Error).message });
     return { data: {}, confidence: 0, documentType };
   }
-}
-
-/**
- * Checks if QA is available.
- * @returns False (deprecated)
- */
-export function isQAAvailable(): boolean {
-  return false;
 }
