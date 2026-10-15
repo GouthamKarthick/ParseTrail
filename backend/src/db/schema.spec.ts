@@ -16,7 +16,9 @@ describe("db/schema — ensureSchema", () => {
     expect(mockQuery).toHaveBeenCalled();
     const allCalls = mockQuery.mock.calls.map((c) => String(c[0]));
     expect(allCalls.join(" ")).toContain("CREATE TABLE IF NOT EXISTS users");
-    expect(allCalls.join(" ")).toContain("CREATE TABLE IF NOT EXISTS documents");
+    expect(allCalls.join(" ")).toContain(
+      "CREATE TABLE IF NOT EXISTS documents",
+    );
   });
 
   it("tolerates migration errors", async () => {

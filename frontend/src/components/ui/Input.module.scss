@@ -1,19 +1,12 @@
 @use "../../styles/variables" as *;
 @use "../../styles/mixins" as *;
-@use "../../styles/mixins" as *;
 
+/* Base layout */
 .input {
-  flex: 1 1 200px;
-  padding: 9px 12px;
+  flex: 1 1 12.5rem;
+  @include input-base;
   border-radius: $radius-md;
-  border: 1px solid $color-border-strong;
-  background: $color-surface;
-  font-size: 14px;
-  color: $color-text;
-  outline: none;
-  @include interactive-hover;
-
-  &::placeholder { color: $color-text-faint; }
-  &:focus { @include focus-ring; }
-  &:hover { border-color: $color-primary; }
 }
+
+/* Responsive */
+/* No responsive overrides */

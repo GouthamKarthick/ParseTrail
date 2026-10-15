@@ -11,14 +11,26 @@ function mockRes() {
 describe("middleware/error", () => {
   it("handles status-bearing error (validation)", () => {
     const res = mockRes();
-    errorHandler({ status: 400, message: "Invalid pagination" } as any, { method: "GET", originalUrl: "/api/documents" } as any, res, (() => {}) as any);
+    errorHandler(
+      { status: 400, message: "Invalid pagination" } as any,
+      { method: "GET", originalUrl: "/api/documents" } as any,
+      res,
+      (() => {}) as any,
+    );
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "Invalid pagination" }));
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "Invalid pagination" }),
+    );
   });
 
   it("handles Invalid file type → 400", () => {
     const res = mockRes();
-    errorHandler(new Error("Invalid file type. Allowed: pdf"), { method: "POST", originalUrl: "/upload" } as any, res, (() => {}) as any);
+    errorHandler(
+      new Error("Invalid file type. Allowed: pdf"),
+      { method: "POST", originalUrl: "/upload" } as any,
+      res,
+      (() => {}) as any,
+    );
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
@@ -32,7 +44,12 @@ describe("middleware/error", () => {
 
   it("else 500", () => {
     const res = mockRes();
-    errorHandler(new Error("boom"), { method: "GET", originalUrl: "/" } as any, res, (() => {}) as any);
+    errorHandler(
+      new Error("boom"),
+      { method: "GET", originalUrl: "/" } as any,
+      res,
+      (() => {}) as any,
+    );
     expect(res.status).toHaveBeenCalledWith(500);
   });
 });

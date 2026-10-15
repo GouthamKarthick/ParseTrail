@@ -10,12 +10,19 @@ function mockRes() {
 
 describe("middleware/validate", () => {
   it("uuidSchema accepts valid UUID and rejects invalid", () => {
-    expect(uuidSchema.safeParse("550e8400-e29b-41d4-a716-446655440000").success).toBe(true);
+    expect(
+      uuidSchema.safeParse("550e8400-e29b-41d4-a716-446655440000").success,
+    ).toBe(true);
     expect(uuidSchema.safeParse("not-uuid").success).toBe(false);
   });
 
   it("listQuerySchema parses q and document_type", () => {
-    const p = listQuerySchema.safeParse({ limit: "10", offset: "0", q: "  hello ", document_type: "invoice" });
+    const p = listQuerySchema.safeParse({
+      limit: "10",
+      offset: "0",
+      q: "  hello ",
+      document_type: "invoice",
+    });
     expect(p.success).toBe(true);
     if (p.success) expect(p.data.q).toBe("hello");
   });
@@ -37,6 +44,31 @@ describe("middleware/validate", () => {
   });
 
   it("invalid document_type fails", () => {
-    expect(listQuerySchema.safeParse({ document_type: "badtype" }).success).toBe(false);
+    expect(
+      listQuerySchema.safeParse({ document_type: "badtype" }).success,
+    ).toBe(false);
+  });
+
+  it("document_type accepts comma-separated and repeated values", () => {
+    const csv = listQuerySchema.safeParse({ document_type: "invoice,receipt" });
+    expect(csv.success).toBe(true);
+    if (csv.success)
+      expect(csv.data.document_type).toEqual(["invoice", "receipt"]);
+
+    const arr = listQuerySchema.safeParse({
+      document_type: ["invoice", "receipt"],
+    });
+    expect(arr.success).toBe(true);
+    if (arr.success)
+      expect(arr.data.document_type).toEqual(["invoice", "receipt"]);
+
+    const mixed = listQuerySchema.safeParse({
+      document_type: "invoice,badtype",
+    });
+    expect(mixed.success).toBe(false);
+
+    const empty = listQuerySchema.safeParse({ document_type: "" });
+    expect(empty.success).toBe(true);
+    if (empty.success) expect(empty.data.document_type).toBeUndefined();
   });
 });

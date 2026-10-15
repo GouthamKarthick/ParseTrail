@@ -1,27 +1,32 @@
+/**
+ * @fileoverview DocumentRow — memoized link row displaying name, type badge, status, and date.
+ */
+
 import { memo } from "react";
 import { Link } from "react-router-dom";
 import type { Document } from "../types";
-import { Badge } from "./ui/Badge";
 import { FormattedDate } from "./FormattedDate";
+import { statusBadges } from "../utils/badges";
 import styles from "./DocumentRow.module.scss";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Props {
   doc: Document;
 }
 
-function statusVariant(status: Document["status"]) {
-  switch (status) {
-    case "done":
-      return "success" as const;
-    case "failed":
-      return "error" as const;
-    case "processing":
-      return "warning" as const;
-    default:
-      return "neutral" as const;
-  }
-}
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
+/**
+ * Single document row linking to detail view.
+ * @param props.doc - Document to render
+ * @returns Link element with badges and formatted date
+ * @example <DocumentRow doc={doc} />
+ */
 export const DocumentRow = memo(function DocumentRow({ doc }: Props) {
   return (
     <Link
@@ -34,15 +39,24 @@ export const DocumentRow = memo(function DocumentRow({ doc }: Props) {
           {doc.name}
         </span>
         <span className={styles["document-row-meta"]}>
-          <Badge variant="type">{doc.document_type}</Badge>
-          <Badge variant={statusVariant(doc.status)}>{doc.status}</Badge>
+          <span className={`${styles["document-row-status"]} ${styles["document-row-type"]}`}>
+            {doc.document_type}
+          </span>
+          {statusBadges(doc.status, doc.refine_status).map((b, i) => (
+            <span
+              key={i}
+              className={`${styles["document-row-status"]} ${styles[`document-row-status-${b.variant}`]}`}
+            >
+              {b.label}
+            </span>
+          ))}
         </span>
       </div>
       <div className={styles["document-row-date-col"]}>
         <FormattedDate iso={doc.created_at} />
       </div>
       <span className={styles["document-row-chevron"]} aria-hidden>
-        {">"}
+        <i className="bi bi-chevron-right" aria-hidden />
       </span>
     </Link>
   );

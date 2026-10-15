@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Upload page — file selection, suspicious-name guard, and document upload flow.
+ */
+
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { uploadDocument, ApiError } from "../api/client";
@@ -8,12 +12,25 @@ import { Heading } from "../components/ui/Heading";
 import { Text } from "../components/ui/Text";
 import styles from "./Upload.module.scss";
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * Document upload page.
+ * @returns Upload page element
+ * @example <Upload />
+ */
 export default function Upload() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const { show } = useToastContext();
   const nav = useNavigate();
 
+  /**
+   * Handle native file input change with frontend security check.
+   * @param e - Input change event
+   */
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const f = e.target.files?.[0] ?? null;
@@ -27,6 +44,10 @@ export default function Upload() {
     [show],
   );
 
+  /**
+   * Submit selected file to backend.
+   * @param e - Form submit event
+   */
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
@@ -41,11 +62,15 @@ export default function Upload() {
       nav(`/documents/${res.id}`);
     } catch (e) {
       const err = e as ApiError;
-      if (err.status === 409 && err.code === "DUPLICATE_CONTENT") {
+      if (
+        err.status === 409 &&
+        (err.code === "DUPLICATE_CONTENT" || err.code === "DUPLICATE_UPDATED")
+      ) {
         show(
           "warning",
-          `Duplicate invoice — same vendor/invoiceNumber/total/currency already exists (id ${err.duplicateOf ?? ""}).`,
+          `Duplicate document — updated existing record (id ${err.duplicateOf ?? ""}). Not added as new.`,
         );
+        if (err.duplicateOf) nav(`/documents/${err.duplicateOf}`);
       } else if (err.code === "SUSPICIOUS_INPUT") {
         show("warning", err.message || "Suspicious input detected — not saved");
       } else {

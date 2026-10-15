@@ -1,11 +1,30 @@
+/**
+ * middleware/error.ts — Global error handler.
+ */
+
 import type { Request, Response, NextFunction } from "express";
 import { logger } from "../config/logger.js";
 
-export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
-  // zod/validation passed via next({ status, message, code })
+/**
+ * Handles validation and unexpected errors.
+ * @param err Error object
+ * @param req Express request
+ * @param res Express response
+ * @param _next Next middleware
+ * @returns void
+ */
+export function errorHandler(
+  err: unknown,
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+) {
   const maybeStatus = (err as { status?: number })?.status;
   if (maybeStatus) {
-    res.status(maybeStatus).json({ error: (err as { message?: string }).message || "Bad request", code: (err as { code?: string }).code });
+    res.status(maybeStatus).json({
+      error: (err as { message?: string }).message || "Bad request",
+      code: (err as { code?: string }).code,
+    });
     return;
   }
   if (err instanceof Error) {

@@ -1,15 +1,24 @@
+/**
+ * middleware/upload.ts — Multer upload handling.
+ */
+
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
 import { config } from "../config.js";
 
-if (!fs.existsSync(config.uploadDir)) {
+if (!fs.existsSync(config.uploadDir))
   fs.mkdirSync(config.uploadDir, { recursive: true });
-}
 
-const allowedMimes = new Set(["application/pdf", "image/png", "image/jpeg", "image/jpg"]);
+const allowedMimes = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+]);
 
+/** Multer instance for document uploads. */
 export const upload = multer({
   storage: multer.diskStorage({
     destination(_req, _file, cb) {
@@ -18,7 +27,6 @@ export const upload = multer({
     filename(_req, file, cb) {
       const id = randomUUID();
       const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
-      // embed id so controller can reuse without reparsing
       cb(null, `${id}-${safe}`);
     },
   }),
@@ -28,8 +36,11 @@ export const upload = multer({
       cb(new Error(`Invalid file type. Allowed: pdf, png, jpg`));
       return;
     }
-    // Block path traversal / XSS in filename
-    if (file.originalname.includes("..") || /[<>]/.test(file.originalname) || file.originalname.length > 255) {
+    if (
+      file.originalname.includes("..") ||
+      /[<>]/.test(file.originalname) ||
+      file.originalname.length > 255
+    ) {
       cb(new Error(`Suspicious file name — not saved`));
       return;
     }

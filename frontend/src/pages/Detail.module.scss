@@ -1,77 +1,258 @@
 @use "../styles/variables" as *;
 @use "../styles/mixins" as *;
 
+/* Base layout */
 .detail {
-  &-header { 
-    @include page-narrow; 
-    display: flex; 
-    flex-direction: column; 
-    gap: 10px; 
-    margin-bottom: 16px; 
+  &-header {
+    @include page-narrow;
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    margin-bottom: 1rem;
   }
 
   &-back {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
+    @include nav-pill;
+    font-size: 0.8125em;
     font-weight: 600;
     color: $color-text-muted;
     background: $color-surface;
     border: 1px solid $color-border;
-    padding: 6px 12px;
+    padding: 0.375rem 0.75rem;
     border-radius: $radius-pill;
-    text-decoration: none;
     width: fit-content;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
-    
-    &:hover { 
-      background: $color-hover; 
-      color: $color-primary; 
-      border-color: $color-border-strong; 
-      text-decoration: none; 
+    :global(.bi) {
+      @include bi-icon;
+    }
+    &:hover {
+      background: $color-hover;
+      color: $color-primary;
+      border-color: $color-border-strong;
+      text-decoration: none;
     }
   }
 
-  &-meta { 
-    display: flex; 
-    gap: 8px; 
-    align-items: center; 
-    flex-wrap: wrap; 
+  &-meta {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  &-date {
+    margin-left: auto;
+    display: flex;
+    color: $color-text-muted;
   }
 
-  &-date { 
-    margin-left: auto; 
-    display: flex; 
-    color: $color-text-muted; 
+  &-status {
+    font-size: 0.8125em;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  &-status-neutral,
+  &-status-type {
+    color: $color-text-muted;
+  }
+  &-status-info {
+    color: $color-ai;
+  }
+  &-status-success {
+    color: $color-success;
+  }
+  &-status-warning {
+    color: $color-warning;
+  }
+  &-status-error {
+    color: $color-error;
+  }
+  &-refinement-note {
+    @include page-narrow;
+    margin-top: 1rem;
+    color: $color-text-muted;
   }
 
   &-card {
     @include page-narrow;
     @include card-base;
-    padding: 20px;
+    padding: 1.25rem;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 0.75rem;
+  }
+
+  &-card + &-card {
+    margin-top: 1rem;
   }
 
   &-pre {
     background: $color-hover;
     border: 1px solid $color-border;
     color: $color-text;
-    padding: 14px;
+    padding: 0.875rem;
     border-radius: $radius-md;
-    font-size: 12.5px;
+    font-size: 0.78125em;
     line-height: 1.6;
     overflow: auto;
     font-family: $font-mono;
   }
-  
+
   &-error {
     color: $color-error;
-    background: color-mix(in srgb, $color-error 8%, transparent);
-    border: 1px solid color-mix(in srgb, $color-error 20%, transparent);
-    padding: 8px 10px;
-    border-radius: $radius-md;
+  }
+
+  /* Table */
+  &-table {
+    @include table-base;
+    margin-top: 0.5rem;
+    width: 100%;
+    table-layout: fixed;
+
+    th,
+    td {
+      padding: 0.5rem 0.625rem;
+      border-bottom: 1px solid $color-border;
+      text-align: left;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      word-break: break-word;
+    }
+    th {
+      @include table-th;
+      padding: 0.5rem 0.625rem;
+    }
+    th:first-child,
+    td:first-child {
+      width: 32%;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    th:last-child,
+    td:last-child {
+      width: 3.5rem;
+      text-align: right;
+    }
+    td:last-child {
+      text-overflow: clip;
+    }
+  }
+
+  &-edit-button {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+  }
+
+  &-edit {
+    display: flex;
+    gap: 0.375rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  &-timeline {
+    list-style: none;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  &-attempt {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+
+  &-attempt-method {
+    font-size: 0.8125em;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+
+  &-reason {
+    color: $color-text-muted;
+    overflow-wrap: anywhere;
+  }
+
+  &-history {
+    list-style: disc;
+    margin: 0.5rem 0 0 1.25rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+}
+
+/* Responsive */
+@include tablet {
+  .detail {
+    &-card {
+      padding: 1rem;
+    }
+
+    &-table {
+      font-size: 0.8125em;
+
+      th,
+      td {
+        padding: 0.375rem 0.5rem;
+      }
+    }
+  }
+}
+
+@include iphone-max {
+  .detail {
+    &-header {
+      gap: 0.5rem;
+    }
+
+    &-meta {
+      gap: 0.375rem;
+    }
+
+    &-date {
+      margin-left: 0;
+      width: 100%;
+    }
+
+    &-card {
+      padding: 0.75rem;
+    }
+
+    &-table {
+      width: 100%;
+      table-layout: fixed;
+      font-size: 0.8125em;
+
+      th,
+      td {
+        padding: 0.5rem;
+        white-space: normal;
+        word-break: break-word;
+      }
+
+      th:first-child,
+      td:first-child {
+        width: 32%;
+      }
+
+      th:last-child,
+      td:last-child {
+        width: 3rem;
+      }
+    }
+  }
+}
+
+@include desktop {
+  .detail {
+    &-header,
+    &-card {
+      max-width: 47.5rem;
+    }
   }
 }

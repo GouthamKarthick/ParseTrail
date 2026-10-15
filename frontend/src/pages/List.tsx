@@ -1,15 +1,26 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+/**
+ * @fileoverview List page — searchable, filterable document table with list/grid view toggle.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { listDocuments, ApiError } from "../api/client";
-import type { Document, DocumentType } from "../types";
+import type { Document } from "../types";
 import { useToastContext, kindFromStatus } from "../context/ToastContext";
 import { isSuspiciousFrontend } from "../utils/security";
 import { Heading } from "../components/ui/Heading";
-import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
-import { Select } from "../components/ui/Select";
+import { Skeleton } from "../components/Skeleton";
+import { EmptyState } from "../components/Feedback";
+import { statusBadges } from "../utils/badges";
+import { formatMoney } from "../utils/format";
+import { FilterDropdown } from "../components/FilterDropdown";
 import { DocumentList, type ViewMode } from "../components/DocumentList";
 import styles from "./List.module.scss";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const DOC_TYPES: { value: string; label: string }[] = [
   { value: "", label: "All types" },
@@ -23,17 +34,47 @@ const DOC_TYPES: { value: string; label: string }[] = [
   { value: "unknown", label: "Unknown" },
 ];
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * Document list page with URL-synced search and type filter.
+ * @returns List page element
+ * @example <List />
+ */
 export default function List() {
   const [docs, setDocs] = useState<Document[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const { show } = useToastContext();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const qParam = searchParams.get("q") ?? "";
   const typeParam = searchParams.get("type") ?? "";
   const [qInput, setQInput] = useState(qParam);
   const [debouncedQ, setDebouncedQ] = useState(qParam);
+
+  const typeValues = useMemo(
+    () => DOC_TYPES.map((o) => o.value).filter(Boolean),
+    [],
+  );
+  const selectedTypes = useMemo(
+    () =>
+      typeParam
+        .split(",")
+        .map((s) => s.trim())
+        .filter((v) => typeValues.includes(v)),
+    [typeParam, typeValues],
+  );
+  const selectedLabels = useMemo(
+    () =>
+      selectedTypes.map(
+        (v) => DOC_TYPES.find((o) => o.value === v)?.label ?? v,
+      ),
+    [selectedTypes],
+  );
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -63,7 +104,7 @@ export default function List() {
     setLoading(true);
     const opts: { q?: string; document_type?: string } = {};
     if (qParam) opts.q = qParam;
-    if (typeParam) opts.document_type = typeParam as DocumentType;
+    if (selectedTypes.length) opts.document_type = selectedTypes.join(",");
     listDocuments(20, 0, opts)
       .then((r) => {
         setDocs(r.documents);
@@ -78,25 +119,24 @@ export default function List() {
       .finally(() => setLoading(false));
   }, [qParam, typeParam, show]);
 
-  const onTypeChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const v = e.target.value;
+  const toggleType = useCallback(
+    (value: string) => {
       const next = new URLSearchParams(searchParams);
-      if (v) next.set("type", v);
+      const current = new Set(selectedTypes);
+      if (current.has(value)) current.delete(value);
+      else current.add(value);
+      const ordered = typeValues.filter((v) => current.has(v));
+      if (ordered.length) next.set("type", ordered.join(","));
       else next.delete("type");
       setSearchParams(next, { replace: true });
     },
-    [searchParams, setSearchParams],
+    [searchParams, setSearchParams, selectedTypes, typeValues],
   );
 
-  const clearFilters = useCallback(() => {
-    setQInput("");
-    setDebouncedQ("");
-    setSearchParams(new URLSearchParams(), { replace: true });
-  }, [setSearchParams]);
-
   const handleViewList = useCallback(() => setView("list"), []);
+
   const handleViewGrid = useCallback(() => setView("grid"), []);
+
   const handleQChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setQInput(e.target.value),
     [],
@@ -104,7 +144,7 @@ export default function List() {
 
   const [view, setView] = useState<ViewMode>("list");
 
-  const hasFilters = Boolean(qParam || typeParam);
+  const hasFilters = Boolean(qParam || selectedTypes.length);
 
   return (
     <div className="page">
@@ -128,7 +168,7 @@ export default function List() {
             onClick={handleViewList}
             type="button"
           >
-            ☰ Table
+            <i className="bi bi-list-ul" aria-hidden /> List
           </button>
           <button
             role="tab"
@@ -141,7 +181,7 @@ export default function List() {
             onClick={handleViewGrid}
             type="button"
           >
-            ⊞ Cards
+            <i className="bi bi-grid-fill" aria-hidden /> Grid
           </button>
         </div>
       </div>
@@ -153,69 +193,103 @@ export default function List() {
           value={qInput}
           onChange={handleQChange}
         />
-        <Select
-          aria-label="Filter by document type"
-          value={typeParam}
-          onChange={onTypeChange}
-        >
-          {DOC_TYPES.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
-        {hasFilters && (
-          <Button variant="secondary" size="md" onClick={clearFilters}>
-            Clear
-          </Button>
-        )}
+        <FilterDropdown
+          options={DOC_TYPES.filter((o) => o.value !== "")}
+          selected={selectedTypes}
+          active={hasFilters}
+          onToggle={toggleType}
+        />
       </div>
 
       {view === "list" ? (
-        <div className={styles["list-table-wrap"]}>
-          {loading ? (
-            <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
-              Loading…
-            </div>
-          ) : docs.length === 0 ? (
-            <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
-              {hasFilters
-                ? `No documents matching "${qParam || typeParam}"`
-                : "No documents yet — upload your first invoice."}
-            </div>
+        <div className={styles["list-table-wrap"]} aria-busy={loading}>
+          {docs.length === 0 ? (
+            loading ? (
+              <Skeleton lines={6} />
+            ) : hasFilters ? (
+              <EmptyState
+                icon="search"
+                title="No matches"
+                message={`No documents matching "${qParam || selectedLabels.join(", ")}".`}
+              />
+            ) : (
+              <EmptyState
+                icon="cloud-arrow-up"
+                title="No documents yet"
+                message="Upload your first invoice or receipt to get started."
+                actionTo="/"
+                actionLabel="Upload a document"
+              />
+            )
           ) : (
-            <table className={styles["list-table"]}>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Amount</th>
-                  <th>Currency</th>
-                  <th>Date</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {docs.map((d) => (
-                  <tr key={d.id}>
-                    <td>
-                      <Link to={`/documents/${d.id}`}>{d.name}</Link>
-                    </td>
-                    <td>{d.document_type}</td>
-                    <td>{d.status}</td>
-                    <td>
-                      {d.data?.totalAmount != null
-                        ? d.data.totalAmount.toFixed(2)
-                        : "—"}
-                    </td>
-                    <td>{d.data?.currency ?? "—"}</td>
-                    <td>{d.data?.invoiceDate ?? "—"}</td>
-                    <td>{new Date(d.created_at).toLocaleDateString()}</td>
+            <>
+              <table className={styles["list-table"]}>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Amount</th>
+                    <th>Currency</th>
+                    <th>Date</th>
+                    <th>Created</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {docs.map((d) => (
+                    <tr
+                      key={d.id}
+                      className={styles["list-row"]}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Open ${d.name}`}
+                      onClick={() => navigate(`/documents/${d.id}`)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          navigate(`/documents/${d.id}`);
+                        }
+                      }}
+                    >
+                      <td>
+                        <span className={styles["list-document-name"]}>
+                          {d.name}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={styles["list-type"]}>
+                          {d.document_type}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={styles["list-statuses"]}>
+                          {statusBadges(d.status, d.refine_status).map((b, i) => (
+                            <span
+                              key={i}
+                              className={`${styles["list-status"]} ${styles[`list-status-${b.variant}`]}`}
+                            >
+                              {b.label}
+                            </span>
+                          ))}
+                        </span>
+                      </td>
+                      <td>
+                        {formatMoney(
+                          typeof d.data?.totalAmount === "number"
+                            ? d.data.totalAmount
+                            : Number(d.data?.totalAmount),
+                          d.data?.currency,
+                        )}
+                      </td>
+                      <td>{d.data?.currency ?? "—"}</td>
+                      <td>{d.data?.invoiceDate ?? "—"}</td>
+                      <td>{new Date(d.created_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {loading && <Skeleton lines={2} />}
+            </>
           )}
         </div>
       ) : (
@@ -225,7 +299,7 @@ export default function List() {
           view={view}
           loading={loading}
           hasFilters={hasFilters}
-          filterLabel={qParam || typeParam}
+          filterLabel={qParam || selectedLabels.join(", ")}
         />
       )}
     </div>

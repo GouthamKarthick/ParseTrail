@@ -27,4 +27,12 @@ describe("routes — documents", () => {
     const res = await request(app).get("/api/documents/bad-id");
     expect(res.status).toBe(400);
   });
+
+  it("POST /api/documents/:id/refinement/retry 400 invalid uuid", async () => {
+    const app = createApp();
+    const res = await request(app).post(
+      "/api/documents/bad-id/refinement/retry",
+    );
+    expect(res.status).toBe(400);
+  });
 });

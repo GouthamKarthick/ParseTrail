@@ -1,29 +1,60 @@
-import { useState } from "react";
+/**
+ * @fileoverview Toast primitives — standalone hook and container for transient messages.
+ */
 
+import { useState } from "react";
+import styles from "./Toast.module.scss";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Visual severity for a toast notification. */
 export type ToastKind = "success" | "info" | "warning" | "error";
+
+/** Single toast record. */
 export interface ToastItem {
   id: string;
   kind: ToastKind;
   message: string;
 }
 
-const bg: Record<ToastKind, string> = {
-  success: "#16a34a", // green - 2xx success
-  info: "#16a34a", // green alias
-  warning: "#ca8a04", // dark yellow - 4xx user errors (per spec)
-  error: "#dc2626", // red - 5xx internal errors
-};
+// ---------------------------------------------------------------------------
+// Hooks
+// ---------------------------------------------------------------------------
 
+/**
+ * Local toast state for isolated component usage.
+ * @returns Toast list plus show/dismiss helpers
+ * @example const { toasts, show } = useToast();
+ */
 export function useToast() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+
   const show = (kind: ToastKind, message: string) => {
     const id = crypto.randomUUID();
     setToasts((t) => [...t, { id, kind, message }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
   };
-  return { toasts, show, dismiss: (id: string) => setToasts((t) => t.filter((x) => x.id !== id)) };
+
+  return {
+    toasts,
+    show,
+    dismiss: (id: string) => setToasts((t) => t.filter((x) => x.id !== id)),
+  };
 }
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * Floating container that renders active toasts.
+ * @param props.toasts - Active toast items
+ * @param props.onDismiss - Callback to remove a toast
+ * @returns Toast container element or null when empty
+ * @example <ToastContainer toasts={toasts} onDismiss={dismiss} />
+ */
 export function ToastContainer({
   toasts,
   onDismiss,
@@ -33,34 +64,13 @@ export function ToastContainer({
 }) {
   if (toasts.length === 0) return null;
   return (
-    <div
-      aria-live="polite"
-      style={{
-        position: "fixed",
-        top: 16,
-        right: 16,
-        zIndex: 9999,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
-    >
+    <div aria-live="polite" className={styles["toast-container"]}>
       {toasts.map((t) => (
         <div
           key={t.id}
           role={t.kind === "error" ? "alert" : "status"}
           onClick={() => onDismiss(t.id)}
-          style={{
-            background: bg[t.kind],
-            color: "white",
-            padding: "10px 14px",
-            borderRadius: 8,
-            minWidth: 280,
-            maxWidth: 420,
-            cursor: "pointer",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-            fontSize: 14,
-          }}
+          className={`${styles["toast-item"]} ${styles[`toast-item--${t.kind}`]}`}
         >
           {t.message}
         </div>

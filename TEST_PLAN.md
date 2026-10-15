@@ -97,6 +97,9 @@ backend/src/routes/documents.route.spec.ts (4) — GET /health, pagination 400, 
 
 ## 4. Frontend Manual Checklist (no runner yet)
 
+- [ ] Registration with SMTP disabled → account is verified and continues to optional profile setup; with SMTP enabled → email verification screen
+- [ ] Login → authenticated navigation; refresh → session restored; logout → guest navigation and protected routes return to login
+- [ ] Guest navigation shows Login/Create account only; verified users see Upload/Documents/Dashboard
 - [ ] Upload dropzone `accept .pdf/.png/.jpg` + max 10MB client hint → submit disabled until file → Upload → Button loading
 - [ ] List `GET /api/documents` via `client.ts` `listDocuments(limit,offset,{q,document_type})` → `Heading muted total` + `Input` + `Select` + `DocumentList view=list|grid` (header toggle, no sub-header)
 - [ ] `usePolling.ts` 2s interval until `done|failed`, cleanup on unmount, `detail` inline `FormattedDate,`

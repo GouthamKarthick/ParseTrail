@@ -1,4 +1,12 @@
+/**
+ * @fileoverview FormattedDate — localized date + time display with inline variant.
+ */
+
 import styles from "./FormattedDate.module.scss";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface Props {
   iso: string;
@@ -6,6 +14,18 @@ interface Props {
   inline?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * Render an ISO date string as localized date and time spans.
+ * @param props.iso - ISO 8601 date string
+ * @param props.className - Additional CSS class
+ * @param props.inline - Whether to render date and time inline
+ * @returns Span element with formatted date
+ * @example <FormattedDate iso={doc.created_at} inline />
+ */
 export function FormattedDate({ iso, className, inline = false }: Props) {
   const d = new Date(iso);
   const dateStr = d.toLocaleDateString(undefined, {

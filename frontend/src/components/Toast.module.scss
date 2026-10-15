@@ -1,0 +1,76 @@
+@use "../styles/variables" as *;
+@use "../styles/mixins" as *;
+
+/* Base layout */
+.toast {
+  &-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  &-item {
+    color: #fff;
+    padding: 0.625rem 0.875rem;
+    border-radius: $radius-md;
+    min-width: 17.5rem;
+    max-width: 26.25rem;
+    cursor: pointer;
+    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.2);
+    font-size: 0.875em;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+
+    :global(.bi) {
+      @include bi-icon;
+    }
+    
+    &--success {
+      background: #16a34a;
+    }
+
+    &--info {
+      background: $color-primary;
+    }
+
+    &--warning {
+      background: #ca8a04;
+    }
+    
+    &--error {
+      background: #dc2626;
+    }
+
+    animation: toast-slide-in 0.18s ease-out;
+  }
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Responsive */
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    &-item {
+      animation: none;
+    }
+  }
+}
+
+/* Responsive */
+/* No responsive overrides */

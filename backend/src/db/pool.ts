@@ -1,30 +1,41 @@
+/**
+ * db/pool.ts — MySQL connection pool with TLS handling.
+ */
+
 import fs from "fs";
 import path from "path";
 import mysql from "mysql2/promise";
 import { config } from "../config.js";
 
+/**
+ * Resolves SSL config from env cert or filesystem.
+ * @returns SSL options or undefined
+ */
 function getSslConfig():
   | { ca: string; rejectUnauthorized: boolean }
   | { rejectUnauthorized: boolean }
   | undefined {
   if (!config.db.ssl) return undefined;
-  // 1) Env var with cert content (for Render) — paste whole -----BEGIN CERTIFICATE-----
   if (config.db.sslCa) {
     const ca = config.db.sslCa.replace(/\\n/g, "\n");
-    if (ca.includes("BEGIN CERTIFICATE")) return { ca, rejectUnauthorized: true };
-    // stray value (e.g., "true") — fall through to file check
+    if (ca.includes("BEGIN CERTIFICATE"))
+      return { ca, rejectUnauthorized: true };
   }
-  // 2) File at DB_CA_PATH (default backend/ca.pem) — for local
-  const candidates = [config.db.sslCaPath, "./ca.pem", "backend/ca.pem", path.join(process.cwd(), "ca.pem")];
+  const candidates = [
+    config.db.sslCaPath,
+    "./ca.pem",
+    "backend/ca.pem",
+    path.join(process.cwd(), "ca.pem"),
+  ];
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) {
         const ca = fs.readFileSync(p, "utf-8");
-        if (ca.includes("BEGIN CERTIFICATE")) return { ca, rejectUnauthorized: true };
+        if (ca.includes("BEGIN CERTIFICATE"))
+          return { ca, rejectUnauthorized: true };
       }
     } catch {}
   }
-  // Fallback — let Node verify with system CAs; for Aiven custom CA this will fail, but avoids mysql2 offset error with empty ca
   return { rejectUnauthorized: true };
 }
 

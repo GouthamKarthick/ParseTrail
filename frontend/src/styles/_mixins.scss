@@ -1,73 +1,236 @@
 @use "./variables" as *;
 
-@mixin focus-ring { 
-    border-color: $color-primary; 
-    box-shadow: 0 0 0 3px $color-primary-soft; 
+/* ── Focus & Interaction ── */
+@mixin focus-ring {
+  border-color: $color-primary;
+  box-shadow: 0 0 0 0.1875rem $color-primary-soft;
 }
 
-@mixin card($padding: 20px, $radius: $radius-lg) { 
-    background: $color-surface; 
-    border: 1px solid $color-border; 
-    border-radius: $radius; 
-    box-shadow: $shadow-sm; 
-    padding: $padding; 
+@mixin interactive-hover {
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
 }
 
-@mixin card-base { 
-    background: $color-surface; 
-    border: 1px solid $color-border; 
-    border-radius: $radius-lg; 
-    box-shadow: $shadow-sm; 
+/* ── Cards & Containers ── */
+@mixin card($padding: 1.25rem, $radius: $radius-lg) {
+  background: $color-surface;
+  border: 1px solid $color-border;
+  border-radius: $radius;
+  box-shadow: $shadow-sm;
+  padding: $padding;
 }
 
-@mixin pill-toggle { 
-    padding: 5px 10px; 
-    border-radius: $radius-pill; 
-    font-size: 12.5px; 
-    font-weight: 600; 
-    border: 1px solid transparent; 
-    cursor: pointer;
-    transition: all 0.15s; 
+@mixin card-base {
+  background: $color-surface;
+  border: 1px solid $color-border;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-sm;
 }
 
-@mixin truncate { 
-    white-space: nowrap; 
-    overflow: hidden; 
-    text-overflow: ellipsis; 
+@mixin dashed-box {
+  padding: 2rem;
+  text-align: center;
+  background: $color-surface;
+  border: 1px dashed $color-border;
+  border-radius: $radius-lg;
+  color: $color-text-muted;
 }
 
-@mixin flex-center($gap: 8px) { 
-    display: inline-flex; 
-    align-items: center; 
-    justify-content: center; 
-    gap: $gap; 
+@mixin page-narrow {
+  max-width: 45rem;
+  margin: 0 auto;
 }
 
-@mixin dashed-box { 
-    padding: 32px; 
-    text-align: center; 
-    background: $color-surface; 
-    border: 1px dashed $color-border; 
-    border-radius: $radius-lg; 
-    color: $color-text-muted; 
+/* ── Pills & Toggles ── */
+@mixin pill-base {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5625rem;
+  border-radius: $radius-pill;
+  font-size: 0.7188em;
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid transparent;
 }
 
-@mixin pill-base { 
-    display: inline-flex; 
-    align-items: center; 
-    padding: 2px 9px; 
-    border-radius: $radius-pill; 
-    font-size: 11.5px; 
-    font-weight: 600; 
-    line-height: 1.5; 
-    border: 1px solid transparent; 
+@mixin pill-toggle {
+  padding: 0.3125rem 0.625rem;
+  border-radius: $radius-pill;
+  font-size: 0.78125em;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-@mixin interactive-hover { 
-    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s; 
+/* ── Flex Helpers ── */
+@mixin flex-center($gap: 0.5rem) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: $gap;
 }
 
-@mixin page-narrow { 
-    max-width: 720px; 
-    margin: 0 auto; 
+@mixin flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+@mixin truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Icon ── */
+@mixin bi-icon {
+  font-size: 1em;
+  line-height: 1;
+  vertical-align: middle;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ── Form ── */
+@mixin input-base {
+  width: 100%;
+  padding: 0.5625rem 0.75rem;
+  border-radius: $radius-md;
+  border: 1px solid $color-border-strong;
+  background: $color-surface;
+  color: $color-text;
+  font-size: 1rem;
+  outline: none;
+  @include interactive-hover;
+
+  &::placeholder {
+    color: $color-text-faint;
+  }
+  &:focus {
+    @include focus-ring;
+    outline: none;
+  }
+  &:hover {
+    border-color: $color-primary;
+  }
+}
+
+/* ── Table ── */
+@mixin table-base {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875em;
+}
+
+@mixin table-th {
+  text-align: left;
+  padding: 0.5rem 0.625rem;
+  background: $color-hover;
+  color: $color-text-muted;
+  font-weight: 600;
+  border-bottom: 1px solid $color-border;
+  font-size: 0.8125em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+@mixin table-td {
+  padding: 0.5625rem 0.625rem;
+  border-bottom: 1px solid $color-border;
+  color: $color-text;
+}
+
+@mixin table-row-hover {
+  tr:last-child td {
+    border-bottom: none;
+  }
+  tr:hover td {
+    background: $color-hover;
+    color: $color-text;
+  }
+}
+
+/* ── Feedback ── */
+@mixin error-box {
+  color: $color-error;
+  background: color-mix(in srgb, $color-error 8%, transparent);
+  border: 1px solid color-mix(in srgb, $color-error 18%, transparent);
+  padding: 0.5rem 0.625rem;
+  border-radius: $radius-md;
+  font-size: 0.8125em;
+}
+
+/* ── Navigation Pill ── */
+@mixin nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.75rem;
+  border-radius: $radius-md;
+  font-size: 0.875em;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+/* ── Responsive Breakpoints (mobile-first) ── */
+
+@mixin iphone-se {
+  @media (max-width: $bp-iphone-se) {
+    @content;
+  }
+}
+
+@mixin android {
+  @media (max-width: $bp-android) {
+    @content;
+  }
+}
+
+@mixin iphone {
+  @media (max-width: $bp-iphone) {
+    @content;
+  }
+}
+
+@mixin iphone-max {
+  @media (max-width: $bp-iphone-max) {
+    @content;
+  }
+}
+
+@mixin tablet {
+  @media (max-width: $bp-tablet) {
+    @content;
+  }
+}
+
+@mixin tablet-lg {
+  @media (max-width: $bp-tablet-lg) {
+    @content;
+  }
+}
+@mixin laptop {
+  @media (max-width: $bp-laptop) {
+    @content;
+  }
+}
+@mixin desktop {
+  @media (min-width: $bp-desktop) {
+    @content;
+  }
+}
+@mixin wide {
+  @media (min-width: $bp-wide) {
+    @content;
+  }
 }

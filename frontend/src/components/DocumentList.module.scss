@@ -1,27 +1,71 @@
 @use "../styles/variables" as *;
 @use "../styles/mixins" as *;
 
+/* Base layout */
 .document-list {
-  &-list { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 8px; 
+  &-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
   &-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    :global(a) { 
-      height: 100%; 
-    }
+    gap: 0.625rem;
 
-    @media (max-width: 720px) { 
-      grid-template-columns: 1fr; 
+    :global(a) {
+      height: 100%;
     }
   }
 
-  &-empty, &-skeleton { 
-    @include dashed-box; 
+  &-empty,
+  &-skeleton {
+    @include dashed-box;
+  }
+}
+
+/* Responsive */
+@include tablet {
+  .document-list {
+    &-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+@include iphone-max {
+  .document-list {
+    &-list {
+      gap: 0.375rem;
+    }
+
+    &-grid {
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
+    }
+
+    &-empty,
+    &-skeleton {
+      padding: 1.25rem;
+      font-size: 0.8125em;
+    }
+  }
+}
+
+@include desktop {
+  .document-list {
+    &-grid {
+      grid-template-columns: repeat(2, 1fr);
+      max-width: $content-max;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    &-list {
+      max-width: $content-max;
+      margin-left: auto;
+      margin-right: auto;
+    }
   }
 }

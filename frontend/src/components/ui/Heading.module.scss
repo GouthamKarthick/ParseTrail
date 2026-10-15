@@ -1,28 +1,60 @@
 @use "../../styles/variables" as *;
 
+/* Base layout */
 .heading {
   margin: 0;
+  font-family: $font-heading;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: $color-text;
   line-height: 1.2;
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 0.625rem;
   flex-wrap: wrap;
 
-  &-h1 { font-size: 28px; }
-  &-h2 { font-size: 22px; }
-  &-h3 { font-size: 17px; font-weight: 600; }
+  &-h1 {
+    font-size: 1.75em;
+  }
+
+  &-h2 {
+    font-size: 1.375em;
+  }
+  
+  &-h3 {
+    font-size: 1.0625em;
+    font-weight: 600;
+  }
 
   &-muted {
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 0.5625em;
+    font-weight: 400;
     color: $color-text-muted;
     letter-spacing: 0;
-    background: $color-surface;
-    border: 1px solid $color-border;
-    padding: 2px 8px;
-    border-radius: $radius-pill;
+    line-height: inherit;
+  }
+}
+
+@media (max-width: 768px) {
+  .heading {
+    &-h1 {
+      font-size: 1.625em;
+    }
+
+    &-h2 {
+      font-size: 1.25em;
+    }
+  }
+}
+
+@media (max-width: 430px) {
+  .heading {
+    &-h1 {
+      font-size: 1.5em;
+    }
+
+    &-h2 {
+      font-size: 1.1875em;
+    }
   }
 }

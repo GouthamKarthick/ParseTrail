@@ -1,21 +1,55 @@
 @use "../../styles/variables" as *;
 @use "../../styles/mixins" as *;
 
+/* Base layout */
 .badge {
   @include pill-base;
   letter-spacing: 0.02em;
   text-transform: capitalize;
-  max-width: 140px;
+  max-width: 8.75rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: 0.6562em;
   line-height: 1.4;
 
-  &-neutral { background: $color-hover; color: $color-text-muted; border-color: $color-border; }
-  &-info { background: $color-primary-soft; color: $color-primary; border-color: $color-border; }
-  &-success { background: color-mix(in srgb, $color-success 12%, transparent); color: $color-success; border-color: color-mix(in srgb, $color-success 30%, transparent); }
-  &-warning { background: color-mix(in srgb, $color-warning 12%, transparent); color: $color-warning; border-color: color-mix(in srgb, $color-warning 30%, transparent); }
-  &-error { background: color-mix(in srgb, $color-error 12%, transparent); color: $color-error; border-color: color-mix(in srgb, $color-error 30%, transparent); }
-  &-type { background: $color-hover; color: $color-text-muted; border-color: $color-border; font-size: 10px; }
+  &-neutral {
+    background: $color-hover;
+    color: $color-text-muted;
+    border-color: $color-border;
+  }
+
+  &-info {
+    background: color-mix(in srgb, $color-ai 12%, transparent);
+    color: $color-ai;
+    border-color: color-mix(in srgb, $color-ai 30%, transparent);
+  }
+
+  &-success {
+    background: color-mix(in srgb, $color-success 12%, transparent);
+    color: $color-success;
+    border-color: color-mix(in srgb, $color-success 30%, transparent);
+  }
+
+  &-warning {
+    background: color-mix(in srgb, $color-warning 12%, transparent);
+    color: $color-warning;
+    border-color: color-mix(in srgb, $color-warning 30%, transparent);
+  }
+
+  &-error {
+    background: color-mix(in srgb, $color-error 12%, transparent);
+    color: $color-error;
+    border-color: color-mix(in srgb, $color-error 30%, transparent);
+  }
+  
+  &-type {
+    background: $color-hover;
+    color: $color-text-muted;
+    border-color: $color-border;
+    font-size: 0.625em;
+  }
 }
+
+/* Responsive */
+/* No responsive overrides */

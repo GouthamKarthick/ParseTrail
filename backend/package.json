@@ -11,9 +11,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:legacy": "tsx src/services/extraction.test.ts",
-    "test:spec": "vitest run src/services/extraction.service.spec.ts"
+    "test:spec": "vitest run src/services/extraction.service.spec.ts",
+    "eval:fetch": "bash eval/fetch-fixtures.sh",
+    "eval:compare": "npx tsx eval/compare.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

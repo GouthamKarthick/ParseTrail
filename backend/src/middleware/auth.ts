@@ -1,3 +1,7 @@
+/**
+ * middleware/auth.ts — JWT authentication.
+ */
+
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { config } from "../config.js";
@@ -7,12 +11,25 @@ export interface AuthUser {
   email: string;
 }
 
+/**
+ * Authenticates request via cookie or Bearer token.
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
 export function authenticate(req: Request, res: Response, next: NextFunction) {
-  const token = (req as unknown as { cookies?: Record<string, string> }).cookies?.token || (req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : null);
+  const token =
+    (req as unknown as { cookies?: Record<string, string> }).cookies?.token ||
+    (req.headers.authorization?.startsWith("Bearer ")
+      ? req.headers.authorization.slice(7)
+      : null);
   if (!token) {
-    // Allow tests to run without auth; create dummy user for test env
     if (process.env.NODE_ENV === "test" || process.env.VITEST) {
-      (req as unknown as { user: AuthUser }).user = { id: "test-user", email: "test@example.com" };
+      (req as unknown as { user: AuthUser }).user = {
+        id: "test-user",
+        email: "test@example.com",
+      };
       next();
       return;
     }
@@ -28,6 +45,11 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+/**
+ * Extracts authenticated user from request.
+ * @param req Express request
+ * @returns Auth user or null
+ */
 export function getUser(req: Request): AuthUser | null {
   return (req as unknown as { user?: AuthUser }).user ?? null;
 }

@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Login page — credential form with visibility toggle and toast feedback.
+ */
+
 import { useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -8,7 +12,17 @@ import { Input } from "../components/ui/Input";
 import { Heading } from "../components/ui/Heading";
 import { Text } from "../components/ui/Text";
 import styles from "./Upload.module.scss";
+import authStyles from "./Auth.module.scss";
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * Login page for existing users.
+ * @returns Login page element
+ * @example <Login />
+ */
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,6 +33,10 @@ export default function Login() {
   const { show } = useToastContext();
   const nav = useNavigate();
 
+  /**
+   * Submit login credentials.
+   * @param e - Form submit event
+   */
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -49,11 +67,11 @@ export default function Login() {
         <Text variant="muted">Sign in to continue to ClarityDocs.</Text>
 
         <form onSubmit={handleSubmit} className={styles["upload-form"]}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <label htmlFor="login-email" style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
+          <div className={authStyles["auth-field"]}>
+            <label htmlFor="login-email" className={authStyles["auth-label"]}>
               Email
             </label>
-            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+            <div className={authStyles["auth-input-wrap"]}>
               <Input
                 id="login-email"
                 type="email"
@@ -62,28 +80,22 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                style={{ width: "100%", paddingRight: 42 }}
+                className={authStyles["auth-input--with-icon"]}
               />
-              <span
-                aria-hidden
-                style={{
-                  position: "absolute",
-                  right: 12,
-                  color: "var(--color-text-faint)",
-                  fontSize: 16,
-                  pointerEvents: "none",
-                }}
-              >
-                <i className="bi bi-envelope" />
+              <span aria-hidden className={authStyles["auth-icon"]}>
+                <i className="bi bi-envelope" aria-hidden />
               </span>
             </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <label htmlFor="login-password" style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
+          <div className={authStyles["auth-field"]}>
+            <label
+              htmlFor="login-password"
+              className={authStyles["auth-label"]}
+            >
               Password
             </label>
-            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+            <div className={authStyles["auth-input-wrap"]}>
               <Input
                 id="login-password"
                 type={showPassword ? "text" : "password"}
@@ -92,53 +104,57 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
-                style={{ width: "100%", paddingRight: 42 }}
+                className={authStyles["auth-input--with-icon"]}
               />
               <button
                 type="button"
                 aria-label={showPassword ? "Hide password" : "Show password"}
                 title={showPassword ? "Hide password" : "Show password"}
                 onClick={() => setShowPassword((v) => !v)}
-                style={{
-                  position: "absolute",
-                  right: 8,
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--color-text-muted)",
-                  fontSize: 16,
-                  padding: 4,
-                  lineHeight: 1,
-                }}
+                className={authStyles["auth-toggle"]}
               >
-                <i className={showPassword ? "bi bi-eye-slash" : "bi bi-eye"} aria-hidden />
+                <i
+                  className={showPassword ? "bi bi-eye-slash" : "bi bi-eye"}
+                  aria-hidden
+                />
               </button>
             </div>
           </div>
 
-          {err && (
-            <div style={{ color: "var(--color-error)", background: "color-mix(in srgb, var(--color-error) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--color-error) 18%, transparent)", padding: "8px 10px", borderRadius: 8, fontSize: 13 }}>
-              {err}
-            </div>
-          )}
+          {err && <div className={authStyles["auth-error"]}>{err}</div>}
 
-          <Button type="submit" variant="primary" size="md" disabled={busy} style={{ width: "100%" }}>
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            disabled={busy}
+            className={authStyles["auth-submit"]}
+          >
             {busy ? (
               <>
-                <i className="bi bi-arrow-repeat" aria-hidden style={{ animation: "spin 1s linear infinite" }} /> Signing in…
+                <i className="bi bi-arrow-repeat" aria-hidden /> Signing in…
               </>
             ) : (
               <>
-                <i className="bi bi-box-arrow-in-right" aria-hidden /> Login
+                <i
+                  className={`bi bi-box-arrow-in-right ${authStyles["auth-strong-icon"]}`}
+                  aria-hidden
+                />{" "}
+                Login
               </>
             )}
           </Button>
 
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}>
-            <Link to="/register" style={{ color: "var(--color-primary)", fontWeight: 600 }}>
+          <div
+            className={`${authStyles["auth-actions"]} ${authStyles["auth-actions--between"]}`}
+          >
+            <Link to="/register" className={authStyles["auth-link"]}>
               Create account
             </Link>
-            <Link to="/forgot-password" style={{ color: "var(--color-text-muted)" }}>
+            <Link
+              to="/forgot-password"
+              className={authStyles["auth-muted-link"]}
+            >
               Forgot password?
             </Link>
           </div>

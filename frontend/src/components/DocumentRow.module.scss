@@ -1,76 +1,104 @@
 @use "../styles/variables" as *;
 @use "../styles/mixins" as *;
 
+/* Base layout */
 .document-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 16px;
-  padding: 14px 16px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  gap: 1rem;
+  padding: 0.875rem 1rem;
+  background: $color-surface;
+  border: 1px solid $color-border;
   border-radius: $radius-md;
   text-decoration: none;
-  color: var(--color-text);
+  color: $color-text;
   @include interactive-hover;
 
   &:hover {
-    background: var(--color-hover);
-    border-color: var(--color-primary);
-    box-shadow: var(--shadow-sm);
+    background: $color-hover;
+    border-color: $color-primary;
+    box-shadow: $shadow-sm;
     text-decoration: none;
   }
-
-  &:active { 
-    transform: translateY(1px); 
+  &:active {
+    transform: translateY(1px);
+  }
+  &:focus-visible {
+    outline: 0.125rem solid $color-primary;
+    outline-offset: 0.125rem;
   }
 
-  &:focus-visible { 
-    outline: 2px solid var(--color-primary); 
-    outline-offset: 2px; 
+  &-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    min-width: 0;
   }
-
-  &-main { 
-    display: flex; 
-    flex-direction: column; 
-    gap: 6px; 
-    min-width: 0; 
-  }
-
   &-name {
-    font-size: 14px;
+    font-size: 0.875em;
     font-weight: 600;
-    color: var(--color-text);
+    color: var(--color-document-name);
     @include truncate;
+    text-decoration: none;
   }
-
-  &-meta { 
-    display: flex; 
-    gap: 6px; 
-    flex-wrap: wrap; 
+  &-meta {
+    display: flex;
+    gap: 0.375rem;
+    flex-wrap: wrap;
     align-items: center;
+  }
+  &-status {
+    font-size: 0.75em;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  &-type,
+  &-status-neutral {
+    color: $color-text-muted;
+  }
+  &-status-info {
+    color: $color-ai;
+  }
+  &-status-success {
+    color: $color-success;
+  }
+  &-status-warning {
+    color: $color-warning;
+  }
+  &-status-error {
+    color: $color-error;
   }
 
   &-date-col {
     text-align: right;
-    min-width: 110px;
-    border-left: 1px solid var(--color-border);
-    padding-left: 16px;
-    color: var(--color-text-muted);
+    min-width: 6.875rem;
+    border-left: 1px solid $color-border;
+    padding-left: 1rem;
+    color: $color-text-muted;
   }
 
   &-chevron {
-    color: var(--color-text-faint);
-    font-size: 18px;
+    color: $color-text-faint;
+    font-size: 1em;
     line-height: 1;
-    padding-left: 4px;
+    vertical-align: middle;
+    font-weight: 700;
+    padding-left: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    :global(.bi) {
+      @include bi-icon;
+    }
   }
 
-  &:hover &-chevron { 
-    color: var(--color-primary); 
+  &:hover &-chevron {
+    color: $color-primary;
   }
-
-  &:hover &-name { 
-    color: var(--color-primary); 
+  &:hover &-name {
+    color: $color-primary;
   }
 }
+
+/* Responsive */
+/* No responsive overrides */
