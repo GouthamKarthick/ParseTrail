@@ -49,11 +49,11 @@ export function formatMoney(
  * Format a 0-1 ratio as a percentage string.
  * @param value - Ratio or nullish
  * @returns Percent string or em dash
- * @example formatPercent01(0.85) // "85.0%"
+ * @example formatPercent01(0.85) // "85%"
  */
 export function formatPercent01(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  return `${(value * 100).toFixed(1)}%`;
+  return `${Math.round(value * 100)}%`;
 }
 
 /**
