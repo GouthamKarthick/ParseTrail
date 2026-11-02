@@ -281,7 +281,7 @@ function runRulesStage(
   lightType: { type: string; confidence: number },
   attempts: AttemptRecord[],
 ): RulesStageOut | null {
-  if (!rulesFirst || !hasText || text.trim().length <= 30) return null;
+  if (!rulesFirst || !hasText || text.trim().length < 5) return null;
   const t0 = Date.now();
   const rules = extractRulesOnly(text, lightType.type);
   const ruleFields = Object.keys(rules.data).length;
@@ -688,6 +688,7 @@ export async function extract(
     order?: ExtractionOrder;
     allowCloud?: boolean;
     cloudOnly?: boolean;
+    hintLang?: string;
   },
 ): Promise<
   ExtractionResult & { attempts: AttemptRecord[]; typeVotes: string[] }
@@ -710,7 +711,7 @@ export async function extract(
           textLen: text.trim().length,
         });
         try {
-          const r = await ocrBuffer(buffer, "application/pdf");
+          const r = await ocrBuffer(buffer, "application/pdf", opts?.hintLang);
           if (r.text.trim().length > text.trim().length) {
             text = r.text;
             ocrConfidence = r.confidence;
@@ -734,7 +735,7 @@ export async function extract(
         size: buffer.length,
       });
       try {
-        const r = await ocrBuffer(buffer, mime);
+        const r = await ocrBuffer(buffer, mime, opts?.hintLang);
         text = r.text;
         ocrConfidence = r.confidence;
         ocrPages = r.pages;
@@ -758,7 +759,7 @@ export async function extract(
       stack: (e as Error).stack,
     });
   }
-  const hasText = text.trim().length > 20;
+  const hasText = text.trim().length > 5;
   const isImage = buffer ? buffer.subarray(0, 4).toString() !== "%PDF" : false;
   const isScannedPdf =
     !hasText && buffer ? buffer.subarray(0, 4).toString() === "%PDF" : false;

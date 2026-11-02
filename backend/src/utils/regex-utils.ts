@@ -74,6 +74,13 @@ export function extractAmountFallback(text: string): number | null {
     const n = Number(plainM[plainM.length - 1]);
     if (!isNaN(n)) return n;
   }
+  const codeAmount = [...text.matchAll(/\b(?:INR|USD|EUR|GBP)\s+([0-9][0-9,.]*)/gi)]
+    .map((m) => m[1].replace(/,/g, "").replace(/\s/g, ""))
+    .filter((d) => !isIdLike(d));
+  if (codeAmount.length) {
+    const n = Number(codeAmount[codeAmount.length - 1]);
+    if (!isNaN(n)) return n;
+  }
   return null;
 }
 

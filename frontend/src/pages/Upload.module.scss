@@ -43,6 +43,21 @@
   &-file-input {
     display: none;
   }
+  &-language {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+
+    select {
+      padding: 0.625rem 0.75rem;
+      border: 1px solid $color-border-strong;
+      border-radius: $radius-md;
+      background: $color-surface;
+      color: $color-text;
+    }
+  }
   &-drop-text {
     font-size: 0.875em;
     font-weight: 600;

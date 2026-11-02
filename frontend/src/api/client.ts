@@ -299,8 +299,9 @@ export class ApiError extends Error {
  * @returns Created document metadata
  * @example await uploadDocument(file);
  */
-export async function uploadDocument(file: File) {
+export async function uploadDocument(file: File, language?: string) {
   const fd = new FormData();
+  if (language) fd.append("language", language);
   fd.append("file", file);
   const res = await fetch(`${API_BASE}/api/documents/upload`, {
     method: "POST",

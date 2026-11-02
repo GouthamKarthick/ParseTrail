@@ -23,6 +23,7 @@ import styles from "./Upload.module.scss";
  */
 export default function Upload() {
   const [file, setFile] = useState<File | null>(null);
+  const [language, setLanguage] = useState("auto");
   const [busy, setBusy] = useState(false);
   const { show } = useToastContext();
   const nav = useNavigate();
@@ -57,7 +58,7 @@ export default function Upload() {
     }
     setBusy(true);
     try {
-      const res = await uploadDocument(file);
+      const res = await uploadDocument(file, language === "auto" ? undefined : language);
       show("success", `Uploaded ${res.name} — ${res.status}`);
       nav(`/documents/${res.id}`);
     } catch (e) {
@@ -104,6 +105,21 @@ export default function Upload() {
             <span className={styles["upload-drop-hint"]}>
               Supported: .pdf .png .jpg .jpeg
             </span>
+          </label>
+
+          <label className={styles["upload-language"]}>
+            <span>Document language</span>
+            <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+              <option value="auto">Auto / English</option>
+              <option value="de">German</option>
+              <option value="fr">French</option>
+              <option value="es">Spanish</option>
+              <option value="hi">Hindi</option>
+              <option value="ta">Tamil</option>
+              <option value="ml">Malayalam</option>
+              <option value="kn">Kannada</option>
+              <option value="te">Telugu</option>
+            </select>
           </label>
 
           <div className={styles["upload-actions"]}>
