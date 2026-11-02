@@ -280,10 +280,51 @@ export async function uploadDocument(
       return;
     }
     const filePath = file.path;
+    let header: Buffer;
+    try {
+      header = await fs.readFile(filePath).then((buffer) => buffer.subarray(0, 8));
+    } catch {
+      header = Buffer.alloc(0);
+    }
+    const isPdf = header.subarray(0, 4).toString("latin1") === "%PDF";
+    const isPng =
+      header[0] === 0x89 &&
+      header.subarray(1, 4).toString("latin1") === "PNG";
+    const isJpeg = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+    const expectedType = file.mimetype;
+    const signatureMatches =
+      (expectedType === "application/pdf" && isPdf) ||
+      (expectedType === "image/png" && isPng) ||
+      ((expectedType === "image/jpeg" || expectedType === "image/jpg") && isJpeg);
+    if (header.length > 0 && !signatureMatches) {
+      await fs.unlink(filePath);
+      res.status(400).json({
+        error: "File contents do not match the uploaded file type",
+        code: "INVALID_FILE_CONTENT",
+      });
+      return;
+    }
     let result: Awaited<ReturnType<typeof extract>> | null = null;
     let extractError: string | null = null;
     try {
-      result = await extract(filePath, { allowCloud: false });
+      const requestedLanguage =
+        typeof req.body?.language === "string" ? req.body.language.trim() : "";
+      const supportedLanguages: Record<string, string> = {
+        de: "deu",
+        en: "eng",
+        es: "spa",
+        fr: "fra",
+        hi: "hin",
+        kn: "kan",
+        ml: "mal",
+        ta: "tam",
+        te: "tel",
+      };
+      const hintLang = supportedLanguages[requestedLanguage.toLowerCase()];
+      result = await extract(filePath, {
+        allowCloud: false,
+        hintLang,
+      });
     } catch (e) {
       extractError = (e as Error).message;
       logger.error("Extraction failed before dedup", { error: extractError });
