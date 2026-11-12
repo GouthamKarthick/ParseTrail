@@ -2,14 +2,11 @@
  * index.ts — Application entry point.
  */
 
-import dotenv from "dotenv";
 import fs from "fs";
 import { createApp } from "./app.js";
 import { ensureSchema } from "./db/schema.js";
 import { config } from "./config.js";
 import { logger } from "./config/logger.js";
-
-dotenv.config();
 
 if (!fs.existsSync(config.uploadDir))
   fs.mkdirSync(config.uploadDir, { recursive: true });
@@ -84,10 +81,18 @@ async function start() {
           ),
         ),
       )
-      .catch(() => {});
+      .catch((e) =>
+        logger.warn("Failed to schedule retention cleanup", {
+          error: (e as Error).message,
+        }),
+      );
     const { startRefineWorker } = await import("./jobs/refine.js");
     startRefineWorker();
-  } catch {}
+  } catch (e) {
+    logger.warn("Failed to initialize background jobs", {
+      error: (e as Error).message,
+    });
+  }
 
   app.listen(config.port, () => {
     logger.info(`API listening on http://localhost:${config.port}`, {
