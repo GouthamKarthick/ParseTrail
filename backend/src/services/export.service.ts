@@ -26,7 +26,7 @@ export async function generateSummaryPdf(
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
-    doc.fontSize(20).text("ClarityDocs — 30-Day Summary", { align: "center" });
+    doc.fontSize(20).text("ParseTrail — 30-Day Summary", { align: "center" });
     doc.moveDown();
     doc
       .fontSize(10)

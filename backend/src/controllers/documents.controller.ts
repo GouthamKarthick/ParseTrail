@@ -1057,7 +1057,7 @@ export async function exportSummary(
       res.setHeader("Content-Type", "text/csv");
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename=claritydocs-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+        `attachment; filename=parsetrail-summary-${new Date().toISOString().slice(0, 10)}.csv`,
       );
       res.send(csv);
       return;
@@ -1066,7 +1066,7 @@ export async function exportSummary(
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=claritydocs-summary-${new Date().toISOString().slice(0, 10)}.pdf`,
+      `attachment; filename=parsetrail-summary-${new Date().toISOString().slice(0, 10)}.pdf`,
     );
     res.send(pdf);
   } catch (err) {

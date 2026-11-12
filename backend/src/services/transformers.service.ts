@@ -39,9 +39,13 @@ async function getLocalLLM(): Promise<Text2TextPipeline | null> {
       const mod: unknown = await import("@huggingface/transformers");
       const fn = (mod as { default?: unknown }).default ?? mod;
       if (typeof fn !== "function") throw new Error("pipeline not found");
-      const p = await fn("text2text-generation", "Xenova/flan-t5-small", { quantized: true });
+      const model = process.env.LOCAL_LLM_MODEL || "Xenova/LaMini-Flan-T5-77M";
+      const p = await fn("text2text-generation", model, {
+        quantized: true,
+        dtype: "q8",
+      });
       llmPipeline = p as Text2TextPipeline;
-      logger.info("Flan-T5 local LLM loaded (quantized, pre-baked)");
+      logger.info("Minimal local LLM loaded", { model });
       return llmPipeline;
     } catch (e) {
       logger.warn("Failed to load local LLM, will fallback to Gemini", { error: (e as Error).message });

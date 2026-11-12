@@ -1,4 +1,4 @@
-# ClarityDocs — Product Requirements Document
+# ParseTrail — Product Requirements Document
  
 ## 1. Problem statement
  
@@ -11,7 +11,7 @@ black boxes: they give you a result with no visibility into *how* it was
 produced, no control over the cost-vs-accuracy tradeoff per document, and no
 way to learn from corrections over time.
  
-ClarityDocs is a small, self-built document intelligence pipeline that solves
+ParseTrail is a small, self-built document intelligence pipeline that solves
 the same core problem — turn an uploaded document into structured data — but
 does so transparently: every extraction attempt, its method, its confidence,
 and its cost are observable, and the system escalates through cheaper
@@ -55,7 +55,7 @@ This is a portfolio/learning project. The two audiences it needs to satisfy:
 A **tiered, confidence-scored extraction cascade** instead of one opaque call:
 1. **Heuristic type detection** — light type vote across all stages (invoice/receipt/payment/bill/payslip/settlement_slip).
 2. **Rule-based extraction** (cheapest) — deterministic regex over OCR/PDF text for vendor, invoiceNo, date, amount, currency; confidence = `min(1, filled/5) * 0.85`. Rules win on any conflict with ML outputs.
-3. **Local LLM extraction** (moderate cost) — quantized Flan-T5-small via @huggingface/transformers with per-type 1-shot examples from `strategies.ts`; conflicts with rules resolved deterministically (rules win).
+3. **Local LLM extraction** (moderate cost) — one small quantized `Xenova/LaMini-Flan-T5-77M` model via @huggingface/transformers, configurable through `LOCAL_LLM_MODEL`, with per-type 1-shot examples from `strategies.ts`; conflicts with rules resolved deterministically (rules win).
 4. **Cloud LLM extraction** (most expensive) — Gemini flash fallback, only invoked if local stages fail or confidence < threshold; forced escalation on rules-vs-model disagreement for number/date/amount/currency.
 Every attempt is logged: method used, confidence score, latency, cost, fallback reason, and predicted document type. This is the part existing IDP tools don't expose, and it directly answers the "AI observability" gap identified during planning.
  
@@ -69,15 +69,14 @@ Every attempt is logged: method used, confidence score, latency, cost, fallback 
   `processing` → `done` (or `failed` with an error message).
 - User can view the extracted data once processing completes.
 - User can see a list of previously uploaded documents and their status.
-### Phase 2 — asynchronous
-- Upload triggers a message onto a queue instead of extracting inline.
-- A separate worker process consumes the queue and performs extraction.
-- Frontend polling behavior is unchanged — only the backend implementation
-  changes.
+### Phase 2 — asynchronous refinement (implemented)
+- Upload performs local extraction inline and stores the result in MySQL.
+- Incomplete or conflicting results enqueue a row in `refine_jobs`.
+- An in-process worker polls MySQL and runs the cloud refinement pass.
+- Frontend polling behavior is unchanged while refinement updates the record.
 ### Phase 3 — tiered extraction + observability
-- Each extraction attempt (not just the final result) is recorded.
-- A simple UI shows which method was used and its confidence.
-- User can correct a field; the correction is stored for future reference.
+- Implemented: extraction attempts are recorded in MySQL and shown in the
+  document timeline; users can correct fields and view correction history.
 ### Phase 4 — generalize beyond invoices
 - Document "type" becomes a first-class concept.
 - Extraction strategies are pluggable per document type.
@@ -90,73 +89,46 @@ Every attempt is logged: method used, confidence score, latency, cost, fallback 
   within free-tier limits, but AWS S3/SQS/Lambda are not required — the
   system is fully functional on a single MySQL instance and local disk.
 - **Language/stack**: React + TypeScript (frontend), Express + TypeScript
-  (backend API), MySQL (persistence), Node (Lambda worker — optional, for
-  cloud async path only), Docker (local dev parity).
+  (backend API), MySQL (persistence), and an in-process Node.js worker.
+  Docker Compose is optional for local MySQL.
 - **Observability**: every extraction attempt must be traceable after the
   fact — no silent failures. All attempts (method, confidence, latency, cost,
   fallback reason, predicted_type) are recorded in the `extraction_attempts`
   ledger.
 ## 9. Data model
  
-### Phase 1/2 — `documents` table
+### Current MySQL schema
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | VARCHAR(36) PK | UUID v4, server-generated (`crypto.randomUUID()`), `PRIMARY KEY` prevents duplicates (`ER_DUP_ENTRY` → retry) |
-| `name` | VARCHAR(255) | as uploaded (short name for `original_name`) |
-| `path` | VARCHAR(500) | local path (Phase 1) or S3 key (Phase 2) — short name for `stored_path` |
-| `status` | ENUM(pending, processing, done, failed) | |
-| `data` | JSON, nullable | shape varies by document type — short name for `extracted_data` |
-| `error` | TEXT, nullable | short name for `error_message` |
-| `created_at` / `updated_at` | DATETIME | |
-| `document_type` | VARCHAR(50) | invoice | receipt | payment | bill | payslip | settlement_slip | other | unknown — per-type extraction strategy routing |
-| `document_category` | VARCHAR(50) | financial | unknown — gates per-type strategy selection |
-| `user_id` | VARCHAR(36) FK → users.id | per-user isolation; all queries include `WHERE user_id=?` |
-| `expires_at` | DATETIME | 30-day retention default: `created_at + INTERVAL 30 DAY`; INDEX `idx_expires` for scheduled purge |
+The backend runs `ensureSchema()` during startup and creates or migrates these
+tables in the database selected by `DB_NAME` (default: `parsetrail`):
 
-**Notes:**
-- Short names: `name` (for `original_name`), `path` (for `stored_path`), `data` (for `extracted_data`), `error` (for `error_message`) per PRD §9.
-- `path`: Phase1 local path, Phase2 S3 key. Abstracted via `storageService.resolvePath()`.
-- `data` JSON shape = `ExtractedInvoiceData | null`. No generated columns in MVP.
-- `DATETIME` uses `CURRENT_TIMESTAMP` (MySQL 8). `updated_at` auto-updates on row change.
-- `idx_status_created` index on `(status, created_at)` for list queries.
-- `idx_expires` index for 30-day retention purge.
+| Table | Stored data |
+|---|---|
+| `users`, `user_avatars`, `password_reset_tokens` | Accounts and authentication data |
+| `documents` | Document metadata, extraction status, and extracted fields |
+| `extraction_attempts` | Per-stage method, confidence, latency, cost estimate, outcome, and fallback reason |
+| `refine_jobs`, `refine_quota` | Queued cloud-refinement work and daily quota usage |
+| `corrections` | User field corrections and their history |
 
-### Phase 3 — additional `extraction_attempts` table (future)
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | VARCHAR(36) PK | UUID |
-| `doc_id` | VARCHAR(36) FK → documents.id | short name for `document_id` |
-| `method` | VARCHAR(50) | e.g. `heuristic`, `regex`, `layout`, `llm` — not indexed (query by `doc_id` only) |
-| `predicted_type` | VARCHAR(50) | document type detected by this attempt |
-| `confidence` | FLOAT | 0–1 |
-| `cost` | DECIMAL, nullable | short name for `cost_estimate` |
-| `latency` | INT | ms — short name for `latency_ms` |
-| `success` | BOOLEAN | short name for `succeeded` |
-| `fallback_reason` | VARCHAR(100), nullable | e.g. `rules_vs_model_disagreement`, `local_llm_failed`, `quota_exhausted` |
-| `created_at` | DATETIME | |
-
-Not built in the MVP — included here so the schema decision is made once,
-not revisited mid-project.
+Uploaded file bytes are stored on local disk under `UPLOAD_DIR` (default:
+`./uploads`); MySQL stores the document record and its extracted data.
  
 ## 10. High-level data flow
 
-**Phase 1 (synchronous):**
-`React frontend` → `Express API (save + call inline extraction)` → `Extraction function (rules-first cascade: heuristic → rule-based → local Flan-T5 → cloud Gemini)` → `MySQL`, with the frontend polling `GET /api/documents/:id` until status is terminal. Every extraction attempt is recorded in the `extraction_attempts` ledger.
+**Upload path (implemented):**
+`React frontend` → `Express API (save file locally + local extraction)` → `MySQL documents + extraction_attempts`. Incomplete or conflicting local results enqueue `refine_jobs`; the frontend receives the local result while the in-process worker later performs cloud refinement and fills missing values.
 
-**Phase 2 (async hybrid):**
-Same frontend and API, except the API's upload handler: saves the file (local `./uploads` or S3 via `storageService`), creates a `documents` row `pending`, enqueues a `refine_jobs` row with `status=queued`, and returns immediately. An in-process worker polls MySQL every ~15s, picks up `queued` jobs, runs the extraction cascade, updates the job to `working`, writes results to `documents` (sets `done` + `data` or `failed` + `error`), and records every attempt in `extraction_attempts`. The frontend's polling contract does not change — `GET /api/documents/:id` still polls until terminal state.
-
-**Phase 3 (tiered + observability, documented):**
-Each extraction attempt (not just the final result) is recorded in `extraction_attempts` with method, confidence, latency, cost, succeeded, fallback_reason, predicted_type. A UI badge shows which method was used and its confidence. User can correct a field; the correction is stored in the `corrections` table with the producing method for failure analytics.
+**Background refinement (implemented):**
+The worker polls MySQL about every 15 seconds, claims queued work, records
+cloud attempts, and updates the existing document. This is not a separate
+worker process and does not use S3, SQS, or Lambda.
  
 ## 11. Success criteria for the MVP
  
 - A user can upload a real invoice/receipt image or PDF and see structured
   fields (vendor, date, total) appear within a reasonable time.
-- The same codebase can be pointed at either the inline extraction path or
-  the SQS/Lambda path via configuration, without frontend changes.
+- The backend creates its MySQL schema on startup and supports local upload,
+  extraction, correction, and dashboard flows without AWS services.
 - The project has a README explaining the architecture decision (why async,
   what problem it solves) clearly enough for an interviewer to follow.
 ## 12. Open questions / assumptions
@@ -176,7 +148,7 @@ are preserved in spirit; the means changed.
 | # | Original PRD | What actually happened | Why |
 |---|---|---|---|
 | 1 | §2 Vision: start narrow (invoices/receipts), generalize in Phase 4 | Generalized on day one: 6 financial types (`invoice/receipt/payment/bill/payslip/settlement_slip`) + financial-only category gate | User decision: uniform quality across all six types from the start |
-| 2 | §6 Tiers: regex → layout-aware → LLM | Heuristic sniff → local Flan-T5-small (quantized, in-Docker) → Gemini-flash fallback, plus deterministic amount/date fallback extractors; no separate layout stage | Free-tier + offline-first; layout handling folded into prompts and fallbacks |
+| 2 | §6 Tiers: regex → layout-aware → LLM | Heuristic sniff → one lazy-loaded quantized LaMini-Flan-T5-77M model → Gemini-flash fallback, plus deterministic amount/date fallback extractors; no separate layout stage | Smaller memory/disk footprint + offline-first; layout handling folded into prompts and fallbacks |
 | 3 | §7/§10 Phase 2: SQS + Lambda | Re-planned: DB-backed `refine_jobs` table + in-process worker, no new infra | Same sync→async teaching goal (§4) at $0 and 512MB Docker-safe |
 | 4 | §5 Non-goal: no multi-user auth | Full auth shipped (register, mandatory email verify, login, profiles, avatars) | Demo and multi-user needs |
 | 5 | §8 Cost basis: AWS always-free tiers | Gemini free-tier quotas + local-first; OCR via tesseract (slow — 5+ min observed on photo PDFs) | No AWS usage; everything reproducible locally via Docker |
@@ -200,7 +172,7 @@ are preserved in spirit; the means changed.
  
 The "so what" question — why would anyone other than an interviewer care —
 has three answers backed by actual market data, not assumption. Each maps
-onto a document type ClarityDocs already extracts.
+onto a document type ParseTrail already extracts.
  
 ### 14.1 Accounts payable — duplicate and erroneous payments
  
@@ -214,7 +186,7 @@ meaningful share of small businesses fall victim to invoice fraud
 (duplicate or inflated invoice submissions), at real average losses per
 incident.
  
-**Why this matters for ClarityDocs specifically:** the dedup-with-update
+**Why this matters for ParseTrail specifically:** the dedup-with-update
 feature already built (§13, deviation #7) is infrastructure for exactly
 this problem. It currently silently merges duplicates; the market data
 says the more valuable behavior is to **flag a likely duplicate before
@@ -236,7 +208,7 @@ filing, while tools that do real reconciliation are priced for
 enterprises. That's a specific, named gap between "cheap and does filing"
 and "reconciles properly but costs enterprise money."
  
-**Why this matters for ClarityDocs specifically:** the test invoices you
+**Why this matters for ParseTrail specifically:** the test invoices you
 already built include GSTIN, CGST/SGST splits, and invoice numbers — the
 exact fields a GSTR-2B cross-check needs. A lightweight "does this
 purchase invoice's GSTIN/number/amount match what your supplier actually
@@ -250,7 +222,7 @@ that close to 40% of employees don't fully understand what's listed on
 their own payslip, and common self-audit failures include not checking
 deduction math or overtime rates against expectation.
  
-**Why this matters for ClarityDocs specifically:** payslip is already one
+**Why this matters for ParseTrail specifically:** payslip is already one
 of your six supported document types. Turning the extracted numbers into
 "does this month's deduction math add up, and how does it compare to last
 month" is a personal-finance feature built almost entirely on data you
@@ -279,12 +251,30 @@ appropriate for a company with compliance backing, not for a portfolio
 project built alongside GATE prep. Cross-checking and flagging is safe,
 useful, and demonstrable; auto-filing is not worth the current risk for
 the return it offers this project.
+
+## 16. Recommended improvements
+
+1. **Model budget:** keep exactly one local model (`LaMini-Flan-T5-77M` as
+   the default), load it on demand, and measure its accuracy before switching
+   to a larger replacement. Expose the override as configuration only; do not
+   preload models in application startup or Docker builds.
+2. **Reliability:** make file storage lifecycle and retention the source of
+   truth in tests. Persist extraction results, but also prove expected
+   behavior after a pod/container restart where uploaded bytes may be gone.
+3. **Security:** add rate limits and upload size/MIME validation at the edge,
+   rotate credentials, enable secure cookie settings outside local
+   development, and separate authentication hardening from extraction work.
+4. **Privacy:** provide an explicit document-delete action and ensure deleting
+   a document removes its file, attempts, corrections, and derived records.
+5. **Operational visibility:** expose a lightweight `readiness` endpoint that
+   checks MySQL and required runtime capabilities separately from liveness,
+   plus structured job aging and cloud-quota metrics.
  
 ---
  
 ## Instructions for generating the technical specification
  
-This PRD is the input. Using it, produce a `TECHNICAL_SPEC.md` that covers:
+This PRD is the input. Using it, produce a [`TECHNICAL_SPEC.md`](./TECHNICAL_SPEC.md) that covers:
  
 1. Full API contract (routes, request/response shapes, status codes) for
    both Phase 1 and Phase 2, noting exactly what changes between them.

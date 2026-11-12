@@ -69,6 +69,20 @@ export default function Detail() {
       : latestLlmFailure
         ? "dead"
         : doc?.refine_status;
+  const attemptLabel = (method: string): string => {
+    switch (method) {
+      case "heuristic-detect":
+        return "Document type detected";
+      case "rule-based":
+        return "Standard field extraction";
+      case "local-llm":
+        return "Local AI analysis";
+      case "llm":
+        return "Cloud AI enhancement";
+      default:
+        return "Document analysis";
+    }
+  };
 
   const docId = doc?.id;
   const docStatus = doc?.status;
@@ -291,27 +305,16 @@ export default function Detail() {
                       : styles["detail-status-error"]
                   }`}
                 >
-                  {a.method}
+                  {attemptLabel(a.method)}
                 </span>
                 <Text variant="small">
-                  Confidence {Number(a.confidence).toFixed(2)}
+                  {a.succeeded ? "Completed" : "Unable to complete"}
                 </Text>
-                {a.fallback_reason && (
+                {!a.succeeded && a.method === "llm" && (
                   <Text variant="small" className={styles["detail-reason"]}>
-                    <span
-                      className={
-                        a.method === "llm" && !a.succeeded
-                          ? styles["detail-error"]
-                          : undefined
-                      }
-                    >
-                      {a.method === "llm" && !a.succeeded
-                        ? `LLM error: ${
-                            /429|quota/i.test(a.fallback_reason)
-                              ? "Gemini quota exceeded (HTTP 429). Check the provider quota, then retry."
-                              : a.fallback_reason
-                          }`
-                        : `→ ${a.fallback_reason}`}
+                    <span className={styles["detail-error"]}>
+                      Enhancement is temporarily unavailable. Existing extracted
+                      fields are still saved; please retry later.
                     </span>
                   </Text>
                 )}

@@ -93,7 +93,7 @@ export default function Dashboard() {
         url.current = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url.current;
-        a.download = `claritydocs-summary.${fmt}`;
+        a.download = `parsetrail-summary.${fmt}`;
         a.click();
         show("success", `Summary exported as ${fmt.toUpperCase()}`);
       } catch (e) {

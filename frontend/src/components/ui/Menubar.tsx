@@ -66,7 +66,7 @@ export function Menubar() {
         <NavLink
           to="/"
           className={styles["menubar-brand"]}
-          aria-label="ClarityDocs home"
+          aria-label="ParseTrail home"
           onClick={closeSidebar}
         >
           <span className={styles["menubar-logo"]} aria-hidden>
@@ -169,7 +169,7 @@ export function Menubar() {
             </svg>
           </span>
           <span className={styles["menubar-title"]}>
-            Clarity<span className={styles["menubar-title-accent"]}>Docs</span>
+            Parse<span className={styles["menubar-title-accent"]}>Trail</span>
           </span>
         </NavLink>
 

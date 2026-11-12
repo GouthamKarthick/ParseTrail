@@ -64,7 +64,7 @@ export default function Login() {
     <div className="page">
       <div className={styles["upload-card"]}>
         <Heading level={1}>Welcome back</Heading>
-        <Text variant="muted">Sign in to continue to ClarityDocs.</Text>
+        <Text variant="muted">Sign in to continue to ParseTrail.</Text>
 
         <form onSubmit={handleSubmit} className={styles["upload-form"]}>
           <div className={authStyles["auth-field"]}>
