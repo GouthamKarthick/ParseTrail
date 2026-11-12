@@ -64,7 +64,6 @@ export const config = {
       "google",
     model: process.env.AI_MODEL || "gemini-flash-latest",
     apiKey: process.env.AI_API_KEY || "",
-    threshold: Number(process.env.AI_CONFIDENCE_THRESHOLD) || 0.5,
   },
   logs: {
     dir: "./logs",

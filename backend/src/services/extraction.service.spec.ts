@@ -45,7 +45,7 @@ function ocrText(t: string, c = 95, p = 1) {
 describe("extraction.service — Flan local -> Gemini", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (config as any).ai = { ...config.ai, apiKey: "", threshold: 0.5 };
+    (config as any).ai = { ...config.ai, apiKey: "" };
     mockLocal.mockResolvedValue({
       data: {},
       confidence: 0,

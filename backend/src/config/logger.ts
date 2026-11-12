@@ -6,14 +6,9 @@ import fs from "fs";
 import path from "path";
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import dotenv from "dotenv";
+import { config } from "../config.js";
 
-dotenv.config();
-
-const LOG_DIR = "./logs";
-const LOG_LEVEL = process.env.LOG_LEVEL || "debug";
-
-const logDir = path.resolve(LOG_DIR);
+const logDir = path.resolve(config.logs.dir);
 if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
 const ecsFormat = winston.format.combine(
@@ -55,7 +50,7 @@ function dailyTransport(filename: string, level: string) {
 }
 
 export const logger = winston.createLogger({
-  level: LOG_LEVEL,
+  level: config.logs.level,
   levels: winston.config.npm.levels,
   transports: [
     dailyTransport("info", "info"),
@@ -63,7 +58,7 @@ export const logger = winston.createLogger({
     dailyTransport("warn", "warn"),
     dailyTransport("error", "error"),
     new winston.transports.Console({
-      level: LOG_LEVEL,
+      level: config.logs.level,
       format: winston.format.combine(
         winston.format.colorize(),
         winston.format.timestamp({ format: "HH:mm:ss" }),

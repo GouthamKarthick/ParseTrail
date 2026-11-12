@@ -3,12 +3,8 @@
  */
 
 import multer from "multer";
-import fs from "fs";
 import { randomUUID } from "crypto";
 import { config } from "../config.js";
-
-if (!fs.existsSync(config.uploadDir))
-  fs.mkdirSync(config.uploadDir, { recursive: true });
 
 const allowedMimes = new Set([
   "application/pdf",
