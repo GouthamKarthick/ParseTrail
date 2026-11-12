@@ -1,5 +1,5 @@
 /**
- * @fileoverview Shared domain type definitions for ClarityDocs frontend.
+ * @fileoverview Shared domain type definitions for ParseTrail frontend.
  * Defines document statuses, types, categories, and extraction data shapes.
  */
 

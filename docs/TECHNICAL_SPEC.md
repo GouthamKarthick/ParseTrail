@@ -1,6 +1,6 @@
-# ClarityDocs — Technical Specification
+# ParseTrail — Technical Specification
 
-> Derived from `ClarityDocs-PRD.md`. Covers API contract (Phase1 vs Phase2), DDL, folder structure, AWS resources, and phased checklist. Stack: `Node 20 + Express + TypeScript (ESM)` + `React + TypeScript + Vite SPA` + `MySQL (mysql2, no ORM)` + `pdf-parse` (Phase1, swappable) per PRD §8. Deploy deferred.
+> Derived from `ParseTrail-PRD.md`. Covers API contract (Phase1 vs Phase2), DDL, folder structure, AWS resources, and phased checklist. Stack: `Node 20 + Express + TypeScript (ESM)` + `React + TypeScript + Vite SPA` + `MySQL (mysql2, no ORM)` + `pdf-parse` (Phase1, swappable) per PRD §8. Deploy deferred.
 > **Update 2026-09-14 — Freelancing Finish:** `S3/SQS/Lambda` dropped (code in `backend/src/lambda/` `backend/infra/` deleted per user trade-off), MySQL cloud (`Clever Cloud`/`Railway` free) used for online deploy, `Render` ephemeral `UPLOAD_DIR=/tmp/uploads` accepted. See §10 Reasoning.
 
 ---
@@ -13,7 +13,7 @@
 
 **No ORM:** Plain `mysql2/promise` pool. Reason: PRD §8 explicitly says `plain mysql2` unless justified; keeps SQL visible for interviewers and avoids migration magic.
 
-**Env:** `dotenv` + `.env.example`. Frontend `VITE_API_URL` points to `http://localhost:4000`.
+**Env:** `dotenv` + `.env.example`. Frontend `VITE_BACKEND_URL` points to the backend; local development leaves it blank and uses the Vite proxy.
 
 ---
 
@@ -270,9 +270,11 @@ CREATE TABLE IF NOT EXISTS corrections (
 ### 4.1 Repository Layout (separate frontend/backend, deploy deferred)
 
 ```
-clarityDocs/
-├── ClarityDocs-PRD.md
-├── TECHNICAL_SPEC.md        # this file
+ParseTrail/
+├── docs/
+│   ├── ParseTrail-PRD.md
+│   ├── TECHNICAL_SPEC.md    # this file
+│   └── TEST_PLAN.md
 ├── docker-compose.yml       # mysql:8 for local dev
 ├── backend/
 │   ├── package.json         # type: module, ESM — pdf-parse, tesseract.js, sharp, @huggingface/transformers, mysql2; NO @aws-sdk/*
@@ -316,7 +318,7 @@ clarityDocs/
 │       ├── main.tsx
 │       ├── App.tsx           # router (incl. /verify-email, /setup-profile)
 │       ├── api/
-│       │   └── client.ts     # fetch wrapper (VITE_API_URL) + auth/corrections/summary calls
+│       │   └── client.ts     # fetch wrapper (VITE_BACKEND_URL; VITE_API_URL legacy alias) + auth/corrections/summary calls
 │       ├── hooks/
 │       │   ├── usePolling.ts # 2s interval until done|failed (+refine badge)
 │       │   └── useApi.ts     # data-fetch helper (used by Dashboard)
@@ -342,7 +344,7 @@ export interface ExtractionResult {
 }
 export async function extract(filePathOrBuffer: string | Buffer): Promise<ExtractionResult>;
 ```
-Impl: `pdf-parse` → text (→ `pdftotext` fallback) → deterministic rules; images/scanned PDFs → `tesseract.js`+`sharp` OCR; then local Flan-T5 fill, cloud Gemini arbitration, FX enrichment. (The `pdfjs-dist` swap note from early drafts is stale — that package is not installed.)
+Impl: `pdf-parse` → text (→ `pdftotext` fallback) → deterministic rules; images/scanned PDFs → `tesseract.js`+`sharp` OCR; then one lazy-loaded quantized local LaMini-Flan-T5-77M fill (`LOCAL_LLM_MODEL` override), cloud Gemini arbitration, and FX enrichment. Models are not pre-baked into Docker builds. (The `pdfjs-dist` swap note from early drafts is stale — that package is not installed.)
 
 - **services/jobs/refine.ts (replaces the two deleted adapters below):** `enqueueRefineJob` + `startRefineWorker()` poll `refine_jobs`; no S3/SQS involved.
 
@@ -356,12 +358,12 @@ The S3/SQS/Lambda design below from early drafts was **deleted** (2026-09-14, $0
 
 | Resource (dropped) | Was planned as | Replaced by |
 |---|---|---|
-| **S3 Bucket** | `claritydocs-uploads-*`, 5 GB free | Local `UPLOAD_DIR` (`/tmp/uploads` on Render ephemeral); rows in MySQL cloud are the source of truth |
-| **SQS Queue + DLQ** | `claritydocs-jobs`, 1M req/mo free | `refine_jobs` table (`queued/working/done/retry/dead`), 5 tries → dead, sweep of stale `working` |
+| **S3 Bucket** | `parsetrail-uploads-*`, 5 GB free | Local `UPLOAD_DIR` (`/tmp/uploads` on Render ephemeral); rows in MySQL cloud are the source of truth |
+| **SQS Queue + DLQ** | `parsetrail-jobs`, 1M req/mo free | `refine_jobs` table (`queued/working/done/retry/dead`), 5 tries → dead, sweep of stale `working` |
 | **Lambda worker** | `nodejs20.x`, SQS trigger | In-process `startRefineWorker()` (`setInterval REFINE_POLL_MS`), same `extraction.service` code |
 | **IAM role** | S3/SQS/logs policies | Nothing — no AWS calls remain |
 
-**Actual deploy:** backend on Render (`node:20-alpine`, `PORT=10000`, `UPLOAD_DIR=/tmp/uploads`), MySQL cloud (Clever Cloud/Railway free, `DB_*` env), frontend on Vercel (`VITE_API_URL`). Demo scale (<100 docs/mo) fits free tiers.
+**Actual deploy:** backend on Render (`node:20-alpine`, `PORT=10000`, `UPLOAD_DIR=/tmp/uploads`), MySQL cloud (Clever Cloud/Railway free, `DB_*` env), frontend on Vercel (`VITE_BACKEND_URL`). Demo scale (<100 docs/mo) fits free tiers.
 
 ---
 
@@ -375,8 +377,8 @@ The S3/SQS/Lambda design below from early drafts was **deleted** (2026-09-14, $0
 - [x] `services/extraction.service.ts` `pdf-parse` impl (export `extract`), regex for `vendor/date/total` + confidence; unit fixture with sample PDF
 - [x] `routes` + `controllers` implement `POST /upload` inline flow `pending→processing→done/failed`, `GET /documents`, `GET /documents/:id`
 - [x] `app.ts`/`index.ts` wire `cors`, `express.json`, `/api`, `/health`, `ensureSchema`
-- [x] `frontend/` Vite scaffold: `Upload` (file input + POST), `List` (GET), `Detail` (polling hook 2s), `client.ts` with `VITE_API_URL`
-- [x] `docker-compose.yml` (`mysql:8`, `backend` depends_on, init `clarity_docs` DB), `README` arch note (why sync first)
+- [x] `frontend/` Vite scaffold: `Upload` (file input + POST), `List` (GET), `Detail` (polling hook 2s), `client.ts` with `VITE_BACKEND_URL` (`VITE_API_URL` legacy alias)
+- [x] `docker-compose.yml` (`mysql:8`, `backend` depends_on, init `parsetrail` DB), `README` arch note (why sync first)
 - [x] Verification (authed cookie): `curl -F file=@invoice.pdf http://localhost:4000/api/documents/upload` → `201` → poll `GET :id` → `done` with `data`; upload 3 real invoices, show list; `npm run build` passes
 
 **Demo exit:** User uploads PDF/PNG, sees `vendor/date/total` within seconds, list persists.
@@ -450,7 +452,28 @@ Flagged per PRD §12 instruction — no scope added without flag:
 | **Per-user isolation** | **Server-side `WHERE user_id=?`** never client-side filter | Prevents cross-user `GET /api/documents/:id` leak; mirrors `listDocuments` `where[]` pattern `validate.ts:1`. |
 | **Retention 30-day enforcement** | **Hard delete + `uploads` unlink via `jobs/cleanup.ts` `purgeExpired()`** — `documents.expires_at` defaults to `created_at + INTERVAL RETENTION_DAYS`, `INDEX idx_expires`; purge selects `WHERE expires_at < NOW() LIMIT 500`, unlinks files (best-effort), deletes rows (cascades attempts/corrections) | Hard delete saves free DB quota vs soft `deleted_at`. `LIMIT 500` avoids long transactions. Actually running: `setInterval` 24h + `node-cron` `0 2 * * *` (both call `purgeExpired()`; idempotent so overlap is harmless). No MySQL `EVENT` is created. Purge/refine race is benign: a purged document's refine job finds "document gone" and goes `dead`; refine never resurrects rows. |
 | **Graph** | **`recharts` on `frontend` `Dashboard.tsx`** (light, no `canvas` peer) | `PRD.md:81` observability deferred; `recharts` fits `Vite SPA` `frontend/package.json:12` without native deps. Metrics `average usage AVG(totalAmount)` `document authenticity AVG(confidence)` + `totalDocs sumTotal byType trend topVendors` for 30-day window `WHERE user_id=? AND status='done' AND created_at>=NOW()-INTERVAL 30 DAY` `JSON_EXTRACT(data,'$.totalAmount')`. |
-| **Download** | **CSV + PDF data exports** via `pdfkit`: `GET /api/documents/summary/export?format=pdf\|csv` — two buttons, `Download Summarized CSV` + `Download Summarized PDF`; the PDF holds summarized tables only, no chart image | `pdfkit` is light vs `puppeteer/html2canvas` on Render free. `Content-Disposition: attachment; filename=claritydocs-summary-YYYY-MM-DD.pdf`. (A client-side PNG graph snapshot exists separately in the UI; it is not a data export.) |
+| **Download** | **CSV + PDF data exports** via `pdfkit`: `GET /api/documents/summary/export?format=pdf\|csv` — two buttons, `Download Summarized CSV` + `Download Summarized PDF`; the PDF holds summarized tables only, no chart image | `pdfkit` is light vs `puppeteer/html2canvas` on Render free. `Content-Disposition: attachment; filename=parsetrail-summary-YYYY-MM-DD.pdf`. (A client-side PNG graph snapshot exists separately in the UI; it is not a data export.) |
 | **File delete after 30d** | **Yes — `uploads/<uuid>-safe` `fs.unlink` in `cleanup.ts`** (`resolveFilename`, `middleware/upload.ts`) | Prevents `Render /tmp` fill. After an ephemeral-disk restart the bytes are gone: `POST /:id/reprocess` then marks the document `failed` (missing file), and refine retries age to `dead` — both graceful, never silent. |
 
-**Consequence for deploy:** Freelancing build is `Render` `node:20-alpine` `npm run build && node dist/index.js` `PORT=10000` `UPLOAD_DIR=/tmp/uploads` `JWT_SECRET` `RETENTION_DAYS=30` `AI_API_KEY` + `Clever Cloud MySQL` `DB_HOST` → `Vercel` `VITE_API_URL`. `lambda/infra/S3/SQS` code deleted; `EXTRACTION_MODE` flag removed.
+**Consequence for deploy:** Freelancing build is `Render` `node:20-alpine` `npm run build && node dist/index.js` `PORT=10000` `UPLOAD_DIR=/tmp/uploads` `JWT_SECRET` `RETENTION_DAYS=30` `AI_API_KEY` + `Clever Cloud MySQL` `DB_HOST` → `Vercel` `VITE_BACKEND_URL`. `lambda/infra/S3/SQS` code deleted; `EXTRACTION_MODE` flag removed.
+
+---
+
+## 11. Recommended improvements
+
+Implementation priority:
+
+1. **One local model only:** default to `Xenova/LaMini-Flan-T5-77M` with `q8`
+   quantization and lazy loading. Remove model preloading from startup and
+   container builds; permit larger models only as explicit operator overrides.
+2. **Storage abstraction:** finish the storage interface and retain a canonical
+   file-status field so reprocessing missing/restarted ephemeral files fails
+   predictably instead of relying on filesystem probes.
+3. **Readiness and backpressure:** add `/ready` with MySQL, job-worker, and
+   optional local-model checks; apply upload and refine-job concurrency limits.
+4. **Delete/privacy lifecycle:** document a transactional deletion contract
+   covering file bytes, extraction attempts, corrections, refinement jobs, and
+   derived summaries. Verify it with integration tests.
+5. **Security hardening:** add authenticated upload throttling, production
+   secure cookies, secret rotation guidance, and remove permissive CORS
+   defaults outside development.

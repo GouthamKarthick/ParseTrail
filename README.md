@@ -1,50 +1,119 @@
-# ClarityDocs
+# ParseTrail
 
-Tiered document intelligence pipeline — invoices/receipts/bills/payments/payslips/settlement slips → structured data with observability.
+ParseTrail extracts structured fields from uploaded financial documents using rules, local Flan-T5 inference, and queued cloud refinement.
 
-## Stack
-- Backend: Node 20 + Express (ESM `type:module`, `NodeNext`) + `mysql2` (no ORM)
-- Extraction cascade (cheapest first): heuristic type sniff → rule-based regex → local Flan-T5-small (`@huggingface/transformers`, quantized) → cloud Gemini-flash fallback
-- Text layer: `pdf-parse` with `pdftotext` (poppler) fallback; OCR: `tesseract.js` + `sharp` preprocessing (`pdfjs-dist`/`canvas` raster path is inactive — neither is installed, so scanned PDFs go through `pdftotext`/tesseract only)
-- Currency display: free keyless FX (Frankfurter.app primary, open.er-api.com fallback) → `totalAmountConverted` in `DISPLAY_CURRENCY` (default INR), best-effort, rate-cached
-- Frontend: React 18 + Vite + TypeScript (SPA)
-- DB: MySQL 8, local `mysql:8` via docker-compose or MySQL cloud for deploy
-- Async: no AWS. Upload extracts local-only (fast); incomplete results enqueue a DB-backed `refine_jobs` row; an in-process worker (`REFINE_POLL_MS=15s`, daily cap) runs the cloud pass. No S3/SQS/Lambda — deleted per TECHNICAL_SPEC §10.
+**Live demo:** [clarity-docs-psi.vercel.app](https://clarity-docs-psi.vercel.app/)
+<!-- TODO: Update the live demo URL after the Vercel project is renamed. -->
 
-See `TECHNICAL_SPEC.md` for API contract, DDL, and phased checklist. PRD at `ClarityDocs-PRD.md`.
+## Screenshots
 
-## Auth
+![Dashboard — TODO: add screenshot](docs/screenshots/dashboard.png)
 
-Shipped (not in the original PRD scope): JWT in HttpOnly cookie (`SameSite=lax`, CORS with credentials; no CSRF tokens — SameSite is the only CSRF mitigation) + `bcryptjs`. Logout only clears the cookie (no server-side revocation; tokens live `JWT_EXPIRY`, default 1d). Register → email verify (Resend SMTP, auto-verified in dev **only when `SMTP_HOST` is empty** — never leave it empty in production or all accounts self-verify) → login (unverified → `403 EMAIL_NOT_VERIFIED`) → per-user isolation (`WHERE user_id=?` on all document queries; cross-user access returns `404`, never `403`, to avoid ID probing). All `/api/documents/*` routes require auth — see Quick start for cookie-based `curl`.
+![Document details — TODO: add screenshot](docs/screenshots/document-details.png)
 
-## Main endpoints
+## Features
 
-- `POST /api/documents/upload` → `201 {id, name, status}` (`409 {code:"DUPLICATE_UPDATED"}` on content dup)
-- `GET /api/documents`, `GET /api/documents/:id`, `GET /api/documents/:id/attempts`
-- `POST /api/documents/:id/reprocess`, `POST /api/documents/:id/refinement/retry`
-- `POST|GET /api/documents/:id/corrections`, `GET /api/documents/corrections/stats`
-- `GET /api/documents/summary`, `GET /api/documents/summary/export?format=pdf|csv`
-- Auth: `POST /api/auth/register|login|logout|resend-verification|verify-email|forgot-password|reset-password`, `GET /api/auth/me`, `PATCH /api/auth/profile`, avatar up/down/load
+- Extracts text from PDFs and OCRs images or scanned PDFs.
+- Detects document types with lightweight text heuristics.
+- Runs deterministic field rules, then local Flan-T5 when needed.
+- Escalates selected rules/model field conflicts to cloud refinement; Gemini is the default provider.
+- Queues incomplete or conflicting local results in MySQL for an in-process worker with exponential retries.
+- Supports field corrections and correction history.
+- For the same user and document type, matches duplicates by vendor, invoice number, amount, and currency, then updates the existing record.
+- Filters the document list by type.
+- Shows a 30-day dashboard summary and exports it as CSV or PDF.
+- Shows a per-document extraction-attempt timeline (latest attempts in the UI).
+
+## How it works
+
+```mermaid
+flowchart TD
+    A[Upload PDF or image] --> B{Input type}
+    B -->|PDF| C[Extract PDF text]
+    B -->|Image or scanned PDF| D[Local OCR]
+    C --> E[Heuristic document-type detection]
+    D --> E
+    E --> F[Deterministic rules]
+    F -->|Pass| G[Save local extraction]
+    F -->|Continue| H[Local Flan-T5]
+    H -->|Pass| G
+    H -->|Missing fields, low confidence, or conflict| G
+    G --> J[Return local result]
+    G --> I{Required fields missing or strategies disagree?}
+    I -->|No| J
+    I -->|Yes| K[Insert MySQL refine_jobs row]
+    K --> L[In-process polling worker]
+    L --> M[Configured cloud inference: Gemini by default]
+    M --> N[Fill missing fields and record attempts]
+    N --> O[Update stored document]
+```
+
+Uploads run the local stages synchronously. A MySQL-backed worker performs a cloud pass only when required fields are missing or stages disagree; cloud results fill missing stored fields.
+
+## Tech stack
+
+- **Backend:** Node.js, Express, TypeScript
+- **Frontend:** React, TypeScript, Vite
+- **Database and jobs:** MySQL 8, `mysql2`, in-process polling worker
+- **Schema and files:** backend creates/updates MySQL tables at startup; uploaded files stay under `backend/uploads`
+- **Extraction:** `pdf-parse`, `pdftotext` fallback, Tesseract.js OCR, regex rules, Transformers.js with `Xenova/LaMini-Flan-T5-77M`
+- **Cloud refinement:** Google Gemini by default; provider is configurable
+- **Local database:** MySQL database `parsetrail`
+
+Project docs: [PRD](docs/ParseTrail-PRD.md) · [Technical spec](docs/TECHNICAL_SPEC.md) · [Test plan](docs/TEST_PLAN.md)
 
 ## Quick start
 
-```bash
-cp backend/.env.example backend/.env  # edit DB_* if needed; leave SMTP_HOST empty in dev to auto-verify accounts
-docker compose up -d mysql   # or run MySQL locally
-cd backend && npm install && npm run dev   # http://localhost:4000
-cd frontend && npm install && npm run dev  # http://localhost:5173 (proxies /api to :4000)
-```
+Requirements: Node.js 20+, npm, and a running MySQL 8 server. Docker is optional.
 
-Authenticated API use (all `/api/documents/*` return 401 without a login cookie):
+Create the local database and application user (or grant the same privileges to the values you use in `backend/.env.example`):
 
 ```bash
-curl -c jar.txt -H 'Content-Type: application/json' -d '{"email":"a@b.c","password":"secret123!","first_name":"A","last_name":"B"}' http://localhost:4000/api/auth/register
-curl -c jar.txt -b jar.txt -H 'Content-Type: application/json' -d '{"email":"a@b.c","password":"secret123!"}' http://localhost:4000/api/auth/login
-curl -b jar.txt -F file=@invoice.pdf http://localhost:4000/api/documents/upload
-curl -b jar.txt http://localhost:4000/api/documents
-curl -b jar.txt http://localhost:4000/api/documents/<id>  # poll until done|failed
+sudo mysql
 ```
 
-## Why sync → async (interview note)
+In the MySQL prompt:
 
-Upload extracts local-only so the API contract (`POST /upload` → 201, `GET :id` polling every 2s) is proven end-to-end with minimal moving parts. When the local result is incomplete or stages disagreed, the API enqueues a `refine_jobs` row and returns; the in-process worker picks it up (`REFINE_POLL_MS`), spends Gemini quota under a rate bucket + daily cap, and null-fills the stored `data`. Frontend polling does not change, demonstrating a sync→async evolution without reshaping the data model. The earlier S3/SQS/Lambda plan was dropped (zero-infra equivalent, same teaching goal).
+```sql
+CREATE DATABASE IF NOT EXISTS parsetrail;
+CREATE USER IF NOT EXISTS 'parsetrail_user'@'localhost' IDENTIFIED BY 'parsetrail_pass';
+ALTER USER 'parsetrail_user'@'localhost' IDENTIFIED BY 'parsetrail_pass';
+GRANT ALL PRIVILEGES ON parsetrail.* TO 'parsetrail_user'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+Then configure the backend:
+
+```bash
+test -f backend/.env || cp backend/.env.example backend/.env
+```
+
+If `sudo mysql` is unavailable, connect as your MySQL administrator with `mysql -u root -p`. Keep `DB_NAME`, `DB_USER`, and `DB_PASSWORD` in `backend/.env` consistent with the database and user you created. Do not commit `.env`.
+
+In one terminal:
+
+```bash
+cd backend
+npm ci
+npm run dev
+```
+
+In another terminal:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5173`. Configure `backend/.env` for your local database. Set `AI_API_KEY` to enable queued cloud refinement; local extraction does not require it.
+
+On backend startup, `ensureSchema()` creates or migrates the application tables in the configured database. Document records and extraction history are stored in MySQL; original uploads are stored on local disk under `backend/uploads` by default.
+
+## Roadmap
+
+- **Planned — Phase 3:** move the database to AWS RDS.
+- **Planned:** add a dedicated dead-letter queue and dead-job reprocessing flow.
+- **Planned:** calculate provider usage costs instead of recording zero estimates.
+- **Planned:** add S3/SQS/Lambda infrastructure; these services are not used by the current code.

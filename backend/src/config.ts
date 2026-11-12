@@ -39,9 +39,9 @@ export const config = {
   db: {
     host: cleanVal(process.env.DB_HOST) || "localhost",
     port: Number(process.env.DB_PORT) || 3306,
-    user: cleanVal(process.env.DB_USER) || "clarity_user",
-    password: cleanVal(process.env.DB_PASSWORD) || "clarity_pass",
-    database: cleanVal(process.env.DB_NAME) || "clarity_docs",
+    user: cleanVal(process.env.DB_USER) || "parsetrail_user",
+    password: cleanVal(process.env.DB_PASSWORD) || "parsetrail_pass",
+    database: cleanVal(process.env.DB_NAME) || "parsetrail",
     ssl:
       process.env.DB_SSL === "true" ||
       (cleanVal(process.env.DB_HOST) || "").includes("aivencloud.com"),
@@ -56,7 +56,7 @@ export const config = {
     port: Number(process.env.SMTP_PORT) || 587,
     user: process.env.SMTP_USER || "",
     pass: process.env.SMTP_PASS || "",
-    from: process.env.SMTP_FROM || "noreply@claritydocs.local",
+    from: process.env.SMTP_FROM || "noreply@parsetrail.local",
   },
   ai: {
     provider:

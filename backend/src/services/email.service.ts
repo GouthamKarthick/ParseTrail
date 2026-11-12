@@ -59,7 +59,7 @@ export async function sendVerificationEmail(
   await transport.sendMail({
     from: config.smtp.from,
     to,
-    subject: "Verify your ClarityDocs email",
+    subject: "Verify your ParseTrail email",
     text: `Verify your email: ${link}${codePart}`,
     html: `<p>Click <a href="${link}">here</a> to verify your email (expires in 24h).</p>${code ? `<p>Or enter this code in the app: <b style="font-size:18px; letter-spacing:2px;">${code}</b></p>` : ""}`,
   });
@@ -81,7 +81,7 @@ export async function sendResetEmail(to: string, token: string) {
   await transport.sendMail({
     from: config.smtp.from,
     to,
-    subject: "Reset your ClarityDocs password",
+    subject: "Reset your ParseTrail password",
     text: `Reset: ${link} (expires 1h)`,
     html: `<p>Click <a href="${link}">here</a> to reset password (1h).</p>`,
   });

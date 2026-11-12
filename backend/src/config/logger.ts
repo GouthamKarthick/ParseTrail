@@ -25,7 +25,7 @@ const ecsFormat = winston.format.combine(
       "log.level": level,
       message: (stack as string) || (message as string),
       "ecs.version": "8.11.0",
-      service: "claritydocs-backend",
+      service: "parsetrail-backend",
     };
     for (const [k, v] of Object.entries(meta)) {
       if (k === "level" || k === "message") continue;

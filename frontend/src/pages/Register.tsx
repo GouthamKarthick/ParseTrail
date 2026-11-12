@@ -124,7 +124,7 @@ export default function Register() {
       <div className={styles["upload-card"]}>
         <Heading level={1}>Create account</Heading>
         <Text variant="muted">
-          Start organizing your invoices with ClarityDocs.
+          Start organizing your invoices with ParseTrail.
         </Text>
 
         <form onSubmit={handleSubmit} className={styles["upload-form"]}>

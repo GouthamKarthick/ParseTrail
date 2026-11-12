@@ -1,5 +1,5 @@
 /**
- * @fileoverview Typed HTTP client for ClarityDocs backend API.
+ * @fileoverview Typed HTTP client for ParseTrail backend API.
  * Wraps fetch with credential handling, error mapping via ApiError, and typed responses.
  */
 

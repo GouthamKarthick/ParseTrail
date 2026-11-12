@@ -161,6 +161,11 @@ describe("transformers — null-precision guards", () => {
     );
     expect(extractAmountFallback("Total $264,990,610.38")).toBe(264990610.38);
   });
+
+  it("extractAmountFallback reads currency-code amounts", () => {
+    expect(extractAmountFallback("Total INR 1,250.50")).toBe(1250.5);
+    expect(extractAmountFallback("USD 24.99")).toBe(24.99);
+  });
   it("extractRulesOnly composes all deterministic helpers", () => {
     const r = extractRulesOnly(
       "Sunrise Hardware & Tools .\nInvoice No: SH/2026/0456\nDate: 03 Sep 2026\nTotal: Rs. 5380.8",

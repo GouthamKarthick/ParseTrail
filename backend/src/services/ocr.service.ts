@@ -39,7 +39,10 @@ async function getWorker(lang: string) {
   const { createWorker } = await import("tesseract.js");
   const langs = lang === "eng" ? "eng" : `eng+${lang}`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const worker: any = await createWorker(langs, 1, {});
+  const worker: any = await createWorker(langs, 1, {
+    langPath: process.cwd(),
+    gzip: false,
+  });
   worker._langs = langs;
   tesseractWorker = worker;
   return worker;
