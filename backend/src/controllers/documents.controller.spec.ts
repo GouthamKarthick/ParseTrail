@@ -56,28 +56,17 @@ describe("controller — uploadDocument", () => {
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
-  it("inline flow: pending→processing→done, returns 201", async () => {
+  it("queues extraction and returns 202 without extracting inline", async () => {
     const mockQuery = vi.mocked(pool.query);
-    // INSERT pending, SELECT created_at, UPDATE processing, extract, dedup, UPDATE done.
+    // INSERT pending, SELECT created_at, UPDATE processing, enqueue: SELECT refine jobs, INSERT refine job
     mockQuery
-      .mockResolvedValueOnce([[]] as any) // INSERT
+      .mockResolvedValueOnce([[]] as any) // INSERT documents
       .mockResolvedValueOnce([
         [{ created_at: new Date().toISOString() }],
       ] as any) // SELECT created_at
       .mockResolvedValueOnce([[]] as any) // UPDATE processing
-      .mockResolvedValueOnce([[]] as any); // UPDATE done
-    vi.mocked(extract).mockResolvedValue({
-      data: {
-        vendor: "V",
-        invoiceNumber: "INV1",
-        totalAmount: 10,
-        currency: "INR",
-      },
-      confidence: 1,
-      method: "regex",
-      documentType: "invoice",
-      documentTypeConfidence: 0.9,
-    } as any);
+      .mockResolvedValueOnce([[]] as any) // enqueue: SELECT existing refine jobs
+      .mockResolvedValueOnce([[]] as any); // enqueue: INSERT refine job
     vi.mocked(findDuplicateByContent).mockResolvedValue({
       duplicate: false,
     } as any);
@@ -93,113 +82,24 @@ describe("controller — uploadDocument", () => {
     };
     const res = mockRes();
     await uploadDocument(req, res, vi.fn());
-    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.status).toHaveBeenCalledWith(202);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ id: expect.any(String), status: "done" }),
+      expect.objectContaining({ id: expect.any(String), status: "pending" }),
     );
-    expect(extract).toHaveBeenCalledWith(
-      Buffer.from("%PDF-1.4\nstub"),
-      expect.objectContaining({ allowCloud: false }),
-    );
+    expect(extract).not.toHaveBeenCalled();
     expect(fs.readFile).toHaveBeenCalledOnce();
+    expect(findDuplicateByContent).toHaveBeenCalledTimes(1);
   });
 
-  it("duplicate preserves corrections and recomputes converted totals", async () => {
-    const { applyConversion } = await import("../utils/conversion.js");
-    vi.mocked(applyConversion).mockImplementation(async (data: any) => {
-      data.totalAmountConverted = 168314.71;
-      data.currencyConverted = "INR";
-      data.conversionRate = 106.5283;
-      data.conversionAt = "2026-10-15T00:00:00.000Z";
-    });
+  it("exact-hash duplicate short-circuits before insert, returns 409", async () => {
     const mockQuery = vi.mocked(pool.query);
-    mockQuery.mockImplementation(async (sql: unknown) => {
-      if (String(sql).includes("FROM corrections WHERE document_id=")) {
-        return [[{ field: "totalAmount", corrected_value: "1580" }]] as any;
-      }
-      return [[]] as any;
-    });
-    vi.mocked(extract).mockResolvedValue({
-      data: {
-        vendor: "V",
-        totalAmount: 1850,
-        currency: "EUR",
-        totalAmountConverted: 2035,
-        currencyConverted: "INR",
-        conversionRate: 1.1,
-        conversionAt: "2026-10-14T00:00:00.000Z",
-      },
-      confidence: 0.8,
-      method: "local-llm",
-      documentType: "invoice",
-      documentTypeConfidence: 0.85,
-      documentCategory: "financial",
-      attempts: [],
-      typeVotes: ["invoice"],
-    } as any);
-    vi.mocked(findDuplicateByContent)
-      .mockResolvedValueOnce({ duplicate: false } as any)
-      .mockResolvedValueOnce({
+    vi.mocked(findDuplicateByContent).mockResolvedValue({
       duplicate: true,
       duplicateOf: "existing-id",
-      } as any);
-    const req: any = {
-      user: { id: "test-user", email: "test@example.com" },
-      file: {
-        filename: "550e8400-e29b-41d4-a716-446655440000-dup3.pdf",
-        originalname: "dup3.pdf",
-        path: "/tmp/dup3",
-        mimetype: "application/pdf",
-      },
-    };
-    const res = mockRes();
-    await uploadDocument(req, res, vi.fn());
-    const updateCall = mockQuery.mock.calls.find((c) =>
-      String(c[0]).includes("UPDATE documents SET data="),
-    );
-    const updateParams = updateCall?.[1] as unknown[] | undefined;
-    const savedData = JSON.parse(String(updateParams?.[0])) as Record<
-      string,
-      unknown
-    >;
-    expect(savedData.totalAmount).toBe(1580);
-    expect(savedData.totalAmountConverted).toBe(168314.71);
-    expect(savedData.currencyConverted).toBe("INR");
-    expect(savedData.conversionRate).toBe(106.5283);
-    expect(savedData.conversionAt).toEqual(expect.any(String));
-    vi.mocked(pool.query).mockReset();
-  });
-
-  it("duplicate → 409 updates existing, does not add", async () => {
-    const mockQuery = vi.mocked(pool.query);
-    // For duplicate, uploadDocument extracts first, finds duplicate, updates existing, deletes new file — no INSERT
-    mockQuery.mockImplementation(async (sql: unknown) => {
-      if (String(sql).includes("SELECT created_at"))
-        return [[{ created_at: new Date().toISOString() }]] as any;
-      if (String(sql).includes("FROM corrections WHERE document_id="))
-        return [[]] as any;
-      return [[]] as any;
-    });
-    vi.mocked(extract).mockResolvedValue({
-      data: {
-        vendor: "V",
-        invoiceNumber: "DUP",
-        totalAmount: 10,
-        currency: "USD",
-      },
-      confidence: 1,
-      method: "local-llm",
-      documentType: "receipt",
-      documentTypeConfidence: 0.85,
-      documentCategory: "financial",
+      matchedDocumentType: "invoice",
+      matchedCategory: "financial",
+      matchedData: { totalAmount: 10 },
     } as any);
-    vi.mocked(findDuplicateByContent)
-      .mockResolvedValueOnce({ duplicate: false } as any)
-      .mockResolvedValueOnce({
-        duplicate: true,
-        duplicateOf: "existing-id",
-      } as any);
-
     const req: any = {
       user: { id: "test-user", email: "test@example.com" },
       file: {
@@ -218,11 +118,9 @@ describe("controller — uploadDocument", () => {
         duplicateOf: "existing-id",
       }),
     );
-    // Should have updated existing, not inserted new
-    expect(mockQuery).toHaveBeenCalledWith(
-      expect.stringContaining("UPDATE documents SET data="),
-      expect.anything(),
-    );
+    expect(extract).not.toHaveBeenCalled();
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(fs.unlink).toHaveBeenCalledWith("/tmp/dup");
   });
 
   it("short-circuits exact byte duplicates before extraction", async () => {

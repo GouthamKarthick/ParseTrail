@@ -5,6 +5,14 @@ vi.hoisted(() => {
 });
 
 vi.mock("../db/pool.js", () => ({ pool: { query: vi.fn() } }));
+vi.mock("fs/promises", () => ({
+  default: {
+    access: vi.fn().mockRejectedValue(
+      Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+    ),
+    readFile: vi.fn(),
+  },
+}));
 vi.mock("../services/extraction.service.js", () => ({
   extract: vi.fn(),
   extractFromText: vi.fn(),
@@ -12,6 +20,7 @@ vi.mock("../services/extraction.service.js", () => ({
 }));
 
 import { pool } from "../db/pool.js";
+import fs from "fs/promises";
 import {
   extract,
   extractFromText,
@@ -141,6 +150,65 @@ describe("jobs/refine — worker", () => {
       String(c[0]).includes("refine_quota"),
     );
     expect(quotaCall).toBeDefined();
+  });
+
+  it("pending doc: local extraction marks done, caches text, no cloud quota", async () => {
+    baseSqlMock({
+      job: { id: "j1", document_id: "d1", user_id: "u1", attempts: 0 },
+      doc: {
+        id: "d1",
+        path: "/tmp/x.pdf",
+        status: "pending",
+        data: null,
+        extracted_text: null,
+      },
+    });
+    vi.mocked(fs.access).mockResolvedValueOnce(undefined);
+    vi.mocked(extract).mockResolvedValue({
+      data: { vendor: "V", totalAmount: 10 },
+      confidence: 0.9,
+      method: "regex",
+      documentType: "invoice",
+      documentTypeConfidence: 0.9,
+      documentCategory: "financial",
+      attempts: [],
+      extractedText: "Invoice total 10",
+      typeVotes: ["invoice"],
+    } as any);
+    expect(await processOneRefineJob()).toBe("done");
+    expect(extract).toHaveBeenCalledWith("/tmp/x.pdf", { allowCloud: false });
+    expect(recordAttempts).toHaveBeenCalledWith("d1", []);
+    const doneCall = mockQuery().mock.calls.find((c) =>
+      String(c[0]).includes("UPDATE documents SET status='done'"),
+    );
+    expect(doneCall).toBeDefined();
+    expect(String(doneCall![0])).toContain("content_fingerprint");
+    const quotaCall = mockQuery().mock.calls.find((c) =>
+      String(c[0]).includes("refine_quota"),
+    );
+    expect(quotaCall).toBeUndefined();
+  });
+
+  it("pending doc with missing source file is dead with source_unavailable", async () => {
+    const errno = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    vi.mocked(fs.access).mockRejectedValueOnce(errno);
+    baseSqlMock({
+      job: { id: "j1", document_id: "d1", user_id: "u1", attempts: 0 },
+      doc: {
+        id: "d1",
+        path: "/tmp/missing.pdf",
+        status: "pending",
+        data: null,
+        extracted_text: null,
+      },
+    });
+    expect(await processOneRefineJob()).toBe("dead");
+    expect(extract).not.toHaveBeenCalled();
+    const deadCall = mockQuery().mock.calls.find((call) =>
+      String(call[0]).includes("status='dead'"),
+    );
+    expect(deadCall).toBeDefined();
+    expect(deadCall![1]).toContain("source_unavailable");
   });
 
   it("ignores an overlapping tick while a job is being processed", async () => {

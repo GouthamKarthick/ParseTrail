@@ -18,6 +18,7 @@ import {
   extractFromText,
   recordAttempts,
 } from "../services/extraction.service.js";
+import { createContentFingerprint } from "../services/dedup.service.js";
 import { needsRefinement } from "../services/confidence.service.js";
 import { parseJsonColumn } from "../utils/json.js";
 
@@ -186,6 +187,86 @@ async function finishJob(
 }
 
 /**
+ * Performs the initial local extraction for a freshly uploaded document.
+ * Runs without cloud quota: local OCR + rules/model only. Persists the
+ * extracted text once so retries never re-OCR. If the source file has
+ * vanished (ephemeral-disk restart), marks the job dead with a clear reason.
+ * @param job Refine job row
+ * @param doc Document row (status pending/processing)
+ * @returns Outcome
+ */
+async function processInitialExtraction(
+  job: RefineJob,
+  doc: {
+    id: string;
+    path: string;
+    status: string;
+    data: string | null;
+    extracted_text: string | null;
+  },
+): Promise<Outcome> {
+  // Source file may have vanished on an ephemeral-disk restart.
+  try {
+    await fs.access(doc.path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await finishJob(job, "dead", "source_unavailable");
+      return "dead";
+    }
+    throw error;
+  }
+  if (isStopping) return "idle";
+  let r: Awaited<ReturnType<typeof extract>>;
+  try {
+    r = await extract(doc.path, { allowCloud: false });
+  } catch (error) {
+    const message = (error as Error).message;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await finishJob(job, "dead", "source_unavailable");
+      return "dead";
+    }
+    await pool.query(
+      "UPDATE documents SET status='failed', error=? WHERE id=?",
+      [message.slice(0, 500), job.document_id],
+    );
+    logger.error("Initial extraction failed", {
+      jobId: job.id,
+      documentId: job.document_id,
+      error: message.slice(0, 200),
+    });
+    await finishJob(job, "dead", message);
+    return "dead";
+  }
+  if (isStopping) return "idle";
+  if (r.extractedText) {
+    await pool.query(
+      "UPDATE documents SET extracted_text=? WHERE id=? AND extracted_text IS NULL",
+      [r.extractedText, job.document_id],
+    );
+  }
+  await recordAttempts(job.document_id, r.attempts);
+  await pool.query(
+    "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, content_fingerprint=?, error=NULL WHERE id=?",
+    [
+      r.documentType,
+      r.documentCategory,
+      JSON.stringify(r.data),
+      r.extractedText,
+      createContentFingerprint(r.data, r.documentType as string),
+      job.document_id,
+    ],
+  );
+  await finishJob(job, "done");
+  logger.info("Initial extraction done", {
+    jobId: job.id,
+    documentId: job.document_id,
+    method: r.method,
+    confidence: r.confidence,
+  });
+  return "done";
+}
+
+/**
  * Processes a single due refine job: cloud pass, null-fill merge, record.
  * @returns Outcome for logging
  */
@@ -201,8 +282,6 @@ export async function processOneRefineJob(): Promise<Outcome> {
 }
 
 async function processRefineJob(): Promise<Outcome> {
-  refillTokens();
-  if (tokens < 1) return "idle";
   const job = await claimJob();
   if (!job) return "idle";
   activeJobId = job.id;
@@ -233,6 +312,9 @@ async function processRefineJob(): Promise<Outcome> {
       await finishJob(job, "dead", "document gone");
       return "dead";
     }
+    if (doc.status === "pending" || doc.status === "processing") {
+      return await processInitialExtraction(job, doc);
+    }
     if (doc.status !== "done") {
       await finishJob(
         job,
@@ -241,6 +323,8 @@ async function processRefineJob(): Promise<Outcome> {
       );
       return "dead";
     }
+    refillTokens();
+    if (tokens < 1) return "idle";
     const hasCachedText = Boolean(doc.extracted_text?.trim());
     if (!hasCachedText) {
       try {
