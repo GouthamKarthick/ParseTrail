@@ -12,6 +12,33 @@ const API_BASE =
   (import.meta.env.VITE_API_URL as string) ||
   "";
 
+// Hard timeout on every API call so a hung backend cannot block the UI.
+const API_TIMEOUT_MS = 30_000;
+
+/**
+ * Fetch with a hard request timeout.
+ * @param input - Request URL
+ * @param init - Fetch init (a timeout signal is merged in)
+ * @returns Response
+ * @throws {ApiError} with status 504 when the request times out
+ */
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (e) {
+    if ((e as Error).name === "AbortError")
+      throw new ApiError("Request timed out", 504);
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Auth API
 // ---------------------------------------------------------------------------
@@ -29,7 +56,7 @@ export async function register(
   email: string,
   password: string,
 ) {
-  const res = await fetch(`${API_BASE}/api/auth/register`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ first_name, last_name, email, password }),
@@ -56,7 +83,7 @@ export async function updateProfile(data: {
   first_name?: string;
   last_name?: string;
 }) {
-  const res = await fetch(`${API_BASE}/api/auth/profile`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/profile`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -68,7 +95,7 @@ export async function updateProfile(data: {
 }
 
 export async function getAvatar() {
-  const res = await fetch(`${API_BASE}/api/auth/avatar`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/avatar`, {
     credentials: "include",
   });
   if (res.status === 404) return null;
@@ -81,7 +108,7 @@ export async function getAvatar() {
 }
 
 export async function putAvatar(avatar_base64: string) {
-  const res = await fetch(`${API_BASE}/api/auth/avatar`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/avatar`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ avatar_base64 }),
@@ -94,7 +121,7 @@ export async function putAvatar(avatar_base64: string) {
 }
 
 export async function deleteAvatar() {
-  const res = await fetch(`${API_BASE}/api/auth/avatar`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/avatar`, {
     method: "DELETE",
     credentials: "include",
   });
@@ -103,7 +130,7 @@ export async function deleteAvatar() {
 }
 
 export async function resendVerification(email: string) {
-  const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/resend-verification`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -119,7 +146,7 @@ export async function resendVerification(email: string) {
  * @example await login("you@example.com", "P@ssw0rd!");
  */
 export async function login(email: string, password: string) {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -142,7 +169,7 @@ export async function login(email: string, password: string) {
  * @example await logout();
  */
 export async function logout() {
-  await fetch(`${API_BASE}/api/auth/logout`, {
+  await fetchWithTimeout(`${API_BASE}/api/auth/logout`, {
     method: "POST",
     credentials: "include",
   });
@@ -155,7 +182,7 @@ export async function logout() {
  * @example const user = await me();
  */
 export async function me() {
-  const res = await fetch(`${API_BASE}/api/auth/me`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/me`, {
     credentials: "include",
   });
   if (!res.ok) throw new ApiError("Not authenticated", res.status);
@@ -182,7 +209,7 @@ export async function me() {
  */
 export async function getSummary(category?: string) {
   const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-  const res = await fetch(`${API_BASE}/api/documents/summary${qs}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/summary${qs}`, {
     credentials: "include",
   });
   if (!res.ok) throw new ApiError("Summary failed", res.status);
@@ -211,7 +238,7 @@ export async function exportSummary(
   const qs = category
     ? `?format=${format}&category=${encodeURIComponent(category)}`
     : `?format=${format}`;
-  const res = await fetch(`${API_BASE}/api/documents/summary/export${qs}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/summary/export${qs}`, {
     credentials: "include",
   });
   if (!res.ok) throw new ApiError("Export failed", res.status);
@@ -229,7 +256,7 @@ export async function exportSummary(
  * @example await forgotPassword("you@example.com");
  */
 export async function forgotPassword(email: string) {
-  const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/forgot-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -246,7 +273,7 @@ export async function forgotPassword(email: string) {
  * @example await resetPassword(token, "NewP@ss1!");
  */
 export async function resetPassword(token: string, password: string) {
-  const res = await fetch(`${API_BASE}/api/auth/reset-password`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/auth/reset-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token, password }),
@@ -303,7 +330,7 @@ export async function uploadDocument(file: File, language?: string) {
   const fd = new FormData();
   if (language) fd.append("language", language);
   fd.append("file", file);
-  const res = await fetch(`${API_BASE}/api/documents/upload`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/upload`, {
     method: "POST",
     body: fd,
     credentials: "include",
@@ -351,7 +378,7 @@ export async function listDocuments(
   if (opts?.document_category)
     params.set("document_category", opts.document_category);
 
-  const res = await fetch(`${API_BASE}/api/documents?${params.toString()}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents?${params.toString()}`, {
     credentials: "include",
   });
 
@@ -375,7 +402,7 @@ export async function listDocuments(
  * @example await getDocument("abc-123");
  */
 export async function getDocument(id: string) {
-  const res = await fetch(`${API_BASE}/api/documents/${id}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}`, {
     credentials: "include",
   });
 
@@ -398,7 +425,7 @@ export async function getDocument(id: string) {
  * @example await reprocessDocument("abc-123");
  */
 export async function reprocessDocument(id: string) {
-  const res = await fetch(`${API_BASE}/api/documents/${id}/reprocess`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}/reprocess`, {
     method: "POST",
     credentials: "include",
   });
@@ -421,7 +448,7 @@ export async function reprocessDocument(id: string) {
 }
 
 export async function retryDocumentRefinement(id: string) {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${API_BASE}/api/documents/${id}/refinement/retry`,
     { method: "POST", credentials: "include" },
   );
@@ -442,7 +469,7 @@ async function fetchDocSub<T>(
   method = "GET",
   body?: unknown,
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}/api/documents/${id}/${sub}`, {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}/${sub}`, {
     method,
     credentials: "include",
     headers: body ? { "Content-Type": "application/json" } : undefined,
