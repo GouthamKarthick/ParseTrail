@@ -3,7 +3,7 @@
  * Covers login validation, Upload file guards, and Detail refining/dead states.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -36,6 +36,10 @@ vi.mock('./api/client.ts', () => ({
 const mockLogin = vi.mocked(login);
 const mockUpload = vi.mocked(uploadDocument);
 const mockGetDocument = vi.mocked(getDocument);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 function providers(children: ReactNode) {
   return (
@@ -200,24 +204,26 @@ describe('Upload page', () => {
 
 describe('Detail page', () => {
   it('mounts within the router and shows Loading… until data resolves', () => {
-    mockGetDocument.mockResolvedValue(null as any);
+    mockGetDocument.mockImplementation(() => Promise.resolve(null as any));
 
     renderAt('/documents/doc-1', <Detail />);
     screen.getByText(/loading…/i);
   });
 
   it('shows Queued for pending status', async () => {
-    mockGetDocument.mockResolvedValue({
-      id: 'd1',
-      name: 'pending.pdf',
-      status: 'pending',
-      document_type: 'unknown',
-      document_category: 'unknown',
-      data: null,
-      error: null,
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-    } as any);
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'pending.pdf',
+        status: 'pending',
+        document_type: 'unknown',
+        document_category: 'unknown',
+        data: null,
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
 
     renderAt('/documents/d1', <Detail />);
 
@@ -225,17 +231,19 @@ describe('Detail page', () => {
   });
 
   it('shows Extracting… for processing status', async () => {
-    mockGetDocument.mockResolvedValue({
-      id: 'd1',
-      name: 'processing.pdf',
-      status: 'processing',
-      document_type: 'unknown',
-      document_category: 'unknown',
-      data: null,
-      error: null,
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-    } as any);
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'processing.pdf',
+        status: 'processing',
+        document_type: 'unknown',
+        document_category: 'unknown',
+        data: null,
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
 
     renderAt('/documents/d1', <Detail />);
 
@@ -243,18 +251,20 @@ describe('Detail page', () => {
   });
 
   it('shows Improving with cloud AI… when refining', async () => {
-    mockGetDocument.mockResolvedValue({
-      id: 'd1',
-      name: 'refining.pdf',
-      status: 'done',
-      document_type: 'invoice',
-      document_category: 'financial',
-      data: { vendor: 'Acme', totalAmount: 100 },
-      error: null,
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-      refine_status: 'working',
-    } as any);
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'refining.pdf',
+        status: 'done',
+        document_type: 'invoice',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 100 },
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        refine_status: 'working',
+      } as any)
+    );
 
     renderAt('/documents/d1', <Detail />);
 
@@ -262,19 +272,21 @@ describe('Detail page', () => {
   });
 
   it('dead state shows Retry AI, Upload clearer file, and Correct fields manually', async () => {
-    mockGetDocument.mockResolvedValue({
-      id: 'd1',
-      name: 'dead.pdf',
-      status: 'done',
-      document_type: 'invoice',
-      document_category: 'financial',
-      data: { vendor: 'Acme', totalAmount: 100, currency: 'USD' },
-      error: null,
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-      refine_status: 'dead',
-      refine_error: 'provider quota exceeded',
-    } as any);
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'dead.pdf',
+        status: 'done',
+        document_type: 'invoice',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 100, currency: 'USD' },
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        refine_status: 'dead',
+        refine_error: 'provider quota exceeded',
+      } as any)
+    );
 
     renderAt('/documents/d1', <Detail />);
 
