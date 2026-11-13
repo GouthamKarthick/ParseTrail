@@ -9,6 +9,7 @@ import {
   uploadDocument,
   listDocuments,
   getDocument,
+  deleteDocument,
   getAttempts,
   reprocessDocument,
   retryDocumentRefinement,
@@ -32,5 +33,6 @@ router.post('/documents/:id/corrections', correctField);
 router.get('/documents/:id/corrections', listCorrections);
 router.get('/documents/corrections/stats', correctionStats);
 router.get('/documents/:id', getDocument);
+router.delete('/documents/:id', deleteDocument);
 
 export default router;

@@ -25,6 +25,7 @@ import {
   enqueueRefineJob,
   retryRefineJobNow,
   releaseWorkingJobs,
+  startRefineWorker,
   stopRefineWorker,
   reserveRefineQuota,
   sweepStale,
@@ -435,5 +436,22 @@ describe('jobs/refine — worker', () => {
         String(call[0]).includes('attempts=GREATEST(0, attempts-1)')
       )
     ).toBe(true);
+  });
+
+  it('worker survives mid-job document deletion (dead, not crash)', async () => {
+    // Reset module state left by previous tests
+    startRefineWorker();
+    stopRefineWorker();
+    baseSqlMock({
+      job: { id: 'j1', document_id: 'd1', user_id: 'u1', attempts: 0 },
+      doc: null,
+    });
+    expect(await processOneRefineJob()).toBe('dead');
+    const deadCall = mockQuery().mock.calls.find(call => {
+      const s = String(call[0]);
+      return s.includes("status='dead'") && s.includes('error=?');
+    });
+    expect(deadCall).toBeDefined();
+    expect(JSON.stringify(deadCall![1])).toContain('document gone');
   });
 });

@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { listDocuments, ApiError } from '../api/client';
+import { listDocuments, deleteDocument, ApiError } from '../api/client';
 import type { Document } from '../types';
 import { useToastContext, kindFromStatus } from '../context/ToastContext';
 import { isSuspiciousFrontend } from '../utils/security';
@@ -12,6 +12,8 @@ import { Heading } from '../components/ui/Heading';
 import { Input } from '../components/ui/Input';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/Feedback';
+import { Button } from '../components/ui/Button';
+import { Text } from '../components/ui/Text';
 import { statusBadges } from '../utils/badges';
 import { formatMoney } from '../utils/format';
 import { FilterDropdown } from '../components/FilterDropdown';
@@ -50,6 +52,8 @@ export default function List() {
   const { show } = useToastContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const qParam = searchParams.get('q') ?? '';
   const typeParam = searchParams.get('type') ?? '';
@@ -137,6 +141,20 @@ export default function List() {
     []
   );
 
+  async function deleteDoc(id: string) {
+    setDeletingId(id);
+    try {
+      await deleteDocument(id);
+      show('success', 'Document deleted');
+      setDocs(docs.filter(d => d.id !== id));
+      setTotal(total - 1);
+      if (confirmDeleteId === id) setConfirmDeleteId(null);
+    } catch (e) {
+      setDeletingId(null);
+      show('error', (e as Error).message || 'Delete failed');
+    }
+  }
+
   const hasFilters = Boolean(qParam || selectedTypes.length);
 
   return (
@@ -214,6 +232,7 @@ export default function List() {
                     <th>Currency</th>
                     <th>Date</th>
                     <th>Created</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -261,6 +280,26 @@ export default function List() {
                       <td>{d.data?.currency ?? '—'}</td>
                       <td>{d.data?.invoiceDate ?? '—'}</td>
                       <td>{new Date(d.created_at).toLocaleDateString()}</td>
+                      <td>
+                        {confirmDeleteId === d.id ? (
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={() => deleteDoc(d.id)}
+                            disabled={deletingId === d.id}
+                          >
+                            {deletingId === d.id ? 'Deleting…' : 'Delete'}
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setConfirmDeleteId(d.id)}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -277,6 +316,38 @@ export default function List() {
           hasFilters={hasFilters}
           filterLabel={qParam || selectedLabels.join(', ')}
         />
+      )}
+      {confirmDeleteId && (
+        <dialog
+          className={styles['list-confirm-dialog']}
+          onClick={e => {
+            if (e.target === e.currentTarget) setConfirmDeleteId(null);
+          }}
+        >
+          <div className={styles['list-confirm-panel']}>
+            <Heading level={3}>Delete document?</Heading>
+            <Text variant="muted">
+              This permanently removes the file, all extraction attempts, and correction history.
+              This cannot be undone.
+            </Text>
+            <div className={styles['list-confirm-actions']}>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  setConfirmDeleteId(null);
+                  void deleteDoc(confirmDeleteId);
+                }}
+                disabled={deletingId === confirmDeleteId}
+              >
+                {deletingId === confirmDeleteId ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </dialog>
       )}
     </div>
   );
