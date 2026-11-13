@@ -39,7 +39,7 @@ This is a portfolio/learning project. The two audiences it needs to satisfy:
 - Design the data model so it doesn't need to be reshaped when the project
   expands from invoices to general documents.
 - The system is designed to run locally first, with optional cloud deployment
-  (MySQL cloud, Render/Vercel) — AWS S3/SQS/Lambda infrastructure is optional
+  (any MySQL-compatible DB, TiDB Cloud Starter recommended, Render/Vercel) — AWS S3/SQS/Lambda infrastructure is optional
   and was dropped to keep the project runnable without an AWS account or paid tier.
 ## 5. Non-goals (for the MVP)
  
@@ -83,8 +83,8 @@ Every attempt is logged: method used, confidence score, latency, cost, fallback 
 ## 8. Non-functional requirements
  
 - **Cost**: designed to run locally first with zero cloud costs; optional cloud
-  deployment uses MySQL cloud (Clever Cloud/Railway free tier) for data
-  persistence and Render/Vercel for hosting. At demo scale (<100 docs/mo,
+  deployment uses any MySQL-compatible database (TiDB Cloud Starter recommended)
+  for data persistence and Render/Vercel for hosting. At demo scale (<100 docs/mo,
   <500 S3 PUT equivalents, <200 Lambda invocations), all metrics are well
   within free-tier limits, but AWS S3/SQS/Lambda are not required — the
   system is fully functional on a single MySQL instance and local disk.

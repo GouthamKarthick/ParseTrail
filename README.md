@@ -2,8 +2,7 @@
 
 ParseTrail extracts structured fields from uploaded financial documents using rules, local Flan-T5 inference, and queued cloud refinement.
 
-**Live demo:** [clarity-docs-psi.vercel.app](https://clarity-docs-psi.vercel.app/)
-<!-- TODO: Update the live demo URL after the Vercel project is renamed. -->
+**Live demo:** TODO: insert the deployed Render/Vercel URL (set `VITE_BACKEND_URL` to your Render backend).
 
 ## Screenshots
 
@@ -114,6 +113,6 @@ On backend startup, `ensureSchema()` creates or migrates the application tables 
 ## Roadmap
 
 - **Planned — Phase 3:** move the database to AWS RDS.
-- **Planned:** add a dedicated dead-letter queue and dead-job reprocessing flow.
-- **Planned:** calculate provider usage costs instead of recording zero estimates.
-- **Planned:** add S3/SQS/Lambda infrastructure; these services are not used by the current code.
+- **✓ Built:** dead-letter queue (`refine_jobs` `dead` status) and dead-job reprocessing (`POST /documents/:id/refinement/retry`).
+- **✓ Done:** real provider token usage recorded per extraction attempt (no longer zero estimates).
+- **Not used (dropped):** S3/SQS/Lambda — extraction runs on local disk + the MySQL jobs table; no AWS infrastructure is required.
