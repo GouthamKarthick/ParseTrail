@@ -281,24 +281,17 @@ export default function List() {
                       <td>{d.data?.invoiceDate ?? '—'}</td>
                       <td>{new Date(d.created_at).toLocaleDateString()}</td>
                       <td>
-                        {confirmDeleteId === d.id ? (
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() => deleteDoc(d.id)}
-                            disabled={deletingId === d.id}
-                          >
-                            {deletingId === d.id ? 'Deleting…' : 'Delete'}
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setConfirmDeleteId(d.id)}
-                          >
-                            Delete
-                          </Button>
-                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setConfirmDeleteId(d.id);
+                          }}
+                          disabled={deletingId === d.id}
+                        >
+                          Delete
+                        </Button>
                       </td>
                     </tr>
                   ))}

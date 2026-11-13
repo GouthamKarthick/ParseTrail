@@ -3,8 +3,9 @@
  * Covers login validation, Upload file guards, and Detail refining/dead states.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { isSuspiciousFrontend, validateUploadFile } from './utils/security.ts';
@@ -13,14 +14,17 @@ import { statusBadges } from './utils/badges.ts';
 import Login from './pages/Login.tsx';
 import Detail from './pages/Detail.tsx';
 import Upload from './pages/Upload.tsx';
+import List from './pages/List.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { ToastProvider } from './context/ToastContext.tsx';
-import { login, uploadDocument, getDocument } from './api/client.ts';
+import { login, uploadDocument, getDocument, deleteDocument, listDocuments } from './api/client.ts';
 
 vi.mock('./api/client.ts', () => ({
   getDocument: vi.fn(),
   login: vi.fn(),
   uploadDocument: vi.fn(),
+  deleteDocument: vi.fn(),
+  listDocuments: vi.fn(),
   me: vi.fn().mockResolvedValue({
     id: 'u1',
     email: 'user@example.com',
@@ -36,10 +40,8 @@ vi.mock('./api/client.ts', () => ({
 const mockLogin = vi.mocked(login);
 const mockUpload = vi.mocked(uploadDocument);
 const mockGetDocument = vi.mocked(getDocument);
-
-beforeEach(() => {
-  vi.clearAllMocks();
-});
+const mockDeleteDocument = vi.mocked(deleteDocument);
+const mockListDocuments = vi.mocked(listDocuments);
 
 function providers(children: ReactNode) {
   return (
@@ -50,11 +52,20 @@ function providers(children: ReactNode) {
 }
 
 function renderAt(route: string, ui: React.ReactNode) {
-  const router = createMemoryRouter([{ path: route, element: providers(ui) }], {
-    initialEntries: [route],
-  });
+  const router = createMemoryRouter(
+    [
+      { path: '/', element: providers(ui) },
+      { path: '/documents/:id', element: providers(ui) },
+      { path: '*', element: providers(ui) },
+    ],
+    { initialEntries: [route] }
+  );
   return render(<RouterProvider router={router} />);
 }
+
+afterEach(() => {
+  cleanup();
+});
 
 // ---------------------------------------------------------------------------
 // Utils
@@ -199,6 +210,81 @@ describe('Upload page', () => {
 });
 
 // ---------------------------------------------------------------------------
+// List — delete dialog flow
+// ---------------------------------------------------------------------------
+
+describe('List page', () => {
+  beforeEach(() => {
+    mockListDocuments.mockResolvedValue({
+      documents: [
+        {
+          id: 'd1',
+          name: 'invoice.pdf',
+          status: 'done',
+          document_type: 'invoice',
+          document_category: 'financial',
+          data: { vendor: 'Acme', totalAmount: 100, currency: 'USD' },
+          error: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        } as any,
+        {
+          id: 'd2',
+          name: 'receipt.pdf',
+          status: 'done',
+          document_type: 'receipt',
+          document_category: 'financial',
+          data: { vendor: 'Best Shop', totalAmount: 50, currency: 'USD' },
+          error: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        } as any,
+      ],
+      total: 2,
+      limit: 20,
+      offset: 0,
+    } as any);
+  });
+
+  it('clicking row Delete shows the confirm dialog', async () => {
+    renderAt('/', <List />);
+
+    // Wait for documents to load
+    await waitFor(() => expect(screen.getByText('invoice.pdf')).toBeTruthy());
+
+    // First Delete click should open the dialog (not call deleteDocument)
+    const firstDelete = screen.getAllByRole('button', { name: /^Delete$/ })[0];
+    await userEvent.click(firstDelete);
+
+    // Dialog should be open
+    await waitFor(() => expect(screen.getByText(/Delete document\?/i)).toBeTruthy());
+    // cancel should not call deleteDocument
+    await userEvent.click(screen.getByText('Cancel').closest('button') as HTMLElement);
+    expect(mockDeleteDocument).not.toHaveBeenCalled();
+  });
+
+  it('confirming delete calls deleteDocument and removes the row', async () => {
+    mockDeleteDocument.mockResolvedValue(undefined);
+
+    renderAt('/', <List />);
+
+    // Wait for documents to load
+    await waitFor(() => expect(screen.getByText('invoice.pdf')).toBeTruthy());
+
+    // Open dialog
+    const firstDelete = screen.getAllByRole('button', { name: /^Delete$/ })[0];
+    await userEvent.click(firstDelete);
+    await waitFor(() => expect(screen.getByText(/Delete document\?/)).toBeTruthy());
+
+    // Confirm - click the Delete button inside the dialog
+    const dialogEl = screen.getByText(/Delete document\?/).closest('dialog') as HTMLElement;
+    const dialogButtons = dialogEl.querySelectorAll('button');
+    await userEvent.click(dialogButtons[1]);
+    await vi.waitFor(() => expect(mockDeleteDocument).toHaveBeenCalledWith('d1'));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Detail — mounting smoke test (state labels covered by statusBadges above)
 // ---------------------------------------------------------------------------
 
@@ -227,7 +313,7 @@ describe('Detail page', () => {
 
     renderAt('/documents/d1', <Detail />);
 
-    await vi.waitFor(() => expect(screen.getByText(/Queued/i)).toBeTruthy());
+    await vi.waitFor(() => expect(screen.getAllByText(/Queued/i).length).toBeGreaterThan(0));
   });
 
   it('shows Extracting… for processing status', async () => {
@@ -290,7 +376,7 @@ describe('Detail page', () => {
 
     renderAt('/documents/d1', <Detail />);
 
-    await vi.waitFor(() => expect(screen.getByText(/Retry AI/i)).toBeTruthy());
+    await vi.waitFor(() => expect(screen.getAllByText(/Retry AI/i).length).toBeGreaterThan(0));
     expect(screen.getByText(/Upload a clearer file/i)).toBeTruthy();
     expect(screen.getByText(/Correct fields manually/i)).toBeTruthy();
     expect(screen.getByText(/provider quota exceeded/i)).toBeTruthy();
