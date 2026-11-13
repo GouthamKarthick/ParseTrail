@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { needsRefinement } from "./confidence.service.js";
+import { isValidDate, needsRefinement } from "./confidence.service.js";
 
 describe("confidence — needsRefinement", () => {
   it("needs refinement when required total is missing", () => {
@@ -24,12 +24,7 @@ describe("confidence — needsRefinement", () => {
     const r = needsRefinement(
       { vendor: "V", totalAmount: 10, invoiceDate: "2026-01-01" },
       "invoice",
-      [
-        {
-          fallbackReason:
-            "rules/model disagree on invoiceDate, escalating to cloud",
-        },
-      ],
+      [{ conflicts: ["invoiceDate"] }],
     );
     expect(r.needed).toBe(true);
     expect(r.reason).toMatch(/disagreed/);
@@ -38,7 +33,7 @@ describe("confidence — needsRefinement", () => {
     const r = needsRefinement(
       { vendor: "V", totalAmount: 10, invoiceDate: "2026-01-01" },
       "invoice",
-      [{ fallbackReason: undefined }],
+      [{ conflicts: [] }],
     );
     expect(r.needed).toBe(false);
   });
@@ -55,5 +50,11 @@ describe("confidence — needsRefinement", () => {
       false,
     );
     expect(needsRefinement({ vendor: "V" }, "payslip", []).needed).toBe(true);
+  });
+
+  it("accepts plausible dates relative to the current year", () => {
+    const year = new Date().getFullYear();
+    expect(isValidDate(`${year + 2}-12-31`)).toBe(true);
+    expect(isValidDate(`${year + 3}-01-01`)).toBe(false);
   });
 });
