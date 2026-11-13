@@ -2,15 +2,15 @@
  * @fileoverview Button — themed button primitive with variant and size support.
  */
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
-import styles from "./Button.module.scss";
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import styles from './Button.module.scss';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
-type Size = "sm" | "md" | "lg";
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Size = 'sm' | 'md' | 'lg';
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
@@ -31,21 +31,16 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
  * @example <Button variant="primary" size="md">Save</Button>
  */
 export function Button({
-  variant = "primary",
-  size = "md",
+  variant = 'primary',
+  size = 'md',
   children,
   className,
   disabled,
   ...rest
 }: Props) {
-  const cls = [
-    styles.button,
-    styles[`button-${variant}`],
-    styles[`button-${size}`],
-    className,
-  ]
+  const cls = [styles.button, styles[`button-${variant}`], styles[`button-${size}`], className]
     .filter(Boolean)
-    .join(" ");
+    .join(' ');
   return (
     <button className={cls} disabled={disabled} {...rest}>
       {children}

@@ -3,20 +3,13 @@
  * Syncs theme to document data-attribute and prefers system setting as fallback.
  */
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-  useMemo,
-} from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type Theme = "light" | "dark";
+type Theme = 'light' | 'dark';
 
 const Ctx = createContext<{ theme: Theme; toggle: () => void } | null>(null);
 
@@ -30,15 +23,13 @@ const Ctx = createContext<{ theme: Theme; toggle: () => void } | null>(null);
  * @example const theme = getInitialTheme();
  */
 function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === 'undefined') return 'light';
 
-  const saved = localStorage.getItem("theme");
+  const saved = localStorage.getItem('theme');
 
-  if (saved === "light" || saved === "dark") return saved;
+  if (saved === 'light' || saved === 'dark') return saved;
 
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 // ---------------------------------------------------------------------------
@@ -55,14 +46,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
   }, [theme]);
 
-  const toggle = useCallback(
-    () => setTheme((t) => (t === "light" ? "dark" : "light")),
-    [],
-  );
+  const toggle = useCallback(() => setTheme(t => (t === 'light' ? 'dark' : 'light')), []);
 
   const value = useMemo(() => ({ theme, toggle }), [theme, toggle]);
 
@@ -81,6 +69,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
  */
 export function useTheme() {
   const v = useContext(Ctx);
-  if (!v) throw new Error("ThemeContext missing");
+  if (!v) throw new Error('ThemeContext missing');
   return v;
 }

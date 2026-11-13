@@ -3,9 +3,9 @@
  * Periodically refetches a document until it reaches a terminal state.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { getDocument } from "../api/client";
-import type { Document } from "../types";
+import { useEffect, useRef, useState } from 'react';
+import { getDocument } from '../api/client';
+import type { Document } from '../types';
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -18,7 +18,7 @@ import type { Document } from "../types";
  * @example isRefining(doc) // false
  */
 export function isRefining(doc: Document | null): boolean {
-  return doc?.refine_status === "queued" || doc?.refine_status === "working";
+  return doc?.refine_status === 'queued' || doc?.refine_status === 'working';
 }
 
 /**
@@ -66,7 +66,7 @@ export function usePolling(id: string | null, intervalMs = 2000) {
 
         setDoc(d);
 
-        if ((d.status === "done" || d.status === "failed") && !isRefining(d)) {
+        if ((d.status === 'done' || d.status === 'failed') && !isRefining(d)) {
           if (timer.current) window.clearInterval(timer.current);
           return;
         }
@@ -93,14 +93,14 @@ export function usePolling(id: string | null, intervalMs = 2000) {
 
     poll();
     schedule(intervalMs);
-    document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       cancelled = true;
       if (timer.current) window.clearInterval(timer.current);
-      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [id, intervalMs, nonce]);
 
-  return { doc, error, refresh: () => setNonce((n) => n + 1) };
+  return { doc, error, refresh: () => setNonce(n => n + 1) };
 }

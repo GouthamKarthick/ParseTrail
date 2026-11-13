@@ -4,7 +4,7 @@
 
 const MAX_BYTES = 1_048_576;
 const MAX_DIM = 512;
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 /**
  * Load an image file into an HTMLImageElement.
@@ -21,7 +21,7 @@ function loadImage(file: File): Promise<HTMLImageElement> {
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("Could not read image file"));
+      reject(new Error('Could not read image file'));
     };
     img.src = url;
   });
@@ -33,24 +33,21 @@ function loadImage(file: File): Promise<HTMLImageElement> {
  * @param quality - JPEG quality 0-1
  * @returns Data URL string
  */
-function encodeCanvas(
-  canvas: HTMLCanvasElement,
-  quality: number,
-): Promise<string> {
+function encodeCanvas(canvas: HTMLCanvasElement, quality: number): Promise<string> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
-      (blob) => {
+      blob => {
         if (!blob) {
-          reject(new Error("Could not encode image"));
+          reject(new Error('Could not encode image'));
           return;
         }
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("Could not encode image"));
+        reader.onerror = () => reject(new Error('Could not encode image'));
         reader.readAsDataURL(blob);
       },
-      "image/jpeg",
-      quality,
+      'image/jpeg',
+      quality
     );
   });
 }
@@ -65,7 +62,7 @@ function encodeCanvas(
  */
 export async function processAvatarFile(file: File): Promise<string> {
   if (!ALLOWED_TYPES.includes(file.type)) {
-    throw new Error("Photo must be jpeg, png or webp");
+    throw new Error('Photo must be jpeg, png or webp');
   }
 
   // Always normalize through canvas to jpeg for consistency.
@@ -75,19 +72,19 @@ export async function processAvatarFile(file: File): Promise<string> {
   width = Math.max(1, Math.round(width * scale));
   height = Math.max(1, Math.round(height * scale));
 
-  const canvas = document.createElement("canvas");
+  const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Could not process image");
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not process image');
   ctx.drawImage(img, 0, 0, width, height);
 
   // Try decreasing qualities until under the limit.
   for (const quality of [0.85, 0.7, 0.55, 0.4]) {
     const url = await encodeCanvas(canvas, quality);
     // Approximate byte size from Base64 length.
-    const bytes = Math.ceil((url.length - url.indexOf(",") - 1) * 0.75);
+    const bytes = Math.ceil((url.length - url.indexOf(',') - 1) * 0.75);
     if (bytes <= MAX_BYTES) return url;
   }
-  throw new Error("Photo is too large even after compression (must be ≤1MB)");
+  throw new Error('Photo is too large even after compression (must be ≤1MB)');
 }

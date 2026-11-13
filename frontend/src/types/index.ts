@@ -8,21 +8,14 @@
 // ---------------------------------------------------------------------------
 
 /** Document processing lifecycle status. */
-export type DocumentStatus = "pending" | "processing" | "done" | "failed";
+export type DocumentStatus = 'pending' | 'processing' | 'done' | 'failed';
 
 /** Recognised document type discriminator. */
 export type DocumentType =
-  | "invoice"
-  | "receipt"
-  | "payment"
-  | "bill"
-  | "payslip"
-  | "settlement_slip"
-  | "other"
-  | "unknown";
+  'invoice' | 'receipt' | 'payment' | 'bill' | 'payslip' | 'settlement_slip' | 'other' | 'unknown';
 
 /** High-level document category. */
-export type DocumentCategory = "financial" | "unknown";
+export type DocumentCategory = 'financial' | 'unknown';
 
 // ---------------------------------------------------------------------------
 // Interfaces
