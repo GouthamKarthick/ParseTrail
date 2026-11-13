@@ -10,7 +10,10 @@ import { ToastContainer, type ToastKind, type ToastItem } from '../components/To
 // Types & Context
 // ---------------------------------------------------------------------------
 
-type ToastContextValue = { show: (kind: ToastKind, message: string) => void };
+type ToastContextValue = {
+  show: (kind: ToastKind, message: string) => void;
+  dismiss: (id: string) => void;
+};
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
@@ -20,9 +23,9 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 
 /**
  * Consume toast context to display notifications.
- * @returns Toast context value with show method
+ * @returns Toast context value with show and dismiss methods
  * @throws When used outside ToastProvider
- * @example const { show } = useToastContext(); show("success", "Saved!");
+ * @example const { show, dismiss } = useToastContext(); show("success", "Saved!");
  */
 export function useToastContext(): ToastContextValue {
   const ctx = useContext(ToastContext);
@@ -55,6 +58,7 @@ export function kindFromStatus(status: number): ToastKind {
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [pausedId, setPausedId] = useState<string | null>(null);
 
   const show = useCallback((kind: ToastKind, message: string) => {
     const id = crypto.randomUUID();
@@ -64,12 +68,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const dismiss = useCallback((id: string) => setToasts(t => t.filter(x => x.id !== id)), []);
 
-  const value = useMemo(() => ({ show }), [show]);
+  const handleMouseEnter = useCallback((id: string) => setPausedId(id), []);
+  const handleMouseLeave = useCallback(() => setPausedId(null), []);
+
+  const value = useMemo(() => ({ show, dismiss }), [show, dismiss]);
 
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+      <ToastContainer
+        toasts={toasts}
+        pausedId={pausedId}
+        onDismiss={dismiss}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      />
     </ToastContext.Provider>
   );
 }
