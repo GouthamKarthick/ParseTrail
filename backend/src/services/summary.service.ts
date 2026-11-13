@@ -2,8 +2,8 @@
  * services/summary.service.ts — Dashboard aggregation queries.
  */
 
-import { pool } from "../db/pool.js";
-import { config } from "../config.js";
+import { pool } from '../db/pool.js';
+import { config } from '../config.js';
 
 export interface Summary {
   totalDocs: number;
@@ -16,7 +16,7 @@ export interface Summary {
 }
 
 interface SummaryRow {
-  kind: "total" | "type" | "trend" | "vendor";
+  kind: 'total' | 'type' | 'trend' | 'vendor';
   group_key: string | null;
   cnt: number | string;
   sum_total: number | string;
@@ -34,13 +34,11 @@ interface SummaryRow {
 export async function getSummary(
   userId: string,
   days = 30,
-  opts?: { category?: string },
+  opts?: { category?: string }
 ): Promise<Summary> {
   const category = opts?.category;
   const catFilter =
-    category && ["financial", "unknown"].includes(category)
-      ? " AND document_category = ? "
-      : "";
+    category && ['financial', 'unknown'].includes(category) ? ' AND document_category = ? ' : '';
   const params: unknown[] = [userId, days];
   if (catFilter) params.push(category);
   params.push(config.currencyConversion.targetCurrency);
@@ -107,10 +105,10 @@ export async function getSummary(
     SELECT 'trend', doc_date, cnt, sum_total, NULL, NULL FROM trend_rows
     UNION ALL
     SELECT 'vendor', vendor, cnt, sum_total, NULL, NULL FROM vendor_rows`,
-    params,
+    params
   );
   const summaryRows = rows as SummaryRow[];
-  const total = summaryRows.find((row) => row.kind === "total");
+  const total = summaryRows.find(row => row.kind === 'total');
   const totalDocs = Number(total?.cnt ?? 0);
   const sumTotal = Number(total?.sum_total ?? 0);
   const amountCount = Number(total?.amount_count ?? 0);
@@ -121,23 +119,23 @@ export async function getSummary(
     avgUsage: amountCount ? sumTotal / amountCount : 0,
     avgConfidence: Number(total?.avg_confidence ?? 0),
     byType: summaryRows
-      .filter((row) => row.kind === "type")
-      .map((row) => ({
+      .filter(row => row.kind === 'type')
+      .map(row => ({
         document_type: String(row.group_key),
         cnt: Number(row.cnt),
         sum: Number(row.sum_total),
       })),
     trend: summaryRows
-      .filter((row) => row.kind === "trend")
-      .map((row) => ({
+      .filter(row => row.kind === 'trend')
+      .map(row => ({
         date: String(row.group_key).slice(0, 10),
         cnt: Number(row.cnt),
         sum: Number(row.sum_total),
       })),
     topVendors: summaryRows
-      .filter((row) => row.kind === "vendor")
+      .filter(row => row.kind === 'vendor')
       .sort((a, b) => Number(b.cnt) - Number(a.cnt))
-      .map((row) => ({
+      .map(row => ({
         vendor: String(row.group_key),
         cnt: Number(row.cnt),
         sum: Number(row.sum_total),

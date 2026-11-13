@@ -9,8 +9,8 @@
  * @returns Finite number or null
  */
 export function parseAmount(raw: unknown): number | null {
-  if (typeof raw === "number") return isFinite(raw) ? raw : null;
-  if (typeof raw !== "string") return null;
-  const n = Number(raw.replace(/[,₹$€£\s]|Rs\.?/gi, ""));
+  if (typeof raw === 'number') return isFinite(raw) ? raw : null;
+  if (typeof raw !== 'string') return null;
+  const n = Number(raw.replace(/[,₹$€£\s]|Rs\.?/gi, ''));
   return isNaN(n) ? null : n;
 }

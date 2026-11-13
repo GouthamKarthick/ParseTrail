@@ -10,10 +10,10 @@
  */
 export function stripJsonFence(s: string): string {
   const t = s.trim();
-  if (t.startsWith("```"))
+  if (t.startsWith('```'))
     return t
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/```\s*$/, "")
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/```\s*$/, '')
       .trim();
   return t;
 }
@@ -24,12 +24,9 @@ export function stripJsonFence(s: string): string {
  * @param fallback Fallback when unparseable
  * @returns Parsed value or fallback
  */
-export function parseJsonColumn<T>(
-  value: string | T | null | undefined,
-  fallback: T,
-): T {
+export function parseJsonColumn<T>(value: string | T | null | undefined, fallback: T): T {
   if (value == null) return fallback;
-  if (typeof value !== "string") return value as T;
+  if (typeof value !== 'string') return value as T;
   try {
     return JSON.parse(value) as T;
   } catch {

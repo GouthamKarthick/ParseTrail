@@ -4,10 +4,10 @@
  */
 
 const CODE_TO_CURRENCY: Record<string, string> = {
-  INR: "INR",
-  USD: "USD",
-  EUR: "EUR",
-  GBP: "GBP",
+  INR: 'INR',
+  USD: 'USD',
+  EUR: 'EUR',
+  GBP: 'GBP',
 };
 
 /**
@@ -16,14 +16,14 @@ const CODE_TO_CURRENCY: Record<string, string> = {
  * @returns Currency code or null
  */
 export function normalizeCurrency(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
+  if (typeof raw !== 'string') return null;
   const c = raw.trim().toUpperCase();
   if (!c) return null;
   if (CODE_TO_CURRENCY[c]) return c;
-  if (c.includes("₹") || c.includes("RS")) return "INR";
-  if (c.includes("$")) return "USD";
-  if (c.includes("€")) return "EUR";
-  if (c.includes("£")) return "GBP";
+  if (c.includes('₹') || c.includes('RS')) return 'INR';
+  if (c.includes('$')) return 'USD';
+  if (c.includes('€')) return 'EUR';
+  if (c.includes('£')) return 'GBP';
   return null;
 }
 
@@ -33,9 +33,9 @@ export function normalizeCurrency(raw: unknown): string | null {
  * @returns Currency code or null
  */
 export function detectCurrencyFromText(text: string): string | null {
-  if (text.includes("₹") || /Rs\.?/.test(text)) return "INR";
-  if (text.includes("$")) return "USD";
-  if (text.includes("€")) return "EUR";
-  if (text.includes("£")) return "GBP";
+  if (text.includes('₹') || /Rs\.?/.test(text)) return 'INR';
+  if (text.includes('$')) return 'USD';
+  if (text.includes('€')) return 'EUR';
+  if (text.includes('£')) return 'GBP';
   return null;
 }

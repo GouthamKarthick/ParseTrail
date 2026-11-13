@@ -2,9 +2,9 @@
  * middleware/auth.ts — JWT authentication.
  */
 
-import type { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
-import { config } from "../config.js";
+import type { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { config } from '../config.js';
 
 export interface AuthUser {
   id: string;
@@ -22,28 +22,26 @@ export interface AuthUser {
 export function authenticate(req: Request, res: Response, next: NextFunction) {
   const token =
     (req as unknown as { cookies?: Record<string, string> }).cookies?.token ||
-    (req.headers.authorization?.startsWith("Bearer ")
-      ? req.headers.authorization.slice(7)
-      : null);
+    (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
   if (!token) {
-    res.status(401).json({ error: "Not authenticated" });
+    res.status(401).json({ error: 'Not authenticated' });
     return;
   }
   try {
     const payload = jwt.verify(token, config.jwtSecret, {
-      algorithms: ["HS256"],
+      algorithms: ['HS256'],
     }) as AuthUser;
     if (payload.emailVerified !== true) {
       res.status(403).json({
-        error: "Email not verified",
-        code: "EMAIL_NOT_VERIFIED",
+        error: 'Email not verified',
+        code: 'EMAIL_NOT_VERIFIED',
       });
       return;
     }
     (req as unknown as { user: AuthUser }).user = payload;
     next();
   } catch {
-    res.status(401).json({ error: "Invalid or expired token" });
+    res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
 

@@ -2,18 +2,18 @@
  * services/registry.ts — Document type categorization and prompts.
  */
 
-import type { DocumentCategory } from "../types/index.js";
-import { buildPromptForType } from "./strategies.js";
+import type { DocumentCategory } from '../types/index.js';
+import { buildPromptForType } from './strategies.js';
 
 export const CATEGORY_MAP: Record<string, DocumentCategory> = {
-  invoice: "financial",
-  receipt: "financial",
-  payment: "financial",
-  bill: "financial",
-  payslip: "financial",
-  settlement_slip: "financial",
-  other: "unknown",
-  unknown: "unknown",
+  invoice: 'financial',
+  receipt: 'financial',
+  payment: 'financial',
+  bill: 'financial',
+  payslip: 'financial',
+  settlement_slip: 'financial',
+  other: 'unknown',
+  unknown: 'unknown',
 };
 
 /**
@@ -22,8 +22,8 @@ export const CATEGORY_MAP: Record<string, DocumentCategory> = {
  * @returns Category
  */
 export function getCategory(documentType: string): DocumentCategory {
-  const t = (documentType || "unknown").toLowerCase();
-  return CATEGORY_MAP[t] ?? "unknown";
+  const t = (documentType || 'unknown').toLowerCase();
+  return CATEGORY_MAP[t] ?? 'unknown';
 }
 
 /**

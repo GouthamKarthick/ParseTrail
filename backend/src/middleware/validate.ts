@@ -2,19 +2,19 @@
  * middleware/validate.ts — Request validation schemas and middleware.
  */
 
-import { z } from "zod";
-import type { Request, Response, NextFunction } from "express";
-import { isSuspicious } from "../utils/security.js";
+import { z } from 'zod';
+import type { Request, Response, NextFunction } from 'express';
+import { isSuspicious } from '../utils/security.js';
 
 const documentTypeValues = [
-  "invoice",
-  "receipt",
-  "payment",
-  "bill",
-  "payslip",
-  "settlement_slip",
-  "other",
-  "unknown",
+  'invoice',
+  'receipt',
+  'payment',
+  'bill',
+  'payslip',
+  'settlement_slip',
+  'other',
+  'unknown',
 ] as const;
 
 export const listQuerySchema = z.object({
@@ -22,16 +22,16 @@ export const listQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
   q: z.string().trim().max(100).optional(),
   document_type: z.preprocess(
-    (v) => {
+    v => {
       if (v === undefined || v === null) return undefined;
-      const list = (Array.isArray(v) ? v : String(v).split(","))
-        .map((s) => String(s).trim())
+      const list = (Array.isArray(v) ? v : String(v).split(','))
+        .map(s => String(s).trim())
         .filter(Boolean);
       return list.length ? list : undefined;
     },
-    z.array(z.enum(documentTypeValues)).optional(),
+    z.array(z.enum(documentTypeValues)).optional()
   ),
-  document_category: z.enum(["financial", "unknown"]).optional(),
+  document_category: z.enum(['financial', 'unknown']).optional(),
 });
 
 /**
@@ -41,17 +41,13 @@ export const listQuerySchema = z.object({
  * @param next Next middleware
  * @returns void
  */
-export function validatePagination(
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-) {
-  const rawQ = (req.query.q as string) || "";
+export function validatePagination(req: Request, _res: Response, next: NextFunction) {
+  const rawQ = (req.query.q as string) || '';
   if (rawQ && isSuspicious(rawQ)) {
     next({
       status: 400,
-      message: "Suspicious input detected in search — not saved",
-      code: "SUSPICIOUS_INPUT",
+      message: 'Suspicious input detected in search — not saved',
+      code: 'SUSPICIOUS_INPUT',
     });
     return;
   }
@@ -60,7 +56,7 @@ export function validatePagination(
     const err: unknown = parsed.error;
     next({
       status: 400,
-      message: "Invalid pagination",
+      message: 'Invalid pagination',
       details: (err as Error).message,
     });
     return;
