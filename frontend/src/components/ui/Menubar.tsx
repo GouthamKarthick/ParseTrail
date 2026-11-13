@@ -2,12 +2,12 @@
  * @fileoverview Menubar — top navigation with hamburger sidebar for mobile and profile dropdown.
  */
 
-import { useCallback, useState, useEffect, useRef } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
-import styles from "./Menubar.module.scss";
-import { Avatar } from "../Avatar";
-import { useAuth } from "../../context/AuthContext";
-import { useTheme } from "../../context/ThemeContext";
+import { useCallback, useState, useEffect, useRef } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import styles from './Menubar.module.scss';
+import { Avatar } from '../Avatar';
+import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 
 /**
  * Application menubar rendered on every route.
@@ -28,21 +28,18 @@ export function Menubar() {
   const handleLogout = useCallback(async () => {
     await logout();
     setProfileOpen(false);
-    nav("/login");
+    nav('/login');
   }, [logout, nav]);
 
   // Close profile dropdown on outside click / route change
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
-      if (
-        profileRef.current &&
-        !profileRef.current.contains(e.target as Node)
-      ) {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setProfileOpen(false);
       }
     }
-    if (profileOpen) document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
+    if (profileOpen) document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
   }, [profileOpen]);
 
   // Close sidebar on navigation
@@ -50,14 +47,14 @@ export function Menubar() {
 
   return (
     <header className={styles.menubar} role="banner">
-      <div className={styles["menubar-inner"]}>
+      <div className={styles['menubar-inner']}>
         {/* Hamburger — visible only on mobile, before logo */}
         {isVerified && (
           <button
-            className={styles["menubar-hamburger"]}
-            aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+            className={styles['menubar-hamburger']}
+            aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={sidebarOpen}
-            onClick={() => setSidebarOpen((v) => !v)}
+            onClick={() => setSidebarOpen(v => !v)}
           >
             <i className="bi bi-list" aria-hidden />
           </button>
@@ -65,11 +62,11 @@ export function Menubar() {
 
         <NavLink
           to="/"
-          className={styles["menubar-brand"]}
+          className={styles['menubar-brand']}
           aria-label="ParseTrail home"
           onClick={closeSidebar}
         >
-          <span className={styles["menubar-logo"]} aria-hidden>
+          <span className={styles['menubar-logo']} aria-hidden>
             <svg
               width="32"
               height="32"
@@ -80,36 +77,10 @@ export function Menubar() {
               <rect width="32" height="32" rx="9" fill="url(#logoGrad)" />
               <g filter="url(#logoShadow)">
                 <path d="M10 9.5H19L22.5 13V23.5H10V9.5Z" fill="white" />
-                <path
-                  d="M19 9.5V13H22.5"
-                  fill="#f1f5f9"
-                  stroke="#cbd5e1"
-                  strokeWidth="0.9"
-                />
-                <rect
-                  x="12.2"
-                  y="15"
-                  width="7.5"
-                  height="1.3"
-                  rx="0.65"
-                  fill="#2563eb"
-                />
-                <rect
-                  x="12.2"
-                  y="17.4"
-                  width="7.5"
-                  height="1.3"
-                  rx="0.65"
-                  fill="#94a3b8"
-                />
-                <rect
-                  x="12.2"
-                  y="19.8"
-                  width="5.2"
-                  height="1.3"
-                  rx="0.65"
-                  fill="#e2e8f0"
-                />
+                <path d="M19 9.5V13H22.5" fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="0.9" />
+                <rect x="12.2" y="15" width="7.5" height="1.3" rx="0.65" fill="#2563eb" />
+                <rect x="12.2" y="17.4" width="7.5" height="1.3" rx="0.65" fill="#94a3b8" />
+                <rect x="12.2" y="19.8" width="5.2" height="1.3" rx="0.65" fill="#e2e8f0" />
               </g>
               <g>
                 <circle
@@ -168,18 +139,18 @@ export function Menubar() {
               </defs>
             </svg>
           </span>
-          <span className={styles["menubar-title"]}>
-            Parse<span className={styles["menubar-title-accent"]}>Trail</span>
+          <span className={styles['menubar-title']}>
+            Parse<span className={styles['menubar-title-accent']}>Trail</span>
           </span>
         </NavLink>
 
         {/* Desktop nav — hidden on mobile */}
         {isVerified && (
-          <nav className={styles["menubar-nav"]} aria-label="Primary">
+          <nav className={styles['menubar-nav']} aria-label="Primary">
             <NavLink
               to="/"
               className={({ isActive }) =>
-                isActive ? styles["menubar-active"] : styles["menubar-link"]
+                isActive ? styles['menubar-active'] : styles['menubar-link']
               }
             >
               <i className="bi bi-cloud-arrow-up-fill" aria-hidden /> Upload
@@ -187,7 +158,7 @@ export function Menubar() {
             <NavLink
               to="/documents"
               className={({ isActive }) =>
-                isActive ? styles["menubar-active"] : styles["menubar-link"]
+                isActive ? styles['menubar-active'] : styles['menubar-link']
               }
             >
               <i className="bi bi-file-earmark-text-fill" aria-hidden /> Documents
@@ -195,7 +166,7 @@ export function Menubar() {
             <NavLink
               to="/dashboard"
               className={({ isActive }) =>
-                isActive ? styles["menubar-active"] : styles["menubar-link"]
+                isActive ? styles['menubar-active'] : styles['menubar-link']
               }
             >
               <i className="bi bi-bar-chart-fill" aria-hidden /> Dashboard
@@ -204,12 +175,12 @@ export function Menubar() {
         )}
 
         {/* Right corner — profile dropdown */}
-        <div className={styles["menubar-right"]} ref={profileRef}>
+        <div className={styles['menubar-right']} ref={profileRef}>
           {verifiedUser ? (
-            <div className={styles["menubar-profile-wrap"]}>
+            <div className={styles['menubar-profile-wrap']}>
               <button
-                className={styles["menubar-profile"]}
-                onClick={() => setProfileOpen((v) => !v)}
+                className={styles['menubar-profile']}
+                onClick={() => setProfileOpen(v => !v)}
                 aria-haspopup="menu"
                 aria-expanded={profileOpen}
               >
@@ -219,40 +190,36 @@ export function Menubar() {
                   email={verifiedUser.email}
                   src={avatar}
                   size={24}
-                />{" "}
-                <span className={styles["menubar-profile-email"]}>
+                />{' '}
+                <span className={styles['menubar-profile-email']}>
                   {verifiedUser.first_name} {verifiedUser.last_name}
-                </span>{" "}
-                <i
-                  className="bi bi-chevron-down"
-                  aria-hidden
-                  style={{ fontSize: "0.75em" }}
-                />
+                </span>{' '}
+                <i className="bi bi-chevron-down" aria-hidden style={{ fontSize: '0.75em' }} />
               </button>
               {profileOpen && (
-                <div className={styles["menubar-profile-dropdown"]} role="menu">
-                  <div className={styles["menubar-profile-header"]}>
+                <div className={styles['menubar-profile-dropdown']} role="menu">
+                  <div className={styles['menubar-profile-header']}>
                     <Avatar
                       first_name={verifiedUser.first_name}
                       last_name={verifiedUser.last_name}
                       email={verifiedUser.email}
                       src={avatar}
                       size={28}
-                    />{" "}
+                    />{' '}
                     {verifiedUser.email}
                   </div>
                   <button
-                    className={styles["menubar-profile-item"]}
+                    className={styles['menubar-profile-item']}
                     onClick={() => {
                       setProfileOpen(false);
-                      nav("/profile");
+                      nav('/profile');
                     }}
                     role="menuitem"
                   >
                     <i className="bi bi-person-fill" aria-hidden /> View profile
                   </button>
                   <button
-                    className={styles["menubar-profile-item"]}
+                    className={styles['menubar-profile-item']}
                     onClick={() => {
                       toggle();
                       setProfileOpen(false);
@@ -261,33 +228,28 @@ export function Menubar() {
                   >
                     <i
                       className={
-                        theme === "dark"
-                          ? "bi bi-brightness-high-fill"
-                          : "bi bi-moon-stars-fill"
+                        theme === 'dark' ? 'bi bi-brightness-high-fill' : 'bi bi-moon-stars-fill'
                       }
                       aria-hidden
-                    />{" "}
-                    {theme === "dark" ? "Light mode" : "Dark mode"}
+                    />{' '}
+                    {theme === 'dark' ? 'Light mode' : 'Dark mode'}
                   </button>
                   <button
-                    className={styles["menubar-profile-item--danger"]}
+                    className={styles['menubar-profile-item--danger']}
                     onClick={handleLogout}
                     role="menuitem"
                   >
                     <i
-                      className={`bi bi-box-arrow-right ${styles["menubar-strong-icon"]}`}
+                      className={`bi bi-box-arrow-right ${styles['menubar-strong-icon']}`}
                       aria-hidden
-                    />{" "}
+                    />{' '}
                     Logout
                   </button>
                 </div>
               )}
             </div>
           ) : user ? (
-            <NavLink
-              to="/verify-email"
-              className={styles["menubar-link"]}
-            >
+            <NavLink to="/verify-email" className={styles['menubar-link']}>
               Verify email
             </NavLink>
           ) : null}
@@ -296,23 +258,19 @@ export function Menubar() {
 
       {/* Mobile sidebar overlay */}
       {isVerified && sidebarOpen && (
-        <div
-          className={styles["menubar-backdrop"]}
-          onClick={closeSidebar}
-          aria-hidden
-        />
+        <div className={styles['menubar-backdrop']} onClick={closeSidebar} aria-hidden />
       )}
 
       {/* Mobile sidebar — Upload/Documents/Dashboard */}
       {isVerified && (
         <nav
-          className={`${styles["menubar-sidebar"]} ${sidebarOpen ? styles["menubar-sidebar--open"] : ""}`}
+          className={`${styles['menubar-sidebar']} ${sidebarOpen ? styles['menubar-sidebar--open'] : ''}`}
           aria-label="Mobile"
         >
-          <div className={styles["menubar-sidebar-header"]}>
-            <span className={styles["menubar-sidebar-title"]}>Menu</span>
+          <div className={styles['menubar-sidebar-header']}>
+            <span className={styles['menubar-sidebar-title']}>Menu</span>
             <button
-              className={styles["menubar-sidebar-close"]}
+              className={styles['menubar-sidebar-close']}
               onClick={closeSidebar}
               aria-label="Close menu"
             >
@@ -322,9 +280,7 @@ export function Menubar() {
           <NavLink
             to="/"
             className={({ isActive }) =>
-              isActive
-                ? styles["menubar-sidebar-link--active"]
-                : styles["menubar-sidebar-link"]
+              isActive ? styles['menubar-sidebar-link--active'] : styles['menubar-sidebar-link']
             }
             onClick={closeSidebar}
           >
@@ -333,9 +289,7 @@ export function Menubar() {
           <NavLink
             to="/documents"
             className={({ isActive }) =>
-              isActive
-                ? styles["menubar-sidebar-link--active"]
-                : styles["menubar-sidebar-link"]
+              isActive ? styles['menubar-sidebar-link--active'] : styles['menubar-sidebar-link']
             }
             onClick={closeSidebar}
           >
@@ -344,9 +298,7 @@ export function Menubar() {
           <NavLink
             to="/dashboard"
             className={({ isActive }) =>
-              isActive
-                ? styles["menubar-sidebar-link--active"]
-                : styles["menubar-sidebar-link"]
+              isActive ? styles['menubar-sidebar-link--active'] : styles['menubar-sidebar-link']
             }
             onClick={closeSidebar}
           >

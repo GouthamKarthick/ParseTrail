@@ -2,10 +2,10 @@
  * @fileoverview EmptyState and ErrorState — consistent dead-end screens with actions.
  */
 
-import { Link } from "react-router-dom";
-import { Text } from "./ui/Text";
-import { Button } from "./ui/Button";
-import styles from "./Feedback.module.scss";
+import { Link } from 'react-router-dom';
+import { Text } from './ui/Text';
+import { Button } from './ui/Button';
+import styles from './Feedback.module.scss';
 
 // ---------------------------------------------------------------------------
 // Components
@@ -44,7 +44,7 @@ export function EmptyState({
         {message}
       </Text>
       {actionTo && actionLabel && (
-        <Link to={actionTo} className={styles["feedback-action"]}>
+        <Link to={actionTo} className={styles['feedback-action']}>
           {actionLabel}
         </Link>
       )}
@@ -59,13 +59,7 @@ export function EmptyState({
  * @returns Error state element
  * @example <ErrorState message="Failed" onRetry={reload} />
  */
-export function ErrorState({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry?: () => void;
-}) {
+export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className={styles.feedback} role="alert">
       <i className="bi bi-exclamation-triangle" aria-hidden />

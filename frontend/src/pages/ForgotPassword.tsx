@@ -2,9 +2,9 @@
  * @fileoverview ForgotPassword page — request password reset email.
  */
 
-import { useState } from "react";
-import { forgotPassword } from "../api/client";
-import authStyles from "./Auth.module.scss";
+import { useState } from 'react';
+import { forgotPassword } from '../api/client';
+import authStyles from './Auth.module.scss';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -16,7 +16,7 @@ import authStyles from "./Auth.module.scss";
  * @example <ForgotPassword />
  */
 export default function ForgotPassword() {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
 
   /**
@@ -26,22 +26,22 @@ export default function ForgotPassword() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     await forgotPassword(email);
-    setMsg("If email exists, reset link sent (Resend free)");
+    setMsg('If email exists, reset link sent (Resend free)');
   }
 
   return (
-    <div className={authStyles["auth-card"]}>
+    <div className={authStyles['auth-card']}>
       <h2>Forgot Password</h2>
-      <form onSubmit={onSubmit} className={authStyles["auth-field"]}>
+      <form onSubmit={onSubmit} className={authStyles['auth-field']}>
         <input
           placeholder="Email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className={authStyles["auth-input"]}
+          onChange={e => setEmail(e.target.value)}
+          className={authStyles['auth-input']}
         />
-        <button className={authStyles["auth-verify-btn"]}>Send reset</button>
+        <button className={authStyles['auth-verify-btn']}>Send reset</button>
       </form>
-      {msg && <p className={authStyles["auth-hint--success"]}>{msg}</p>}
+      {msg && <p className={authStyles['auth-hint--success']}>{msg}</p>}
     </div>
   );
 }

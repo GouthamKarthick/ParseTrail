@@ -2,14 +2,14 @@
  * @fileoverview Toast container — renders transient messages owned by ToastContext.
  */
 
-import styles from "./Toast.module.scss";
+import styles from './Toast.module.scss';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /** Visual severity for a toast notification. */
-export type ToastKind = "success" | "info" | "warning" | "error";
+export type ToastKind = 'success' | 'info' | 'warning' | 'error';
 
 /** Single toast record. */
 export interface ToastItem {
@@ -38,13 +38,13 @@ export function ToastContainer({
 }) {
   if (toasts.length === 0) return null;
   return (
-    <div aria-live="polite" className={styles["toast-container"]}>
-      {toasts.map((t) => (
+    <div aria-live="polite" className={styles['toast-container']}>
+      {toasts.map(t => (
         <div
           key={t.id}
-          role={t.kind === "error" ? "alert" : "status"}
+          role={t.kind === 'error' ? 'alert' : 'status'}
           onClick={() => onDismiss(t.id)}
-          className={`${styles["toast-item"]} ${styles[`toast-item--${t.kind}`]}`}
+          className={`${styles['toast-item']} ${styles[`toast-item--${t.kind}`]}`}
         >
           {t.message}
         </div>

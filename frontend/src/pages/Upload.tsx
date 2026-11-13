@@ -2,15 +2,15 @@
  * @fileoverview Upload page — file selection, suspicious-name guard, and document upload flow.
  */
 
-import { useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { uploadDocument, ApiError } from "../api/client";
-import { useToastContext, kindFromStatus } from "../context/ToastContext";
-import { isSuspiciousFrontend } from "../utils/security";
-import { Button } from "../components/ui/Button";
-import { Heading } from "../components/ui/Heading";
-import { Text } from "../components/ui/Text";
-import styles from "./Upload.module.scss";
+import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { uploadDocument, ApiError } from '../api/client';
+import { useToastContext, kindFromStatus } from '../context/ToastContext';
+import { isSuspiciousFrontend } from '../utils/security';
+import { Button } from '../components/ui/Button';
+import { Heading } from '../components/ui/Heading';
+import { Text } from '../components/ui/Text';
+import styles from './Upload.module.scss';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -23,7 +23,7 @@ import styles from "./Upload.module.scss";
  */
 export default function Upload() {
   const [file, setFile] = useState<File | null>(null);
-  const [language, setLanguage] = useState("auto");
+  const [language, setLanguage] = useState('auto');
   const [busy, setBusy] = useState(false);
   const { show } = useToastContext();
   const nav = useNavigate();
@@ -36,13 +36,13 @@ export default function Upload() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const f = e.target.files?.[0] ?? null;
       if (f && isSuspiciousFrontend(f.name)) {
-        show("warning", "Suspicious file name detected — not saved");
-        e.target.value = "";
+        show('warning', 'Suspicious file name detected — not saved');
+        e.target.value = '';
         return;
       }
       setFile(f);
     },
-    [show],
+    [show]
   );
 
   /**
@@ -53,30 +53,30 @@ export default function Upload() {
     e.preventDefault();
     if (!file) return;
     if (isSuspiciousFrontend(file.name)) {
-      show("warning", "Suspicious file name detected — not saved");
+      show('warning', 'Suspicious file name detected — not saved');
       return;
     }
     setBusy(true);
     try {
-      const res = await uploadDocument(file, language === "auto" ? undefined : language);
-      show("success", `Uploaded ${res.name} — ${res.status}`);
+      const res = await uploadDocument(file, language === 'auto' ? undefined : language);
+      show('success', `Uploaded ${res.name} — ${res.status}`);
       nav(`/documents/${res.id}`);
     } catch (e) {
       const err = e as ApiError;
       if (
         err.status === 409 &&
-        (err.code === "DUPLICATE_CONTENT" || err.code === "DUPLICATE_UPDATED")
+        (err.code === 'DUPLICATE_CONTENT' || err.code === 'DUPLICATE_UPDATED')
       ) {
         show(
-          "warning",
-          `Duplicate document — updated existing record (id ${err.duplicateOf ?? ""}). Not added as new.`,
+          'warning',
+          `Duplicate document — updated existing record (id ${err.duplicateOf ?? ''}). Not added as new.`
         );
         if (err.duplicateOf) nav(`/documents/${err.duplicateOf}`);
-      } else if (err.code === "SUSPICIOUS_INPUT") {
-        show("warning", err.message || "Suspicious input detected — not saved");
+      } else if (err.code === 'SUSPICIOUS_INPUT') {
+        show('warning', err.message || 'Suspicious input detected — not saved');
       } else {
-        const kind = err.status ? kindFromStatus(err.status) : "error";
-        show(kind, err.message || "Upload failed");
+        const kind = err.status ? kindFromStatus(err.status) : 'error';
+        show(kind, err.message || 'Upload failed');
       }
     } finally {
       setBusy(false);
@@ -85,31 +85,29 @@ export default function Upload() {
 
   return (
     <div className="page">
-      <div className={styles["upload-card"]}>
+      <div className={styles['upload-card']}>
         <Heading level={1}>Upload document</Heading>
         <Text variant="muted">
           PDF, PNG, JPG — max 10MB. Scanned images are OCR&apos;d automatically.
         </Text>
 
-        <form onSubmit={onSubmit} className={styles["upload-form"]}>
-          <label className={styles["upload-dropzone"]}>
+        <form onSubmit={onSubmit} className={styles['upload-form']}>
+          <label className={styles['upload-dropzone']}>
             <input
               type="file"
               accept=".pdf,.png,.jpg,.jpeg"
               onChange={handleFileChange}
-              className={styles["upload-file-input"]}
+              className={styles['upload-file-input']}
             />
-            <span className={styles["upload-drop-text"]}>
-              {file ? file.name : "Drop file here or click to browse"}
+            <span className={styles['upload-drop-text']}>
+              {file ? file.name : 'Drop file here or click to browse'}
             </span>
-            <span className={styles["upload-drop-hint"]}>
-              Supported: .pdf .png .jpg .jpeg
-            </span>
+            <span className={styles['upload-drop-hint']}>Supported: .pdf .png .jpg .jpeg</span>
           </label>
 
-          <label className={styles["upload-language"]}>
+          <label className={styles['upload-language']}>
             <span>Document language</span>
-            <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+            <select value={language} onChange={e => setLanguage(e.target.value)}>
               <option value="auto">Auto / English</option>
               <option value="de">German</option>
               <option value="fr">French</option>
@@ -122,22 +120,12 @@ export default function Upload() {
             </select>
           </label>
 
-          <div className={styles["upload-actions"]}>
-            <Button
-              type="submit"
-              disabled={!file || busy}
-              variant="primary"
-              size="md"
-            >
-              {busy ? "Uploading..." : "Upload"}
+          <div className={styles['upload-actions']}>
+            <Button type="submit" disabled={!file || busy} variant="primary" size="md">
+              {busy ? 'Uploading...' : 'Upload'}
             </Button>
             {file && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="md"
-                onClick={() => setFile(null)}
-              >
+              <Button type="button" variant="ghost" size="md" onClick={() => setFile(null)}>
                 Clear
               </Button>
             )}

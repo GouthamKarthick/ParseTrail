@@ -2,35 +2,29 @@
  * @fileoverview App root — lazy page imports, auth/theme providers, and route guards.
  */
 
-import { lazy, Suspense } from "react";
-import {
-  BrowserRouter,
-  Routes,
-  Route,
-  Navigate,
-  useLocation,
-} from "react-router-dom";
-import { ToastProvider } from "./context/ToastContext";
-import { Menubar } from "./components/ui/Menubar";
-import { PageSkeleton } from "./components/Skeleton";
-import { AuthProvider, useAuth } from "./context/AuthContext";
-import { ThemeProvider } from "./context/ThemeContext";
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { ToastProvider } from './context/ToastContext';
+import { Menubar } from './components/ui/Menubar';
+import { PageSkeleton } from './components/Skeleton';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 
 // ---------------------------------------------------------------------------
 // Lazy Pages
 // ---------------------------------------------------------------------------
 
-const Upload = lazy(() => import("./pages/Upload"));
-const List = lazy(() => import("./pages/List"));
-const Detail = lazy(() => import("./pages/Detail"));
-const Login = lazy(() => import("./pages/Login"));
-const Register = lazy(() => import("./pages/Register"));
-const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
-const ResetPassword = lazy(() => import("./pages/ResetPassword"));
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
-const SetupProfile = lazy(() => import("./pages/SetupProfile"));
-const Profile = lazy(() => import("./pages/Profile"));
+const Upload = lazy(() => import('./pages/Upload'));
+const List = lazy(() => import('./pages/List'));
+const Detail = lazy(() => import('./pages/Detail'));
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const VerifyEmail = lazy(() => import('./pages/VerifyEmail'));
+const SetupProfile = lazy(() => import('./pages/SetupProfile'));
+const Profile = lazy(() => import('./pages/Profile'));
 
 // ---------------------------------------------------------------------------
 // Route Guards

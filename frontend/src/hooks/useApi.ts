@@ -2,8 +2,8 @@
  * @fileoverview useApi — fetch state (data/error/loading) with toast on failure.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { useToastContext } from "../context/ToastContext";
+import { useCallback, useEffect, useState } from 'react';
+import { useToastContext } from '../context/ToastContext';
 
 /**
  * Run an async fetch with loading/error state and error toasts.
@@ -27,15 +27,15 @@ export function useApi<T>(fn: () => Promise<T>, immediate = true) {
         setData(d);
         return d;
       } catch (e) {
-        const msg = (e as Error).message || "Request failed";
+        const msg = (e as Error).message || 'Request failed';
         setError(msg);
-        if (notify) show("error", msg);
+        if (notify) show('error', msg);
         return null;
       } finally {
         setLoading(false);
       }
     },
-    [fn, show],
+    [fn, show]
   );
 
   useEffect(() => {

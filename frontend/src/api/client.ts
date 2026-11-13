@@ -8,9 +8,7 @@
 // ---------------------------------------------------------------------------
 
 const API_BASE =
-  (import.meta.env.VITE_BACKEND_URL as string) ||
-  (import.meta.env.VITE_API_URL as string) ||
-  "";
+  (import.meta.env.VITE_BACKEND_URL as string) || (import.meta.env.VITE_API_URL as string) || '';
 
 // Hard timeout on every API call so a hung backend cannot block the UI.
 const API_TIMEOUT_MS = 30_000;
@@ -22,17 +20,13 @@ const API_TIMEOUT_MS = 30_000;
  * @returns Response
  * @throws {ApiError} with status 504 when the request times out
  */
-async function fetchWithTimeout(
-  input: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<Response> {
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } catch (e) {
-    if ((e as Error).name === "AbortError")
-      throw new ApiError("Request timed out", 504);
+    if ((e as Error).name === 'AbortError') throw new ApiError('Request timed out', 504);
     throw e;
   } finally {
     clearTimeout(timeout);
@@ -54,16 +48,16 @@ export async function register(
   first_name: string,
   last_name: string,
   email: string,
-  password: string,
+  password: string
 ) {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ first_name, last_name, email, password }),
-    credentials: "include",
+    credentials: 'include',
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error || "Register failed", res.status);
+  if (!res.ok) throw new ApiError(body.error || 'Register failed', res.status);
   return body as {
     id: string;
     email: string;
@@ -84,22 +78,22 @@ export async function updateProfile(data: {
   last_name?: string;
 }) {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/profile`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-    credentials: "include",
+    credentials: 'include',
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error || "Update failed", res.status);
+  if (!res.ok) throw new ApiError(body.error || 'Update failed', res.status);
   return body;
 }
 
 export async function getAvatar() {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/avatar`, {
-    credentials: "include",
+    credentials: 'include',
   });
   if (res.status === 404) return null;
-  if (!res.ok) throw new ApiError("Avatar fetch failed", res.status);
+  if (!res.ok) throw new ApiError('Avatar fetch failed', res.status);
   return (await res.json()) as {
     avatar_base64: string;
     mime: string;
@@ -109,30 +103,29 @@ export async function getAvatar() {
 
 export async function putAvatar(avatar_base64: string) {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/avatar`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ avatar_base64 }),
-    credentials: "include",
+    credentials: 'include',
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok)
-    throw new ApiError(body.error || "Avatar upload failed", res.status);
+  if (!res.ok) throw new ApiError(body.error || 'Avatar upload failed', res.status);
   return body;
 }
 
 export async function deleteAvatar() {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/avatar`, {
-    method: "DELETE",
-    credentials: "include",
+    method: 'DELETE',
+    credentials: 'include',
   });
-  if (!res.ok) throw new ApiError("Avatar delete failed", res.status);
+  if (!res.ok) throw new ApiError('Avatar delete failed', res.status);
   return true;
 }
 
 export async function resendVerification(email: string) {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/resend-verification`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
   });
   return res.json().catch(() => ({}));
@@ -147,13 +140,13 @@ export async function resendVerification(email: string) {
  */
 export async function login(email: string, password: string) {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
-    credentials: "include",
+    credentials: 'include',
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error || "Login failed", res.status);
+  if (!res.ok) throw new ApiError(body.error || 'Login failed', res.status);
   return body as {
     id: string;
     email: string;
@@ -170,8 +163,8 @@ export async function login(email: string, password: string) {
  */
 export async function logout() {
   await fetchWithTimeout(`${API_BASE}/api/auth/logout`, {
-    method: "POST",
-    credentials: "include",
+    method: 'POST',
+    credentials: 'include',
   });
 }
 
@@ -183,9 +176,9 @@ export async function logout() {
  */
 export async function me() {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/me`, {
-    credentials: "include",
+    credentials: 'include',
   });
-  if (!res.ok) throw new ApiError("Not authenticated", res.status);
+  if (!res.ok) throw new ApiError('Not authenticated', res.status);
   return (await res.json()) as {
     id: string;
     email: string;
@@ -208,11 +201,11 @@ export async function me() {
  * @example const summary = await getSummary("financial");
  */
 export async function getSummary(category?: string) {
-  const qs = category ? `?category=${encodeURIComponent(category)}` : "";
+  const qs = category ? `?category=${encodeURIComponent(category)}` : '';
   const res = await fetchWithTimeout(`${API_BASE}/api/documents/summary${qs}`, {
-    credentials: "include",
+    credentials: 'include',
   });
-  if (!res.ok) throw new ApiError("Summary failed", res.status);
+  if (!res.ok) throw new ApiError('Summary failed', res.status);
   return (await res.json()) as {
     totalDocs: number;
     sumTotal: number;
@@ -231,17 +224,14 @@ export async function getSummary(category?: string) {
  * @returns Blob for download
  * @example const blob = await exportSummary("pdf");
  */
-export async function exportSummary(
-  format: "pdf" | "csv" = "pdf",
-  category?: string,
-) {
+export async function exportSummary(format: 'pdf' | 'csv' = 'pdf', category?: string) {
   const qs = category
     ? `?format=${format}&category=${encodeURIComponent(category)}`
     : `?format=${format}`;
   const res = await fetchWithTimeout(`${API_BASE}/api/documents/summary/export${qs}`, {
-    credentials: "include",
+    credentials: 'include',
   });
-  if (!res.ok) throw new ApiError("Export failed", res.status);
+  if (!res.ok) throw new ApiError('Export failed', res.status);
   return await res.blob();
 }
 
@@ -257,8 +247,8 @@ export async function exportSummary(
  */
 export async function forgotPassword(email: string) {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/forgot-password`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
   });
   const body = await res.json().catch(() => ({}));
@@ -274,12 +264,12 @@ export async function forgotPassword(email: string) {
  */
 export async function resetPassword(token: string, password: string) {
   const res = await fetchWithTimeout(`${API_BASE}/api/auth/reset-password`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, password }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error || "Reset failed", res.status);
+  if (!res.ok) throw new ApiError(body.error || 'Reset failed', res.status);
   return body;
 }
 
@@ -303,12 +293,7 @@ export class ApiError extends Error {
    * @param code - Optional backend error code
    * @param duplicateOf - Duplicate document id when status 409
    */
-  constructor(
-    message: string,
-    status: number,
-    code?: string,
-    duplicateOf?: string,
-  ) {
+  constructor(message: string, status: number, code?: string, duplicateOf?: string) {
     super(message);
     this.status = status;
     this.code = code;
@@ -328,21 +313,16 @@ export class ApiError extends Error {
  */
 export async function uploadDocument(file: File, language?: string) {
   const fd = new FormData();
-  if (language) fd.append("language", language);
-  fd.append("file", file);
+  if (language) fd.append('language', language);
+  fd.append('file', file);
   const res = await fetchWithTimeout(`${API_BASE}/api/documents/upload`, {
-    method: "POST",
+    method: 'POST',
     body: fd,
-    credentials: "include",
+    credentials: 'include',
   });
   const body = await res.json().catch(() => ({ error: res.statusText }));
   if (!res.ok) {
-    throw new ApiError(
-      body.error || "Upload failed",
-      res.status,
-      body.code,
-      body.duplicateOf,
-    );
+    throw new ApiError(body.error || 'Upload failed', res.status, body.code, body.duplicateOf);
   }
   // 409 is handled as error above, but keep for success shape
   return body as {
@@ -366,29 +346,28 @@ export async function uploadDocument(file: File, language?: string) {
 export async function listDocuments(
   limit = 20,
   offset = 0,
-  opts?: { q?: string; document_type?: string; document_category?: string },
+  opts?: { q?: string; document_type?: string; document_category?: string }
 ) {
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
   });
 
-  if (opts?.q) params.set("q", opts.q);
-  if (opts?.document_type) params.set("document_type", opts.document_type);
-  if (opts?.document_category)
-    params.set("document_category", opts.document_category);
+  if (opts?.q) params.set('q', opts.q);
+  if (opts?.document_type) params.set('document_type', opts.document_type);
+  if (opts?.document_category) params.set('document_category', opts.document_category);
 
   const res = await fetchWithTimeout(`${API_BASE}/api/documents?${params.toString()}`, {
-    credentials: "include",
+    credentials: 'include',
   });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(body.error || "Failed to list", res.status, body.code);
+    throw new ApiError(body.error || 'Failed to list', res.status, body.code);
   }
 
   return (await res.json()) as {
-    documents: import("../types").Document[];
+    documents: import('../types').Document[];
     total: number;
     limit: number;
     offset: number;
@@ -403,19 +382,15 @@ export async function listDocuments(
  */
 export async function getDocument(id: string) {
   const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}`, {
-    credentials: "include",
+    credentials: 'include',
   });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
 
-    throw new ApiError(
-      body.error || "Not found",
-      res.status,
-      (body as { code?: string }).code,
-    );
+    throw new ApiError(body.error || 'Not found', res.status, (body as { code?: string }).code);
   }
-  return (await res.json()) as import("../types").Document;
+  return (await res.json()) as import('../types').Document;
 }
 
 /**
@@ -426,17 +401,17 @@ export async function getDocument(id: string) {
  */
 export async function reprocessDocument(id: string) {
   const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}/reprocess`, {
-    method: "POST",
-    credentials: "include",
+    method: 'POST',
+    credentials: 'include',
   });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
 
     throw new ApiError(
-      body.error || "Reprocess failed",
+      body.error || 'Reprocess failed',
       res.status,
-      (body as { code?: string }).code,
+      (body as { code?: string }).code
     );
   }
   return (await res.json()) as {
@@ -448,31 +423,22 @@ export async function reprocessDocument(id: string) {
 }
 
 export async function retryDocumentRefinement(id: string) {
-  const res = await fetchWithTimeout(
-    `${API_BASE}/api/documents/${id}/refinement/retry`,
-    { method: "POST", credentials: "include" },
-  );
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}/refinement/retry`, {
+    method: 'POST',
+    credentials: 'include',
+  });
   const body = await res.json().catch(() => ({ error: res.statusText }));
   if (!res.ok) {
-    throw new ApiError(
-      body.error || "Refinement retry failed",
-      res.status,
-      body.code,
-    );
+    throw new ApiError(body.error || 'Refinement retry failed', res.status, body.code);
   }
   return body as { id: string; status: string; enqueued: boolean };
 }
 
-async function fetchDocSub<T>(
-  id: string,
-  sub: string,
-  method = "GET",
-  body?: unknown,
-): Promise<T> {
+async function fetchDocSub<T>(id: string, sub: string, method = 'GET', body?: unknown): Promise<T> {
   const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}/${sub}`, {
     method,
-    credentials: "include",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    credentials: 'include',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
 
@@ -480,9 +446,9 @@ async function fetchDocSub<T>(
     const errBody = await res.json().catch(() => ({ error: res.statusText }));
 
     throw new ApiError(
-      errBody.error || "Request failed",
+      errBody.error || 'Request failed',
       res.status,
-      (errBody as { code?: string }).code,
+      (errBody as { code?: string }).code
     );
   }
   return (await res.json()) as T;
@@ -496,8 +462,8 @@ async function fetchDocSub<T>(
  */
 export async function getAttempts(id: string) {
   const r = await fetchDocSub<{
-    attempts: import("../types").ExtractionAttempt[];
-  }>(id, "attempts");
+    attempts: import('../types').ExtractionAttempt[];
+  }>(id, 'attempts');
   return r.attempts;
 }
 
@@ -509,18 +475,14 @@ export async function getAttempts(id: string) {
  * @returns Correction outcome
  * @example await submitCorrection("abc-123", "totalAmount", 1580);
  */
-export async function submitCorrection(
-  id: string,
-  field: string,
-  value: string | number,
-) {
+export async function submitCorrection(id: string, field: string, value: string | number) {
   return fetchDocSub<{
     id: string;
     field: string;
     original: unknown;
     corrected: unknown;
     changed: boolean;
-  }>(id, "corrections", "POST", { field, value });
+  }>(id, 'corrections', 'POST', { field, value });
 }
 
 /**
@@ -530,9 +492,6 @@ export async function submitCorrection(
  * @example await listCorrections("abc-123");
  */
 export async function listCorrections(id: string) {
-  const r = await fetchDocSub<{ corrections: import("../types").Correction[] }>(
-    id,
-    "corrections",
-  );
+  const r = await fetchDocSub<{ corrections: import('../types').Correction[] }>(id, 'corrections');
   return r.corrections;
 }

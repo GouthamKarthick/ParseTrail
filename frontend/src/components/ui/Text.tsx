@@ -2,15 +2,15 @@
  * @fileoverview Text — polymorphic typography primitive with variant styling.
  */
 
-import type { ReactNode } from "react";
-import styles from "./Text.module.scss";
+import type { ReactNode } from 'react';
+import styles from './Text.module.scss';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type Variant = "body" | "muted" | "small" | "mono";
-type As = "p" | "span" | "div";
+type Variant = 'body' | 'muted' | 'small' | 'mono';
+type As = 'p' | 'span' | 'div';
 
 interface Props {
   variant?: Variant;
@@ -31,15 +31,8 @@ interface Props {
  * @returns Text element
  * @example <Text variant="muted" as="span">Hint</Text>
  */
-export function Text({
-  variant = "body",
-  as = "p",
-  children,
-  className,
-}: Props) {
+export function Text({ variant = 'body', as = 'p', children, className }: Props) {
   const Tag = as;
-  const cls = [styles.text, styles[`text-${variant}`], className]
-    .filter(Boolean)
-    .join(" ");
+  const cls = [styles.text, styles[`text-${variant}`], className].filter(Boolean).join(' ');
   return <Tag className={cls}>{children}</Tag>;
 }
