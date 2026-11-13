@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+const mockPipeline = vi.hoisted(() => vi.fn());
+vi.mock("@huggingface/transformers", () => ({ default: mockPipeline }));
+import { config } from "../config.js";
 import {
   extractAmountFallback,
   extractDateFallback,
@@ -8,7 +11,10 @@ import {
   extractInvoiceNumberFallback,
   extractCurrencyFallback,
 } from "../utils/regex-utils.js";
-import { extractRulesOnly } from "./transformers.service.js";
+import {
+  extractRulesOnly,
+  runLocalLLMExtraction,
+} from "./transformers.service.js";
 
 describe("transformers — extractAmountFallback", () => {
   it("parses settlement slip NET PAY with parenthesized symbol", () => {
@@ -37,6 +43,22 @@ describe("transformers — extractAmountFallback", () => {
   });
   it("returns null when no amount present", () => {
     expect(extractAmountFallback("Hello world, no numbers here")).toBeNull();
+  });
+});
+
+describe("transformers — local model loading", () => {
+  it("caches a failed model load during the cooldown", async () => {
+    const previous = config.localLlmEnabled;
+    (config as unknown as { localLlmEnabled: boolean }).localLlmEnabled = true;
+    mockPipeline.mockRejectedValue(new Error("download unavailable"));
+    try {
+      await runLocalLLMExtraction("A sufficiently long invoice document", "invoice");
+      await runLocalLLMExtraction("A sufficiently long invoice document", "invoice");
+      expect(mockPipeline).toHaveBeenCalledTimes(1);
+    } finally {
+      (config as unknown as { localLlmEnabled: boolean }).localLlmEnabled =
+        previous;
+    }
   });
 });
 

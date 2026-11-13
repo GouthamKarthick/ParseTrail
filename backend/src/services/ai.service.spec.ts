@@ -1,17 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const mockAiConfig = vi.hoisted(() => ({
+  providers: ["gemini"],
+  model: "gemini-flash-latest",
+  apiKey: "fake-key",
+  groqApiKey: "",
+  openRouterApiKey: "",
+  timeoutMs: 20000,
+  threshold: 0.5,
+}));
+
 vi.mock("../config.js", async (importOriginal) => {
   const orig: any = await importOriginal();
   return {
     ...orig,
     config: {
       ...orig.config,
-      ai: {
-        provider: "google",
-        model: "gemini-flash-latest",
-        apiKey: "fake-key",
-        threshold: 0.5,
-      },
+      ai: mockAiConfig,
       awsRegion: "ap-south-1",
     },
   };
@@ -23,6 +28,11 @@ describe("ai.service — extractWithAI / tryAI", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     global.fetch = vi.fn() as any;
+    mockAiConfig.providers = ["gemini"];
+    mockAiConfig.model = "gemini-flash-latest";
+    mockAiConfig.apiKey = "fake-key";
+    mockAiConfig.groqApiKey = "";
+    mockAiConfig.openRouterApiKey = "";
   });
   afterEach(() => {
     global.fetch = globalFetch;
@@ -134,5 +144,72 @@ describe("ai.service — extractWithAI / tryAI", () => {
     } as any);
     const { tryAI } = await import("./ai.service.js");
     await expect(tryAI("hello")).rejects.toThrow(/status 401/);
+  });
+
+  it("uses configured secondary providers when the Gemini key is absent", async () => {
+    mockAiConfig.providers = ["gemini", "groq"];
+    mockAiConfig.apiKey = "";
+    mockAiConfig.groqApiKey = "groq-key";
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                vendor: "Example Co",
+                confidence: 0.8,
+                documentType: "invoice",
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+    } as any);
+
+    const { extractWithAI } = await import("./ai.service.js");
+    const result = await extractWithAI("invoice text");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.groq.com/openai/v1/chat/completions",
+      expect.any(Object),
+    );
+    expect(result.data.vendor).toBe("Example Co");
+    expect(result.tokenUsage).toEqual({ inputTokens: 10, outputTokens: 5 });
+  });
+
+  it("retries a throttled provider once before accepting its response", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        body: { cancel: vi.fn().mockResolvedValue(undefined) },
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      vendor: "Example Co",
+                      confidence: 0.8,
+                      documentType: "invoice",
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as any);
+
+    const { extractWithAI } = await import("./ai.service.js");
+    const result = await extractWithAI("invoice text");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(result.data.vendor).toBe("Example Co");
   });
 });

@@ -23,11 +23,18 @@ function appUrl(): string {
  * @returns Transport or null if not configured
  */
 function getTransport() {
-  if (!config.smtp.host) return null;
+  if (!config.smtp.host) {
+    if (process.env.NODE_ENV === "production")
+      throw new Error("SMTP_HOST is required to send email in production");
+    return null;
+  }
   return nodemailer.createTransport({
     host: config.smtp.host,
     port: config.smtp.port,
     secure: config.smtp.port === 465,
+    connectionTimeout: config.smtp.timeoutMs,
+    greetingTimeout: config.smtp.timeoutMs,
+    socketTimeout: config.smtp.timeoutMs,
     auth: config.smtp.user
       ? { user: config.smtp.user, pass: config.smtp.pass }
       : undefined,
@@ -56,13 +63,15 @@ export async function sendVerificationEmail(
   const codePart = code
     ? `\nYour verification code is: ${code} (expires in 15 minutes). Enter it at ${base}/verify-email`
     : "";
-  await transport.sendMail({
+  const result = await transport.sendMail({
     from: config.smtp.from,
     to,
     subject: "Verify your ParseTrail email",
     text: `Verify your email: ${link}${codePart}`,
     html: `<p>Click <a href="${link}">here</a> to verify your email (expires in 15 minutes).</p>${code ? `<p>Or enter this code in the app: <b style="font-size:18px; letter-spacing:2px;">${code}</b></p>` : ""}`,
   });
+  if (result.rejected.length > 0 || result.accepted.length === 0)
+    throw new Error("SMTP did not accept the verification recipient");
 }
 
 /**
@@ -78,11 +87,13 @@ export async function sendResetEmail(to: string, token: string) {
     return;
   }
   const link = `${appUrl()}/reset-password?token=${token}`;
-  await transport.sendMail({
+  const result = await transport.sendMail({
     from: config.smtp.from,
     to,
     subject: "Reset your ParseTrail password",
     text: `Reset: ${link} (expires 1h)`,
     html: `<p>Click <a href="${link}">here</a> to reset password (1h).</p>`,
   });
+  if (result.rejected.length > 0 || result.accepted.length === 0)
+    throw new Error("SMTP did not accept the reset recipient");
 }

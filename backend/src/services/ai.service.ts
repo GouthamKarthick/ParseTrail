@@ -1,5 +1,5 @@
 /**
- * services/ai.service.ts — LLM extraction via Gemini/Anthropic.
+ * services/ai.service.ts — LLM extraction via configured AI providers.
  */
 
 import { config } from "../config.js";
@@ -109,91 +109,110 @@ function validateAndNormalize(raw: unknown): {
   return { data: data as ExtractedData, confidence, documentType };
 }
 
-/**
- * Calls Gemini API.
- * @param text Extracted text
- * @param imageBase64 Optional image
- * @param mimeType Optional mime
- * @param customPrompt Optional prompt override
- * @returns Parsed JSON
- */
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+interface ProviderResult {
+  data: unknown;
+  tokenUsage?: TokenUsage;
+}
+
+async function fetchWithRetry(
+  provider: string,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(config.ai.timeoutMs),
+    });
+    if (response.ok) return response;
+    if (![429, 503].includes(response.status) || attempt === 1) {
+      throw new Error(`${provider} request failed with status ${response.status}`);
+    }
+    logger.warn(`${provider} request throttled; retrying`, {
+      status: response.status,
+      attempt: attempt + 1,
+    });
+    await response.body?.cancel();
+    const delay = 250 * 2 ** attempt + Math.floor(Math.random() * 250);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  throw new Error(`${provider} retry exhausted`);
+}
+
 async function callGemini(
   text: string,
   imageBase64?: string,
   mimeType?: string,
   customPrompt?: string,
-): Promise<unknown> {
+): Promise<ProviderResult> {
   const key = config.ai.apiKey;
-  if (!key) throw new Error("AI_API_KEY not set in backend/.env");
+  if (!key) throw new Error("Gemini API key is not configured");
   const model = config.ai.model || "gemini-flash-latest";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-  const prompt = customPrompt || DOCUMENT_EXTRACTION_PROMPT;
   const parts: Array<Record<string, unknown>> = [
-    { text: prompt },
+    { text: customPrompt || DOCUMENT_EXTRACTION_PROMPT },
     { text: text.slice(0, 12000) },
   ];
   if (imageBase64)
     parts.splice(1, 0, {
       inline_data: { mime_type: mimeType || "image/jpeg", data: imageBase64 },
     });
-  const body = {
-    contents: [{ parts }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 0.1,
-      maxOutputTokens: 1024,
+  const response = await fetchWithRetry("Gemini", url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": key,
     },
-  };
-  for (let attempt = 0; attempt <= 3; attempt++) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": key,
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.1,
+        maxOutputTokens: 1024,
       },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
-      const json = (await res.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-      const outText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!outText) throw new Error("Gemini empty response");
-      return JSON.parse(stripJsonFence(outText));
-    }
-    const isRetryable =
-      res.status === 503 || res.status === 429 || res.status === 500;
-    logger.warn(`Gemini ${res.status} attempt ${attempt + 1}/4`, {
-      status: res.status,
-    });
-    if (!isRetryable || attempt === 3)
-      throw new Error(`Gemini request failed with status ${res.status}`);
-    await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
-  }
-  throw new Error("Gemini retry exhausted");
+    }),
+  });
+  const json = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+    };
+  };
+  const outText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!outText) throw new Error("Gemini empty response");
+  return {
+    data: JSON.parse(stripJsonFence(outText)),
+    tokenUsage:
+      json.usageMetadata?.promptTokenCount != null &&
+      json.usageMetadata.candidatesTokenCount != null
+        ? {
+            inputTokens: json.usageMetadata.promptTokenCount,
+            outputTokens: json.usageMetadata.candidatesTokenCount,
+          }
+        : undefined,
+  };
 }
 
-/**
- * Calls Anthropic API.
- * @param text Extracted text
- * @param imageBase64 Optional image
- * @param mimeType Optional mime
- * @param customPrompt Optional prompt override
- * @returns Parsed JSON
- */
 async function callAnthropic(
   text: string,
   imageBase64?: string,
   mimeType?: string,
   customPrompt?: string,
-): Promise<unknown> {
+): Promise<ProviderResult> {
   const key = config.ai.apiKey;
-  if (!key) throw new Error("AI_API_KEY not set");
+  if (!key) throw new Error("Anthropic API key is not configured");
+  if (imageBase64 && mimeType === "application/pdf") {
+    throw new Error("Anthropic PDF input is unsupported; provide extracted text");
+  }
   const model = config.ai.model.includes("claude")
     ? config.ai.model
     : "claude-3-haiku-20240307";
-  const url = "https://api.anthropic.com/v1/messages";
-  const prompt = customPrompt || DOCUMENT_EXTRACTION_PROMPT;
   const content: Array<Record<string, unknown>> = [
     { type: "text", text: text.slice(0, 12000) },
   ];
@@ -206,39 +225,94 @@ async function callAnthropic(
         data: imageBase64,
       },
     });
-  const body = {
-    model,
-    max_tokens: 768,
-    system: prompt,
-    messages: [{ role: "user", content }],
-  };
-  for (let attempt = 0; attempt <= 3; attempt++) {
-    const res = await fetch(url, {
+  const response = await fetchWithRetry(
+    "Anthropic",
+    "https://api.anthropic.com/v1/messages",
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-api-key": key,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
-      const json = (await res.json()) as { content?: Array<{ text?: string }> };
-      const outText = json.content?.[0]?.text;
-      if (!outText) throw new Error("Anthropic empty response");
-      return JSON.parse(stripJsonFence(outText));
-    }
-    const errText = await res.text().catch(() => "");
-    const isRetryable =
-      res.status === 429 || res.status === 500 || res.status === 503;
-    logger.warn(`Anthropic ${res.status} attempt ${attempt + 1}/4`, {
-      err: errText.slice(0, 200),
-    });
-    if (!isRetryable || attempt === 3)
-      throw new Error(`Anthropic ${res.status}: ${errText.slice(0, 500)}`);
-    await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
-  }
-  throw new Error("Anthropic retry exhausted");
+      body: JSON.stringify({
+        model,
+        max_tokens: 768,
+        system: customPrompt || DOCUMENT_EXTRACTION_PROMPT,
+        messages: [{ role: "user", content }],
+      }),
+    },
+  );
+  const json = (await response.json()) as {
+    content?: Array<{ text?: string }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+  const outText = json.content?.[0]?.text;
+  if (!outText) throw new Error("Anthropic empty response");
+  return {
+    data: JSON.parse(stripJsonFence(outText)),
+    tokenUsage:
+      json.usage?.input_tokens != null && json.usage.output_tokens != null
+        ? {
+            inputTokens: json.usage.input_tokens,
+            outputTokens: json.usage.output_tokens,
+          }
+        : undefined,
+  };
+}
+
+async function callCompatibleProvider(
+  provider: "groq" | "openrouter",
+  text: string,
+  customPrompt?: string,
+): Promise<ProviderResult> {
+  const key =
+    provider === "groq" ? config.ai.groqApiKey : config.ai.openRouterApiKey;
+  if (!key) throw new Error(`${provider} API key is not configured`);
+  const model =
+    provider === "groq"
+      ? process.env.GROQ_MODEL || "llama-3.3-70b-versatile"
+      : process.env.OPENROUTER_MODEL ||
+        "meta-llama/llama-3.3-70b-instruct:free";
+  const url =
+    provider === "groq"
+      ? "https://api.groq.com/openai/v1/chat/completions"
+      : "https://openrouter.ai/api/v1/chat/completions";
+  const response = await fetchWithRetry(provider, url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+      ...(provider === "openrouter"
+        ? { "HTTP-Referer": "https://parsetrail.app", "X-Title": "ParseTrail" }
+        : {}),
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: customPrompt || DOCUMENT_EXTRACTION_PROMPT },
+        { role: "user", content: text.slice(0, 12000) },
+      ],
+    }),
+  });
+  const json = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
+  const outText = json.choices?.[0]?.message?.content;
+  if (!outText) throw new Error(`${provider} empty response`);
+  return {
+    data: JSON.parse(stripJsonFence(outText)),
+    tokenUsage:
+      json.usage?.prompt_tokens != null &&
+      json.usage.completion_tokens != null
+        ? {
+            inputTokens: json.usage.prompt_tokens,
+            outputTokens: json.usage.completion_tokens,
+          }
+        : undefined,
+  };
 }
 
 /**
@@ -250,31 +324,67 @@ async function callAnthropic(
 export async function extractWithAI(
   text: string,
   opts?: { imageBase64?: string; mimeType?: string; prompt?: string },
-): Promise<ExtractionResult & { latency: number; cost: number }> {
+): Promise<
+  ExtractionResult & {
+    latency: number;
+    cost: number;
+    tokenUsage?: TokenUsage;
+  }
+> {
   const start = Date.now();
-  const provider = config.ai.provider;
+  let provider = "";
+  let response: ProviderResult | undefined;
+  const errors: string[] = [];
   logger.debug("AI request", {
-    provider,
+    providers: config.ai.providers,
     model: config.ai.model,
     textLength: text.length,
     promptLen: opts?.prompt?.length,
   });
-  const raw =
-    provider === "anthropic"
-      ? await callAnthropic(
-          text,
-          opts?.imageBase64,
-          opts?.mimeType,
-          opts?.prompt,
-        )
-      : await callGemini(text, opts?.imageBase64, opts?.mimeType, opts?.prompt);
-  const { data, confidence, documentType } = validateAndNormalize(raw);
+  for (const candidate of config.ai.providers) {
+    try {
+      provider = candidate;
+      response =
+        candidate === "gemini"
+          ? await callGemini(
+              text,
+              opts?.imageBase64,
+              opts?.mimeType,
+              opts?.prompt,
+            )
+          : candidate === "anthropic"
+            ? await callAnthropic(
+                text,
+                opts?.imageBase64,
+                opts?.mimeType,
+                opts?.prompt,
+              )
+            : await callCompatibleProvider(candidate, text, opts?.prompt);
+      break;
+    } catch (error) {
+      errors.push(
+        error instanceof Error ? error.message : `${candidate} request failed`,
+      );
+      logger.warn("AI provider failed; trying the next configured provider", {
+        provider: candidate,
+        errorType: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
+  if (!response)
+    throw new Error(
+      errors.length
+        ? errors.join("; ")
+        : "No configured AI provider completed extraction",
+    );
+  const { data, confidence, documentType } = validateAndNormalize(response.data);
   const latency = Date.now() - start;
   logger.info("AI response", {
     provider,
     method: "llm",
     confidence,
     latency,
+    tokenUsage: response.tokenUsage,
     documentType,
   });
   return {
@@ -283,6 +393,7 @@ export async function extractWithAI(
     method: "llm",
     latency,
     cost: 0,
+    tokenUsage: response.tokenUsage,
     documentType: documentType as ExtractionResult["documentType"],
     documentTypeConfidence: confidence,
     documentCategory: getCategory(documentType),
@@ -320,5 +431,6 @@ export async function tryAI(
     documentType: r.documentType as ExtractionResult["documentType"],
     documentTypeConfidence: r.confidence,
     documentCategory: r.documentCategory,
+    tokenUsage: r.tokenUsage,
   };
 }
