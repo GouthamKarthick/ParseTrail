@@ -354,6 +354,77 @@ describe("extraction.service — Flan local -> Gemini", () => {
     expect(
       (r.attempts[1] as { fallbackReason?: string }).fallbackReason,
     ).toMatch(/disagree on invoiceDate/);
+    expect(r.attempts[1]?.conflicts).toEqual(["invoiceDate"]);
+    expect(r.data.invoiceDate).toBe("2015-07-18");
+  });
+  it("uses the cloud value when it differs on a locally conflicting field", async () => {
+    (config as any).ai.apiKey = "fake-key";
+    mockOcr.mockResolvedValue(
+      ocrText(
+        "Tata Power\nBill No: B-1\nBill Date: 18/07/2015\nTotal: Rs 2028.97",
+      ),
+    );
+    mockLocal.mockResolvedValue({
+      data: {
+        vendor: "Tata Power",
+        invoiceNumber: "B-1",
+        invoiceDate: "2015-07-17",
+        totalAmount: 2028.97,
+        currency: "INR",
+      },
+      confidence: 0.9,
+      documentType: "bill",
+    } as any);
+    mockTryAI.mockResolvedValue({
+      data: {
+        vendor: "Tata Power",
+        invoiceDate: "2015-07-19",
+        totalAmount: 2028.97,
+      },
+      confidence: 0.2,
+      method: "llm",
+      documentType: "bill",
+      documentTypeConfidence: 0.2,
+    } as any);
+
+    const result = await extract(pngBuffer, { order: "model-first" });
+    expect(result.data.invoiceDate).toBe("2015-07-19");
+    expect(result.data.invoiceNumber).toBe("B-1");
+    expect(result.attempts[1]?.conflicts).toEqual(["invoiceDate"]);
+  });
+  it("keeps local values when no local strategy conflict was flagged", async () => {
+    (config as any).ai.apiKey = "fake-key";
+    mockOcr.mockResolvedValue(
+      ocrText(
+        "Tata Power\nBill No: B-1\nBill Date: 18/07/2015\nTotal: Rs 2028.97",
+      ),
+    );
+    mockLocal.mockResolvedValue({
+      data: {
+        vendor: "Tata Power",
+        invoiceNumber: "B-1",
+        invoiceDate: "2015-07-18",
+        totalAmount: 2028.97,
+        currency: "INR",
+      },
+      confidence: 0.9,
+      documentType: "bill",
+    } as any);
+    mockTryAI.mockResolvedValue({
+      data: {
+        vendor: "Tata Power",
+        invoiceDate: "2015-07-19",
+        totalAmount: 2028.97,
+      },
+      confidence: 0.9,
+      method: "llm",
+      documentType: "bill",
+      documentTypeConfidence: 0.9,
+    } as any);
+
+    const result = await extract(pngBuffer, { order: "model-first" });
+    expect(result.data.invoiceDate).toBe("2015-07-18");
+    expect(result.attempts[1]?.conflicts).toEqual([]);
   });
   it("conflict keeps rules value and still returns local without cloud", async () => {
     (config as any).ai.apiKey = "";

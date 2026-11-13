@@ -257,6 +257,7 @@ interface LocalStageOut {
   typeConf: number;
   fresh: boolean;
   passed: boolean;
+  conflicts: string[];
 }
 
 type FinalResult = ExtractionResult & {
@@ -348,11 +349,13 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         }
       : null;
   }
   const t0 = Date.now();
   let conflictNote: string | undefined;
+  let conflicts: string[] = [];
   try {
     const localRes = await runLocalLLMExtraction(text, lightType.type);
     const flanLatency = Date.now() - t0;
@@ -369,7 +372,6 @@ async function runLocalStage(
             : typeof v === "string"
               ? v.trim()
               : null;
-        const conflicts: string[] = [];
         for (const [k, v] of Object.entries(localRes.data)) {
           if (seed.data[k] == null && v != null) {
             seed.data[k] = v;
@@ -399,7 +401,7 @@ async function runLocalStage(
         }
       } else if (!rulesFirst && hasText && data) {
         const ruleCheck = extractRulesOnly(text, lightType.type);
-        const conflicts = fieldsConflict(
+        conflicts = fieldsConflict(
           ruleCheck.data,
           localRes.data as Record<string, unknown>,
         );
@@ -425,12 +427,21 @@ async function runLocalStage(
         latencyMs: flanLatency,
         cost: 0,
         succeeded: localOk,
+        conflicts,
         fallbackReason: localOk
           ? undefined
           : (conflictNote ??
             `local confidence ${conf} < 0.4, escalating to cloud`),
       });
-      return { data, conf, type, typeConf, fresh: true, passed: localOk };
+      return {
+        data,
+        conf,
+        type,
+        typeConf,
+        fresh: true,
+        passed: localOk,
+        conflicts,
+      };
     }
     attempts.push({
       method: "local-llm",
@@ -449,6 +460,7 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         }
       : {
           data: null,
@@ -457,6 +469,7 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         };
   } catch (e) {
     attempts.push({
@@ -479,6 +492,7 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         }
       : {
           data: null,
@@ -487,6 +501,7 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         };
   }
 }
@@ -526,6 +541,7 @@ async function runCloudStage(args: {
   const localConf = local?.conf ?? 0;
   const localType = local?.type ?? lightType.type;
   const localTypeConf = local?.typeConf ?? lightType.confidence;
+  const conflictFields = new Set(local?.conflicts ?? []);
   const needAI =
     cloudOnly ||
     !hasText ||
@@ -569,12 +585,15 @@ async function runCloudStage(args: {
     if (
       localData &&
       Object.keys(localData).length > 0 &&
-      ai.confidence >= localConf
+      (ai.confidence >= localConf || conflictFields.size > 0)
     ) {
       const merged: Record<string, unknown> = { ...localData };
       let filledFromAI = 0;
       for (const [k, v] of Object.entries(ai.data as Record<string, unknown>))
-        if (merged[k] == null && v != null) {
+        if (
+          v != null &&
+          (merged[k] == null || conflictFields.has(k))
+        ) {
           merged[k] = v;
           filledFromAI++;
         }
