@@ -2,32 +2,23 @@
  * controllers/documents.controller.ts — Document upload, listing, and export handlers.
  */
 
-import type { Request, Response, NextFunction } from "express";
-import { createHash, randomUUID } from "crypto";
-import fs from "fs/promises";
-import { pool } from "../db/pool.js";
-import { logger } from "../config/logger.js";
-import { extract, recordAttempts } from "../services/extraction.service.js";
-import {
-  needsRefinement,
-  isValidDate,
-} from "../services/confidence.service.js";
-import { normalizeCurrency } from "../utils/currency.js";
-import { parseAmount } from "../utils/amount.js";
-import { applyConversion, clearConversion } from "../utils/conversion.js";
-import { parseJsonColumn } from "../utils/json.js";
-import { enqueueRefineJob, retryRefineJobNow } from "../jobs/refine.js";
-import {
-  createContentFingerprint,
-  findDuplicateByContent,
-} from "../services/dedup.service.js";
-import { uuidSchema } from "../middleware/validate.js";
-import { getUser } from "../middleware/auth.js";
-import { getSummary as getSummaryData } from "../services/summary.service.js";
-import {
-  generateSummaryPdf,
-  generateSummaryCsv,
-} from "../services/export.service.js";
+import type { Request, Response, NextFunction } from 'express';
+import { createHash, randomUUID } from 'crypto';
+import fs from 'fs/promises';
+import { pool } from '../db/pool.js';
+import { logger } from '../config/logger.js';
+import { extract, recordAttempts } from '../services/extraction.service.js';
+import { needsRefinement, isValidDate } from '../services/confidence.service.js';
+import { normalizeCurrency } from '../utils/currency.js';
+import { parseAmount } from '../utils/amount.js';
+import { applyConversion, clearConversion } from '../utils/conversion.js';
+import { parseJsonColumn } from '../utils/json.js';
+import { enqueueRefineJob, retryRefineJobNow } from '../jobs/refine.js';
+import { findDuplicateByContent } from "../services/dedup.service.js";
+import { uuidSchema } from '../middleware/validate.js';
+import { getUser } from '../middleware/auth.js';
+import { getSummary as getSummaryData } from '../services/summary.service.js';
+import { generateSummaryPdf, generateSummaryCsv } from '../services/export.service.js';
 
 /**
  * Parses JSON data field from DB row.
@@ -53,13 +44,13 @@ async function maybeEnqueueRefine(
   userId: string,
   data: unknown,
   docType: string,
-  attempts: Array<{ conflicts?: string[] }> | undefined,
+  attempts: Array<{ conflicts?: string[] }> | undefined
 ): Promise<string | null> {
   try {
     const { needed, reason } = needsRefinement(
       (data ?? {}) as Record<string, unknown>,
       docType,
-      attempts ?? [],
+      attempts ?? []
     );
     if (needed && reason) {
       await enqueueRefineJob(docId, userId, reason);
@@ -67,7 +58,7 @@ async function maybeEnqueueRefine(
     }
     return null;
   } catch (e) {
-    logger.warn("Refine enqueue check failed", { error: (e as Error).message });
+    logger.warn('Refine enqueue check failed', { error: (e as Error).message });
     return null;
   }
 }
@@ -81,12 +72,12 @@ async function maybeEnqueueRefine(
  */
 async function withCorrectionsReapplied(
   docId: string,
-  data: Record<string, unknown>,
+  data: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
   try {
     const [rows] = await pool.query(
-      "SELECT field, corrected_value FROM corrections WHERE document_id=? ORDER BY created_at ASC",
-      [docId],
+      'SELECT field, corrected_value FROM corrections WHERE document_id=? ORDER BY created_at ASC',
+      [docId]
     );
     const list = rows as Array<{
       field: string;
@@ -97,13 +88,13 @@ async function withCorrectionsReapplied(
     let financialAmountCorrected = false;
     for (const c of list) {
       if (c.corrected_value == null) continue;
-      if (c.field === "totalAmount") {
+      if (c.field === 'totalAmount') {
         const n = Number(c.corrected_value);
         merged[c.field] = isFinite(n) ? n : c.corrected_value;
         financialAmountCorrected = true;
       } else {
         merged[c.field] = c.corrected_value;
-        if (c.field === "currency") financialAmountCorrected = true;
+        if (c.field === 'currency') financialAmountCorrected = true;
       }
     }
     if (financialAmountCorrected) {
@@ -111,12 +102,12 @@ async function withCorrectionsReapplied(
       try {
         await applyConversion(merged);
       } catch {
-        logger.warn("Reapplied-correction FX recompute failed", { docId });
+        logger.warn('Reapplied-correction FX recompute failed', { docId });
       }
     }
     return merged;
   } catch (e) {
-    logger.warn("Corrections lookup failed, using uncorrected data", {
+    logger.warn('Corrections lookup failed, using uncorrected data', {
       docId,
       error: (e as Error).message,
     });
@@ -131,11 +122,11 @@ async function withCorrectionsReapplied(
  */
 async function latestRefineStatus(
   docId: string,
-  userId: string,
+  userId: string
 ): Promise<{ status: string | null; error: string | null }> {
   const [rows] = await pool.query(
-    "SELECT status, error FROM refine_jobs WHERE document_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1",
-    [docId, userId],
+    'SELECT status, error FROM refine_jobs WHERE document_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1',
+    [docId, userId]
   );
   const row = (rows as Array<{ status: string; error: string | null }>)[0];
   return { status: row?.status ?? null, error: row?.error ?? null };
@@ -146,16 +137,14 @@ type ExtractOutcome = NonNullable<Awaited<ReturnType<typeof extract>>>;
 function respondDuplicate(
   res: Response,
   duplicate: Awaited<ReturnType<typeof findDuplicateByContent>>,
-  result?: ExtractOutcome,
+  result?: ExtractOutcome
 ): void {
   res.status(409).json({
-    error: "Duplicate document — updated existing record",
-    code: "DUPLICATE_UPDATED",
+    error: 'Duplicate document — updated existing record',
+    code: 'DUPLICATE_UPDATED',
     duplicateOf: duplicate.duplicateOf,
-    document_type:
-      result?.documentType ?? duplicate.matchedDocumentType ?? "unknown",
-    document_category:
-      result?.documentCategory ?? duplicate.matchedCategory ?? "unknown",
+    document_type: result?.documentType ?? duplicate.matchedDocumentType ?? 'unknown',
+    document_category: result?.documentCategory ?? duplicate.matchedCategory ?? 'unknown',
     data: result?.data ?? duplicate.matchedData ?? {},
   });
 }
@@ -169,60 +158,52 @@ function respondDuplicate(
  * @param next Next middleware
  * @returns void
  */
-export async function uploadDocument(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function uploadDocument(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const file = (req as unknown as { file?: Express.Multer.File }).file;
     if (!file) {
-      res
-        .status(400)
-        .json({ error: "No file uploaded. Field name must be 'file'." });
+      res.status(400).json({ error: "No file uploaded. Field name must be 'file'." });
       return;
     }
-    const { isSuspicious } = await import("../utils/security.js");
+    const { isSuspicious } = await import('../utils/security.js');
     if (isSuspicious(file.originalname)) {
       res.status(400).json({
-        error: "Suspicious file name detected — not saved",
-        code: "SUSPICIOUS_INPUT",
+        error: 'Suspicious file name detected — not saved',
+        code: 'SUSPICIOUS_INPUT',
       });
       return;
     }
     const filePath = file.path;
     const buffer = await fs.readFile(filePath);
     const header = buffer.subarray(0, 8);
-    const isPdf = header.subarray(0, 4).toString("latin1") === "%PDF";
-    const isPng =
-      header[0] === 0x89 &&
-      header.subarray(1, 4).toString("latin1") === "PNG";
+    const isPdf = header.subarray(0, 4).toString('latin1') === '%PDF';
+    const isPng = header[0] === 0x89 && header.subarray(1, 4).toString('latin1') === 'PNG';
     const isJpeg = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
     const expectedType = file.mimetype;
     const signatureMatches =
-      (expectedType === "application/pdf" && isPdf) ||
-      (expectedType === "image/png" && isPng) ||
-      ((expectedType === "image/jpeg" || expectedType === "image/jpg") && isJpeg);
+      (expectedType === 'application/pdf' && isPdf) ||
+      (expectedType === 'image/png' && isPng) ||
+      ((expectedType === 'image/jpeg' || expectedType === 'image/jpg') && isJpeg);
     if (header.length > 0 && !signatureMatches) {
       await fs.unlink(filePath);
       res.status(400).json({
-        error: "File contents do not match the uploaded file type",
-        code: "INVALID_FILE_CONTENT",
+        error: 'File contents do not match the uploaded file type',
+        code: 'INVALID_FILE_CONTENT',
       });
       return;
     }
     const id = randomUUID();
-    const contentHash = createHash("sha256").update(buffer).digest("hex");
+    const contentHash = createHash('sha256').update(buffer).digest('hex');
     const exactDuplicate = await findDuplicateByContent(
-      {} as ExtractOutcome["data"],
+      {} as ExtractOutcome['data'],
       user.id,
       undefined,
-      { contentHash },
+      { contentHash }
     );
     if (exactDuplicate.duplicate && exactDuplicate.duplicateOf) {
       await fs.unlink(filePath);
@@ -233,15 +214,15 @@ export async function uploadDocument(
     try {
       await pool.query(
         "INSERT INTO documents (id, name, path, status, document_type, document_category, user_id, content_hash) VALUES (?, ?, ?, 'pending', 'unknown', 'unknown', ?, ?)",
-        [id, file.originalname, filePath, user.id, contentHash],
+        [id, file.originalname, filePath, user.id, contentHash]
       );
     } catch (error) {
-      if ((error as { code?: string }).code === "ER_DUP_ENTRY") {
+      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
         const duplicate = await findDuplicateByContent(
-          {} as ExtractOutcome["data"],
+          {} as ExtractOutcome['data'],
           user.id,
           undefined,
-          { contentHash },
+          { contentHash }
         );
         if (duplicate.duplicate && duplicate.duplicateOf) {
           await fs.unlink(filePath);
@@ -251,35 +232,29 @@ export async function uploadDocument(
       }
       throw error;
     }
-    const [createdRows] = await pool.query(
-      "SELECT created_at FROM documents WHERE id=?",
-      [id],
-    );
+    const [createdRows] = await pool.query('SELECT created_at FROM documents WHERE id=?', [id]);
     const created_at =
-      (createdRows as Array<{ created_at: string }>)[0]?.created_at ??
-      new Date().toISOString();
-    logger.info("Document uploaded", {
+      (createdRows as Array<{ created_at: string }>)[0]?.created_at ?? new Date().toISOString();
+    logger.info('Document uploaded', {
       docId: id,
       name: file.originalname,
       path: filePath,
     });
-    await pool.query("UPDATE documents SET status='processing' WHERE id=?", [
-      id,
-    ]);
-    logger.info("Extraction queued", { docId: id });
+    await pool.query("UPDATE documents SET status='processing' WHERE id=?", [id]);
+    logger.info('Extraction queued', { docId: id });
 
     // Extraction runs in the background worker so uploads stay fast even for
     // large scanned PDFs. The frontend polls /api/documents/:id until the
     // status reaches done / failed / dead.
-    await enqueueRefineJob(id, user.id, "initial extraction");
+    await enqueueRefineJob(id, user.id, 'initial extraction');
     res.status(202).json({
       id,
       name: file.originalname,
-      status: "pending",
+      status: 'pending',
       created_at,
     });
   } catch (err) {
-    logger.error("Upload failed", {
+    logger.error('Upload failed', {
       error: (err as Error).message,
       stack: (err as Error).stack,
     });
@@ -294,19 +269,14 @@ export async function uploadDocument(
  * @param next Next middleware
  * @returns void
  */
-export async function listDocuments(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function listDocuments(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    const pagination = (req as unknown as Record<string, unknown>)
-      ._pagination as
+    const pagination = (req as unknown as Record<string, unknown>)._pagination as
       | {
           limit: number;
           offset: number;
@@ -320,44 +290,40 @@ export async function listDocuments(
     const q = pagination?.q?.trim() || undefined;
     const docTypes = (pagination?.document_type ?? []).filter(Boolean);
     const docCat =
-      pagination?.document_category ||
-      (req.query.document_category as string | undefined);
-    const where: string[] = ["user_id = ?", "expires_at > NOW()"];
+      pagination?.document_category || (req.query.document_category as string | undefined);
+    const where: string[] = ['user_id = ?', 'expires_at > NOW()'];
     const params: unknown[] = [user.id];
     if (q) {
-      where.push("name LIKE ?");
-      const escaped = q.replace(/[%_\\]/g, "\\$&");
+      where.push('name LIKE ?');
+      const escaped = q.replace(/[%_\\]/g, '\\$&');
       params.push(`%${escaped}%`);
     }
     if (docTypes.length) {
-      where.push(`document_type IN (${docTypes.map(() => "?").join(",")})`);
+      where.push(`document_type IN (${docTypes.map(() => '?').join(',')})`);
       params.push(...docTypes);
     }
-    if (docCat && ["financial", "unknown"].includes(docCat)) {
-      where.push("document_category = ?");
+    if (docCat && ['financial', 'unknown'].includes(docCat)) {
+      where.push('document_category = ?');
       params.push(docCat);
     }
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const [totalRows] = await pool.query(
       `SELECT COUNT(*) as cnt FROM documents ${whereSql}`,
-      params,
+      params
     );
     const total = (totalRows as Array<{ cnt: number }>)[0]?.cnt ?? 0;
     const [rows] = await pool.query(
       `SELECT id, name, status, document_type, document_category, data, error, created_at, updated_at, expires_at FROM documents ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      [...params, limit, offset],
+      [...params, limit, offset]
     );
     const list = rows as Array<Record<string, unknown>>;
-    const refineByDoc: Record<
-      string,
-      { status: string; error: string | null }
-    > = {};
+    const refineByDoc: Record<string, { status: string; error: string | null }> = {};
     if (list.length > 0) {
-      const ids = list.map((r) => r.id as string);
-      const placeholders = ids.map(() => "?").join(",");
+      const ids = list.map(r => r.id as string);
+      const placeholders = ids.map(() => '?').join(',');
       const [rrows] = await pool.query(
         `SELECT r.document_id, r.status, r.error FROM refine_jobs r INNER JOIN (SELECT document_id, MAX(created_at) AS mc FROM refine_jobs WHERE document_id IN (${placeholders}) GROUP BY document_id) latest ON latest.document_id = r.document_id AND latest.mc = r.created_at`,
-        ids,
+        ids
       );
       for (const r of rrows as Array<{
         document_id: string;
@@ -366,7 +332,7 @@ export async function listDocuments(
       }>)
         refineByDoc[r.document_id] = { status: r.status, error: r.error };
     }
-    const documents = list.map((r) => ({
+    const documents = list.map(r => ({
       ...r,
       data: parseDataField(r as { data: string | null }),
       refine_status: refineByDoc[r.id as string]?.status ?? null,
@@ -385,30 +351,26 @@ export async function listDocuments(
  * @param next Next middleware
  * @returns void
  */
-export async function getDocument(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function getDocument(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const id = req.params.id;
     const parsed = uuidSchema.safeParse(id);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid document id" });
+      res.status(400).json({ error: 'Invalid document id' });
       return;
     }
     const [rows] = await pool.query(
-      "SELECT id, name, status, document_type, document_category, data, error, created_at, updated_at, expires_at FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()",
-      [id, user.id],
+      'SELECT id, name, status, document_type, document_category, data, error, created_at, updated_at, expires_at FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [id, user.id]
     );
     const row = (rows as Array<Record<string, unknown>>)[0];
     if (!row) {
-      res.status(404).json({ error: "Document not found" });
+      res.status(404).json({ error: 'Document not found' });
       return;
     }
     const refine = await latestRefineStatus(parsed.data, user.id);
@@ -430,34 +392,30 @@ export async function getDocument(
  * @param next Next middleware
  * @returns void
  */
-export async function getAttempts(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function getAttempts(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const id = req.params.id;
     const parsed = uuidSchema.safeParse(id);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid document id" });
+      res.status(400).json({ error: 'Invalid document id' });
       return;
     }
     const [docs] = await pool.query(
-      "SELECT id FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()",
-      [id, user.id],
+      'SELECT id FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [id, user.id]
     );
     if (!(docs as Array<unknown>)[0]) {
-      res.status(404).json({ error: "Document not found" });
+      res.status(404).json({ error: 'Document not found' });
       return;
     }
     const [rows] = await pool.query(
-      "SELECT method, predicted_type, confidence, latency_ms, cost_estimate, input_tokens, output_tokens, succeeded, fallback_reason, created_at FROM extraction_attempts WHERE document_id=? ORDER BY created_at ASC, id ASC",
-      [id],
+      'SELECT method, predicted_type, confidence, latency_ms, cost_estimate, input_tokens, output_tokens, succeeded, fallback_reason, created_at FROM extraction_attempts WHERE document_id=? ORDER BY created_at ASC, id ASC',
+      [id]
     );
     res.json({ attempts: rows });
   } catch (err) {
@@ -472,46 +430,42 @@ export async function getAttempts(
  * @param next Next middleware
  * @returns void
  */
-export async function reprocessDocument(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function reprocessDocument(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const id = req.params.id;
     const parsed = uuidSchema.safeParse(id);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid document id" });
+      res.status(400).json({ error: 'Invalid document id' });
       return;
     }
     const [rows] = await pool.query(
-      "SELECT id, path FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()",
-      [id, user.id],
+      'SELECT id, path FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [id, user.id]
     );
     const row = (rows as Array<{ id: string; path: string }>)[0];
     if (!row) {
-      res.status(404).json({ error: "Document not found" });
+      res.status(404).json({ error: 'Document not found' });
       return;
     }
     let result: Awaited<ReturnType<typeof extract>> | null = null;
     try {
       result = await extract(row.path, { allowCloud: false });
     } catch (e) {
-      await pool.query(
-        "UPDATE documents SET status='failed', error=? WHERE id=?",
-        [(e as Error).message.slice(0, 500), id],
-      );
-      res.json({ id, status: "failed", enqueued: false });
+      await pool.query("UPDATE documents SET status='failed', error=? WHERE id=?", [
+        (e as Error).message.slice(0, 500),
+        id,
+      ]);
+      res.json({ id, status: 'failed', enqueued: false });
       return;
     }
     const preservedRe = await withCorrectionsReapplied(
       parsed.data,
-      result.data as Record<string, unknown>,
+      result.data as Record<string, unknown>
     );
     await pool.query(
       "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, error=NULL WHERE id=?",
@@ -521,7 +475,7 @@ export async function reprocessDocument(
         JSON.stringify(preservedRe),
         result.extractedText,
         parsed.data,
-      ],
+      ]
     );
     await recordAttempts(parsed.data, result.attempts);
     const reason = await maybeEnqueueRefine(
@@ -529,11 +483,11 @@ export async function reprocessDocument(
       user.id,
       preservedRe,
       result.documentType,
-      result.attempts,
+      result.attempts
     );
     res.json({
       id: parsed.data,
-      status: "done",
+      status: 'done',
       enqueued: reason != null,
       reason,
     });
@@ -545,38 +499,34 @@ export async function reprocessDocument(
 /**
  * Immediately retries cloud refinement for an owned completed document.
  */
-export async function retryDocumentRefinement(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function retryDocumentRefinement(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const parsed = uuidSchema.safeParse(req.params.id);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid document id" });
+      res.status(400).json({ error: 'Invalid document id' });
       return;
     }
     const [rows] = await pool.query(
-      "SELECT id, status FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()",
-      [parsed.data, user.id],
+      'SELECT id, status FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [parsed.data, user.id]
     );
     const doc = (rows as Array<{ id: string; status: string }>)[0];
     if (!doc) {
-      res.status(404).json({ error: "Document not found" });
+      res.status(404).json({ error: 'Document not found' });
       return;
     }
-    if (doc.status !== "done") {
-      res.status(409).json({ error: "Only completed documents can be refined" });
+    if (doc.status !== 'done') {
+      res.status(409).json({ error: 'Only completed documents can be refined' });
       return;
     }
     const status = await retryRefineJobNow(doc.id, user.id);
-    if (status === "working") {
-      res.status(409).json({ error: "Refinement is already in progress" });
+    if (status === 'working') {
+      res.status(409).json({ error: 'Refinement is already in progress' });
       return;
     }
     res.status(202).json({ id: doc.id, status, enqueued: true });
@@ -587,11 +537,11 @@ export async function retryDocumentRefinement(
 
 // Converted fields are derived, never directly correctable.
 const CORRECTABLE_FIELDS = [
-  "vendor",
-  "invoiceNumber",
-  "invoiceDate",
-  "totalAmount",
-  "currency",
+  'vendor',
+  'invoiceNumber',
+  'invoiceDate',
+  'totalAmount',
+  'currency',
 ] as const;
 
 /**
@@ -600,20 +550,17 @@ const CORRECTABLE_FIELDS = [
  * @param value Raw value
  * @returns Normalized value or null when invalid
  */
-function normalizeCorrection(
-  field: string,
-  value: unknown,
-): string | number | null {
-  if (field === "totalAmount") {
+function normalizeCorrection(field: string, value: unknown): string | number | null {
+  if (field === 'totalAmount') {
     const n = parseAmount(value);
     return n != null && n >= 0 ? n : null;
   }
-  if (field === "invoiceDate") {
-    const s = String(value ?? "").trim();
+  if (field === 'invoiceDate') {
+    const s = String(value ?? '').trim();
     return isValidDate(s) ? s : null;
   }
-  if (field === "currency") return normalizeCurrency(value);
-  const s = String(value ?? "")
+  if (field === 'currency') return normalizeCurrency(value);
+  const s = String(value ?? '')
     .trim()
     .slice(0, 500);
   return s ? s : null;
@@ -626,50 +573,44 @@ function normalizeCorrection(
  * @param next Next middleware
  * @returns void
  */
-export async function correctField(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function correctField(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const id = req.params.id;
     const parsed = uuidSchema.safeParse(id);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid document id" });
+      res.status(400).json({ error: 'Invalid document id' });
       return;
     }
-    const field = String((req.body as { field?: unknown }).field ?? "");
+    const field = String((req.body as { field?: unknown }).field ?? '');
     if (!(CORRECTABLE_FIELDS as readonly string[]).includes(field)) {
       res.status(400).json({
-        error: `Field must be one of: ${CORRECTABLE_FIELDS.join(", ")}`,
+        error: `Field must be one of: ${CORRECTABLE_FIELDS.join(', ')}`,
       });
       return;
     }
-    const value = normalizeCorrection(
-      field,
-      (req.body as { value?: unknown }).value,
-    );
+    const value = normalizeCorrection(field, (req.body as { value?: unknown }).value);
     if (value == null) {
       res.status(400).json({ error: `Invalid value for ${field}` });
       return;
     }
     const [rows] = await pool.query(
-      "SELECT id, data FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()",
-      [parsed.data, user.id],
+      'SELECT id, data FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [parsed.data, user.id]
     );
     const row = (rows as Array<{ id: string; data: string | null }>)[0];
     if (!row) {
-      res.status(404).json({ error: "Document not found" });
+      res.status(404).json({ error: 'Document not found' });
       return;
     }
-    const data: Record<string, unknown> = parseJsonColumn<
-      Record<string, unknown>
-    >(row.data as string, {});
+    const data: Record<string, unknown> = parseJsonColumn<Record<string, unknown>>(
+      row.data as string,
+      {}
+    );
     const original = data[field] ?? null;
     if (original === value) {
       res.json({
@@ -682,26 +623,26 @@ export async function correctField(
       return;
     }
     data[field] = value;
-    if (field === "totalAmount" || field === "currency") {
+    if (field === 'totalAmount' || field === 'currency') {
       clearConversion(data);
       try {
         await applyConversion(data);
       } catch {
-        logger.warn("Correction FX recompute failed, leaving unconverted", {
+        logger.warn('Correction FX recompute failed, leaving unconverted', {
           docId: parsed.data,
         });
       }
     }
-    await pool.query(
-      "UPDATE documents SET data=?, updated_at=NOW() WHERE id=?",
-      [JSON.stringify(data), parsed.data],
-    );
+    await pool.query('UPDATE documents SET data=?, updated_at=NOW() WHERE id=?', [
+      JSON.stringify(data),
+      parsed.data,
+    ]);
     let method: string | null = null;
     let confidence: number | null = null;
     try {
       const [arows] = await pool.query(
-        "SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1",
-        [parsed.data],
+        'SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
+        [parsed.data]
       );
       const last = (arows as Array<{ method: string; confidence: number }>)[0];
       if (last) {
@@ -710,7 +651,7 @@ export async function correctField(
       }
     } catch {}
     await pool.query(
-      "INSERT INTO corrections (id, document_id, user_id, field, original_value, corrected_value, extraction_method, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      'INSERT INTO corrections (id, document_id, user_id, field, original_value, corrected_value, extraction_method, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         randomUUID(),
         parsed.data,
@@ -720,7 +661,7 @@ export async function correctField(
         String(value),
         method,
         confidence,
-      ],
+      ]
     );
     res.json({
       id: parsed.data,
@@ -741,34 +682,30 @@ export async function correctField(
  * @param next Next middleware
  * @returns void
  */
-export async function listCorrections(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function listCorrections(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const id = req.params.id;
     const parsed = uuidSchema.safeParse(id);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid document id" });
+      res.status(400).json({ error: 'Invalid document id' });
       return;
     }
     const [docs] = await pool.query(
-      "SELECT id FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()",
-      [parsed.data, user.id],
+      'SELECT id FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [parsed.data, user.id]
     );
     if (!(docs as Array<unknown>)[0]) {
-      res.status(404).json({ error: "Document not found" });
+      res.status(404).json({ error: 'Document not found' });
       return;
     }
     const [rows] = await pool.query(
-      "SELECT field, original_value, corrected_value, extraction_method, confidence, created_at FROM corrections WHERE document_id=? ORDER BY created_at DESC",
-      [parsed.data],
+      'SELECT field, original_value, corrected_value, extraction_method, confidence, created_at FROM corrections WHERE document_id=? ORDER BY created_at DESC',
+      [parsed.data]
     );
     res.json({ corrections: rows });
   } catch (err) {
@@ -783,28 +720,24 @@ export async function listCorrections(
  * @param next Next middleware
  * @returns void
  */
-export async function correctionStats(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function correctionStats(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const [byField] = await pool.query(
-      "SELECT field, COUNT(*) AS cnt FROM corrections WHERE user_id=? GROUP BY field ORDER BY cnt DESC",
-      [user.id],
+      'SELECT field, COUNT(*) AS cnt FROM corrections WHERE user_id=? GROUP BY field ORDER BY cnt DESC',
+      [user.id]
     );
     const [byType] = await pool.query(
-      "SELECT d.document_type, COUNT(*) AS cnt FROM corrections c JOIN documents d ON d.id=c.document_id WHERE c.user_id=? GROUP BY d.document_type ORDER BY cnt DESC",
-      [user.id],
+      'SELECT d.document_type, COUNT(*) AS cnt FROM corrections c JOIN documents d ON d.id=c.document_id WHERE c.user_id=? GROUP BY d.document_type ORDER BY cnt DESC',
+      [user.id]
     );
     const [byMethod] = await pool.query(
       "SELECT COALESCE(extraction_method,'unknown') AS method, COUNT(*) AS cnt FROM corrections WHERE user_id=? GROUP BY method ORDER BY cnt DESC",
-      [user.id],
+      [user.id]
     );
     res.json({ byField, byType, byMethod });
   } catch (err) {
@@ -819,28 +752,20 @@ export async function correctionStats(
  * @param next Next middleware
  * @returns void
  */
-export async function getSummary(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function getSummary(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
     const category =
-      typeof req.query.category === "string"
+      typeof req.query.category === 'string'
         ? req.query.category
-        : typeof req.query.document_category === "string"
+        : typeof req.query.document_category === 'string'
           ? req.query.document_category
           : undefined;
-    const summary = await getSummaryData(
-      user.id,
-      30,
-      category ? { category } : undefined,
-    );
+    const summary = await getSummaryData(user.id, 30, category ? { category } : undefined);
     res.json(summary);
   } catch (err) {
     next(err);
@@ -854,39 +779,35 @@ export async function getSummary(
  * @param next Next middleware
  * @returns void
  */
-export async function exportSummary(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
+export async function exportSummary(req: Request, res: Response, next: NextFunction) {
   try {
     const user = getUser(req);
     if (!user) {
-      res.status(401).json({ error: "Not authenticated" });
+      res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    const format = String(req.query.format || "pdf").toLowerCase();
+    const format = String(req.query.format || 'pdf').toLowerCase();
     const category =
-      typeof req.query.category === "string"
+      typeof req.query.category === 'string'
         ? req.query.category
-        : typeof req.query.document_category === "string"
+        : typeof req.query.document_category === 'string'
           ? req.query.document_category
           : undefined;
-    if (format === "csv") {
+    if (format === 'csv') {
       const csv = await generateSummaryCsv(user.id, category);
-      res.setHeader("Content-Type", "text/csv");
+      res.setHeader('Content-Type', 'text/csv');
       res.setHeader(
-        "Content-Disposition",
-        `attachment; filename=parsetrail-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+        'Content-Disposition',
+        `attachment; filename=parsetrail-summary-${new Date().toISOString().slice(0, 10)}.csv`
       );
       res.send(csv);
       return;
     }
     const pdf = await generateSummaryPdf(user.id, category);
-    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=parsetrail-summary-${new Date().toISOString().slice(0, 10)}.pdf`,
+      'Content-Disposition',
+      `attachment; filename=parsetrail-summary-${new Date().toISOString().slice(0, 10)}.pdf`
     );
     res.send(pdf);
   } catch (err) {

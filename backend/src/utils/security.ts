@@ -33,13 +33,12 @@ const PATH_PATTERNS = [/\.\.\//, /\.\.\\/, /%2e%2e/i];
  * @returns True if suspicious
  */
 export function isSuspicious(input: string | undefined | null): boolean {
-  if (!input || typeof input !== "string") return false;
+  if (!input || typeof input !== 'string') return false;
   const s = input.toString();
   if (s.length > 1000) return true;
   for (const p of [...SQL_PATTERNS, ...XSS_PATTERNS, ...PATH_PATTERNS]) {
     if (p.test(s)) return true;
   }
-  if ((s.match(/;/g) || []).length > 1 && /SELECT|INSERT|DELETE/i.test(s))
-    return true;
+  if ((s.match(/;/g) || []).length > 1 && /SELECT|INSERT|DELETE/i.test(s)) return true;
   return false;
 }

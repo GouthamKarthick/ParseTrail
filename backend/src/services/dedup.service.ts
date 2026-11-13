@@ -2,11 +2,11 @@
  * services/dedup.service.ts — Duplicate document detection.
  */
 
-import { pool } from "../db/pool.js";
-import { createHash } from "crypto";
-import type { ExtractedData } from "../types/index.js";
-import { normalizeCurrency } from "../utils/currency.js";
-import { parseJsonColumn } from "../utils/json.js";
+import { pool } from '../db/pool.js';
+import { createHash } from 'crypto';
+import type { ExtractedData } from '../types/index.js';
+import { normalizeCurrency } from '../utils/currency.js';
+import { parseJsonColumn } from '../utils/json.js';
 
 /**
  * Normalizes vendor string.
@@ -15,7 +15,7 @@ import { parseJsonColumn } from "../utils/json.js";
  */
 function normVendor(v?: string): string | null {
   if (!v) return null;
-  return v.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 120);
+  return v.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 120);
 }
 
 /**
@@ -48,19 +48,13 @@ function normTotal(v?: number): number | null {
   return Number(Number(v).toFixed(2));
 }
 
-export function createContentFingerprint(
-  data: ExtractedData,
-  docType: string,
-): string | null {
+export function createContentFingerprint(data: ExtractedData, docType: string): string | null {
   const fields = data as Record<string, unknown>;
   const vendor = normVendor(fields.vendor as string | undefined);
-  const invoiceNumber = normInvoiceNo(
-    fields.invoiceNumber as string | undefined,
-  );
+  const invoiceNumber = normInvoiceNo(fields.invoiceNumber as string | undefined);
   const totalAmount = normTotal(fields.totalAmount as number | undefined);
   const currency = normCurrency(fields.currency as string | undefined);
-  if (!vendor || !invoiceNumber || totalAmount == null || !currency)
-    return null;
+  if (!vendor || !invoiceNumber || totalAmount == null || !currency) return null;
   const normalized = JSON.stringify([
     docType.toLowerCase(),
     vendor,
@@ -68,7 +62,7 @@ export function createContentFingerprint(
     totalAmount,
     currency,
   ]);
-  return createHash("sha256").update(normalized).digest("hex");
+  return createHash('sha256').update(normalized).digest('hex');
 }
 
 /**
@@ -88,8 +82,7 @@ function isDuplicateContent(a: ExtractedData, b: ExtractedData): boolean {
   const bt = normTotal(br.totalAmount as number | undefined);
   const ac = normCurrency(ar.currency as string | undefined);
   const bc = normCurrency(br.currency as string | undefined);
-  if (!av || !bv || !ai || !bi || at == null || bt == null || !ac || !bc)
-    return false;
+  if (!av || !bv || !ai || !bi || at == null || bt == null || !ac || !bc) return false;
   return av === bv && ai === bi && at === bt && ac === bc;
 }
 
@@ -104,7 +97,7 @@ export async function findDuplicateByContent(
   newData: ExtractedData,
   userId?: string,
   docTypeHint?: string,
-  options?: { contentHash?: string; excludeDocumentId?: string },
+  options?: { contentHash?: string; excludeDocumentId?: string }
 ): Promise<{
   duplicate: boolean;
   duplicateOf?: string;
@@ -113,15 +106,13 @@ export async function findDuplicateByContent(
   matchedCategory?: string;
 }> {
   const type =
-    (docTypeHint || (newData as Record<string, unknown>).documentType || "")
+    (docTypeHint || (newData as Record<string, unknown>).documentType || '')
       .toString()
-      .toLowerCase() || "invoice";
-  const ownerClause = userId ? "user_id=? AND " : "";
+      .toLowerCase() || 'invoice';
+  const ownerClause = userId ? 'user_id=? AND ' : '';
   const ownerParams = userId ? [userId] : [];
-  const excludeClause = options?.excludeDocumentId ? "AND id<>? " : "";
-  const excludeParams = options?.excludeDocumentId
-    ? [options.excludeDocumentId]
-    : [];
+  const excludeClause = options?.excludeDocumentId ? 'AND id<>? ' : '';
+  const excludeParams = options?.excludeDocumentId ? [options.excludeDocumentId] : [];
   /**
    * Returns the first row whose parsed data matches newData, skipping rows
    * whose data column is not valid JSON.
@@ -132,13 +123,15 @@ export async function findDuplicateByContent(
       data: string | null;
       document_type: string;
       document_category: string;
-    }>,
-  ): {
-    id: string;
-    data: ExtractedData;
-    document_type: string;
-    document_category: string;
-  } | undefined {
+    }>
+  ):
+    | {
+        id: string;
+        data: ExtractedData;
+        document_type: string;
+        document_category: string;
+      }
+    | undefined {
     for (const r2 of rows) {
       const d = parseJsonColumn<ExtractedData | null>(r2.data as string, null);
       if (!d) continue;
@@ -156,7 +149,7 @@ export async function findDuplicateByContent(
   if (options?.contentHash) {
     const [hashRows] = await pool.query(
       `SELECT id, data, document_type, document_category FROM documents WHERE ${ownerClause}content_hash=? AND status IN ('pending','processing','done') AND expires_at > NOW() ${excludeClause}ORDER BY created_at DESC, id DESC LIMIT 1`,
-      [...ownerParams, options.contentHash, ...excludeParams],
+      [...ownerParams, options.contentHash, ...excludeParams]
     );
     const match = findMatchInRows(
       hashRows as Array<{
@@ -164,7 +157,7 @@ export async function findDuplicateByContent(
         data: string | null;
         document_type: string;
         document_category: string;
-      }>,
+      }>
     );
     if (match)
       return {
@@ -180,7 +173,7 @@ export async function findDuplicateByContent(
   if (fingerprint) {
     const [fingerprintRows] = await pool.query(
       `SELECT id, data, document_type, document_category FROM documents WHERE ${ownerClause}content_fingerprint=? AND document_type=? AND status='done' AND expires_at > NOW() ${excludeClause}ORDER BY created_at DESC, id DESC LIMIT 1`,
-      [...ownerParams, fingerprint, type, ...excludeParams],
+      [...ownerParams, fingerprint, type, ...excludeParams]
     );
     const match = findMatchInRows(
       fingerprintRows as Array<{
@@ -188,7 +181,7 @@ export async function findDuplicateByContent(
         data: string | null;
         document_type: string;
         document_category: string;
-      }>,
+      }>
     );
     if (match)
       return {
@@ -210,11 +203,11 @@ export async function findDuplicateByContent(
     ? "WHERE status='done' AND data IS NOT NULL AND user_id=? AND document_type=? AND expires_at > NOW()"
     : "WHERE status='done' AND data IS NOT NULL AND document_type=? AND expires_at > NOW()";
   const params = userId ? [userId, type] : [type];
-  const excludeIdFilter = options?.excludeDocumentId ? " AND id<>?" : "";
+  const excludeIdFilter = options?.excludeDocumentId ? ' AND id<>?' : '';
   if (options?.excludeDocumentId) params.push(options.excludeDocumentId);
   const [rows] = await pool.query(
     `SELECT id, data, document_type, document_category FROM documents ${where}${excludeIdFilter} ORDER BY created_at DESC, id DESC LIMIT 200`,
-    params,
+    params
   );
   const match = findMatchInRows(
     rows as Array<{
@@ -222,7 +215,7 @@ export async function findDuplicateByContent(
       data: string | null;
       document_type: string;
       document_category: string;
-    }>,
+    }>
   );
   if (match)
     return {

@@ -2,19 +2,12 @@
  * types/index.ts — Shared document and extraction types.
  */
 
-export type DocumentStatus = "pending" | "processing" | "done" | "failed";
+export type DocumentStatus = 'pending' | 'processing' | 'done' | 'failed';
 
 export type DocumentType =
-  | "invoice"
-  | "receipt"
-  | "payment"
-  | "bill"
-  | "payslip"
-  | "settlement_slip"
-  | "other"
-  | "unknown";
+  'invoice' | 'receipt' | 'payment' | 'bill' | 'payslip' | 'settlement_slip' | 'other' | 'unknown';
 
-export type DocumentCategory = "financial" | "unknown";
+export type DocumentCategory = 'financial' | 'unknown';
 
 export interface FinancialData {
   vendor?: string;
@@ -63,4 +56,4 @@ export interface AttemptRecord {
   outputTokens?: number;
 }
 
-export type ExtractionOrder = "model-first" | "rules-first";
+export type ExtractionOrder = 'model-first' | 'rules-first';
