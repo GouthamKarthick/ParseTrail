@@ -386,6 +386,55 @@ export async function getDocument(req: Request, res: Response, next: NextFunctio
 }
 
 /**
+ * Deletes a document and all its derived records (attempts, corrections,
+ * refine jobs cascade via ON DELETE CASCADE), then unlinks the uploaded file.
+ * Returns 404 (never 403) when the document does not exist or belongs to
+ * another user, to avoid leaking existence. Idempotent: a second delete
+ * returns 404.
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
+export async function deleteDocument(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = getUser(req);
+    if (!user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    const id = req.params.id;
+    const parsed = uuidSchema.safeParse(id);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid document id' });
+      return;
+    }
+    // Fetch the row + path first so we can unlink the file after deletion.
+    // Ownership is enforced in the WHERE clause; a missing or foreign row
+    // yields 404 (never 403) to avoid leaking existence.
+    const [rows] = await pool.query(
+      'SELECT path FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [parsed.data, user.id]
+    );
+    const row = (rows as Array<{ path: string }>)[0];
+    if (!row) {
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+    await pool.query('DELETE FROM documents WHERE id=?', [parsed.data]);
+    // Best-effort unlink of the uploaded file; ignore ENOENT (already gone).
+    try {
+      await fs.unlink(row.path);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Returns per-stage extraction attempts for a document.
  * @param req Express request
  * @param res Express response

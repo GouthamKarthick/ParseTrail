@@ -434,6 +434,23 @@ export async function retryDocumentRefinement(id: string) {
   return body as { id: string; status: string; enqueued: boolean };
 }
 
+/**
+ * Delete a document and all its derived records.
+ * @param id - Document identifier
+ * @returns Void on success (204)
+ * @example await deleteDocument("abc-123");
+ */
+export async function deleteDocument(id: string) {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(body.error || 'Delete failed', res.status, body.code);
+  }
+}
+
 async function fetchDocSub<T>(id: string, sub: string, method = 'GET', body?: unknown): Promise<T> {
   const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}/${sub}`, {
     method,

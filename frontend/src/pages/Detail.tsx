@@ -8,6 +8,7 @@ import { usePolling } from '../hooks/usePolling';
 import { useToastContext } from '../context/ToastContext';
 import {
   retryDocumentRefinement as retryDocumentRefinementRequest,
+  deleteDocument,
   getAttempts,
   submitCorrection,
   listCorrections,
@@ -46,6 +47,8 @@ export default function Detail() {
     draft: string;
   } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const latestLlmAttempt = [...attempts].reverse().find(attempt => attempt.method === 'llm');
   const latestLlmFailure =
     latestLlmAttempt && !latestLlmAttempt.succeeded && latestLlmAttempt.fallback_reason
@@ -107,6 +110,19 @@ export default function Detail() {
       show('error', (e as Error).message);
     } finally {
       setRetrying(false);
+    }
+  }
+
+  async function deleteDoc() {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      await deleteDocument(id);
+      show('success', 'Document deleted');
+      nav('/documents');
+    } catch (e) {
+      setDeleting(false);
+      show('error', (e as Error).message || 'Delete failed');
     }
   }
 
@@ -181,6 +197,14 @@ export default function Detail() {
                 {retrying ? 'Retrying…' : 'Retry AI'}
               </Button>
             )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => id && setConfirmDeleteId(id)}
+            disabled={deleting}
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </Button>
           <span className={styles['detail-date']}>
             <FormattedDate iso={doc.updated_at} inline />
           </span>
@@ -358,6 +382,39 @@ export default function Detail() {
             ))}
           </ul>
         </div>
+      )}
+
+      {confirmDeleteId && (
+        <dialog
+          className={styles['detail-confirm-dialog']}
+          onClick={e => {
+            if (e.target === e.currentTarget) setConfirmDeleteId(null);
+          }}
+        >
+          <div className={styles['detail-confirm-panel']}>
+            <Heading level={3}>Delete document?</Heading>
+            <Text variant="muted">
+              This permanently removes the file, all extraction attempts, and correction history.
+              This cannot be undone.
+            </Text>
+            <div className={styles['detail-confirm-actions']}>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  setConfirmDeleteId(null);
+                  void deleteDoc();
+                }}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </dialog>
       )}
     </div>
   );
