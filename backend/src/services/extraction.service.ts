@@ -833,8 +833,7 @@ export async function extract(
     attempts,
     typeVotes,
   });
-  if (clouded)
-    return { ...clouded, extractedText, conflicts: local?.conflicts ?? [] };
+  if (clouded) return { ...clouded, extractedText, conflicts: local?.conflicts ?? [] };
   if (local && local.data && Object.keys(local.data).length > 0) {
     await enrichWithConversion(local.data as ExtractedData);
     return {
