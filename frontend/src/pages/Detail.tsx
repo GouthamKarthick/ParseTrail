@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { usePolling } from '../hooks/usePolling';
 import { useToastContext } from '../context/ToastContext';
 import {
@@ -37,6 +37,7 @@ export default function Detail() {
   const { id } = useParams<{ id: string }>();
   const { doc, error, refresh } = usePolling(id ?? null, 2000);
   const { show } = useToastContext();
+  const nav = useNavigate();
   const [retrying, setRetrying] = useState(false);
   const [attempts, setAttempts] = useState<ExtractionAttempt[]>([]);
   const [history, setHistory] = useState<Correction[]>([]);
@@ -187,8 +188,10 @@ export default function Detail() {
       </div>
 
       <div className={styles['detail-card']}>
-        {(doc.status === 'pending' || doc.status === 'processing') && (
-          <Text variant="muted">Processing… polling every 2s</Text>
+        {doc.status === 'pending' && <Text variant="muted">Queued</Text>}
+        {doc.status === 'processing' && <Text variant="muted">Extracting…</Text>}
+        {(doc.refine_status === 'queued' || doc.refine_status === 'working') && (
+          <Text variant="muted">Improving with cloud AI…</Text>
         )}
         {doc.error && (
           <Text as="p" variant="small" className={styles['detail-error']}>
@@ -304,11 +307,41 @@ export default function Detail() {
       )}
 
       {doc.status === 'done' && (doc.refine_status === 'dead' || latestLlmFailure) && (
-        <Text variant="small" className={styles['detail-refinement-note']}>
-          {doc.refine_error === 'source_unavailable'
-            ? 'AI enhancement could not continue because the original file and cached text are unavailable. Upload the document again to retry.'
-            : 'Document processing completed, but optional AI enhancement couldn’t finish.'}
-        </Text>
+        <div className={styles['detail-dead-state']}>
+          <Text variant="small" className={styles['detail-refinement-note']}>
+            {doc.refine_error === 'source_unavailable'
+              ? 'AI enhancement could not continue because the original file and cached text are unavailable.'
+              : doc.refine_error
+                ? `AI enhancement stopped: ${doc.refine_error}`
+                : 'Cloud refinement could not complete — this may be a provider quota limit or a poor scan.'}
+          </Text>
+          <div className={styles['detail-dead-actions']}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={retryDocumentRefinement}
+              disabled={retrying}
+            >
+              {retrying ? 'Retrying…' : 'Retry AI'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => nav('/')}>
+              Upload a clearer file
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                setEditing({
+                  field: Object.keys(doc.data ?? {}).find(k => CORRECTABLE.includes(k)) ?? 'vendor',
+                  draft: '',
+                })
+              }
+              disabled={!doc.data || Object.keys(doc.data).length === 0}
+            >
+              Correct fields manually
+            </Button>
+          </div>
+        </div>
       )}
 
       {history.length > 0 && (
