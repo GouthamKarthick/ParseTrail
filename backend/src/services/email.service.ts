@@ -48,20 +48,20 @@ export async function sendVerificationEmail(
 ) {
   const transport = getTransport();
   if (!transport) {
-    logger.warn("SMTP not configured, skipping verification email", { to });
+    logger.warn("SMTP not configured, skipping verification email");
     return;
   }
   const base = appUrl();
-  const link = `${base}/verify-email?token=${token}`;
+  const link = `${base}/verify-email?${new URLSearchParams({ token, email: to })}`;
   const codePart = code
-    ? `\nYour verification code is: ${code} (expires in 24h). Enter it at ${base}/verify-email`
+    ? `\nYour verification code is: ${code} (expires in 15 minutes). Enter it at ${base}/verify-email`
     : "";
   await transport.sendMail({
     from: config.smtp.from,
     to,
     subject: "Verify your ParseTrail email",
     text: `Verify your email: ${link}${codePart}`,
-    html: `<p>Click <a href="${link}">here</a> to verify your email (expires in 24h).</p>${code ? `<p>Or enter this code in the app: <b style="font-size:18px; letter-spacing:2px;">${code}</b></p>` : ""}`,
+    html: `<p>Click <a href="${link}">here</a> to verify your email (expires in 15 minutes).</p>${code ? `<p>Or enter this code in the app: <b style="font-size:18px; letter-spacing:2px;">${code}</b></p>` : ""}`,
   });
 }
 
@@ -74,7 +74,7 @@ export async function sendVerificationEmail(
 export async function sendResetEmail(to: string, token: string) {
   const transport = getTransport();
   if (!transport) {
-    logger.warn("SMTP not configured, skipping reset email", { to });
+    logger.warn("SMTP not configured, skipping reset email");
     return;
   }
   const link = `${appUrl()}/reset-password?token=${token}`;

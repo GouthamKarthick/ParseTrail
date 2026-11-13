@@ -49,6 +49,12 @@ describe("ai.service — extractWithAI / tryAI", () => {
 
     const { extractWithAI } = await import("./ai.service.js");
     const r = await extractWithAI("some text");
+    expect(fetch).toHaveBeenCalledWith(
+      expect.not.stringContaining("?key="),
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-goog-api-key": "fake-key" }),
+      }),
+    );
     expect(r.data.vendor).toBe("Acme");
     expect(r.data.totalAmount).toBe(1200);
     expect(r.data.currency).toBe("INR");
@@ -127,6 +133,6 @@ describe("ai.service — extractWithAI / tryAI", () => {
       text: async () => "invalid key",
     } as any);
     const { tryAI } = await import("./ai.service.js");
-    await expect(tryAI("hello")).rejects.toThrow(/Gemini 401/);
+    await expect(tryAI("hello")).rejects.toThrow(/status 401/);
   });
 });

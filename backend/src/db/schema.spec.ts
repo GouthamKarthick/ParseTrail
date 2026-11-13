@@ -21,9 +21,9 @@ describe("db/schema — ensureSchema", () => {
     );
   });
 
-  it("tolerates migration errors", async () => {
+  it("propagates migration errors", async () => {
     const mockQuery = vi.mocked(pool.query);
-    mockQuery.mockResolvedValue([[]] as any);
-    await expect(ensureSchema()).resolves.toBeUndefined();
+    mockQuery.mockRejectedValueOnce(new Error("database unavailable"));
+    await expect(ensureSchema()).rejects.toThrow("database unavailable");
   });
 });

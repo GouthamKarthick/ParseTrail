@@ -36,9 +36,9 @@ export async function generateSummaryPdf(
     doc.moveDown();
     doc.fontSize(12).text(`Total Documents: ${summary.totalDocs}`);
     doc.text(`Sum Total: ${summary.sumTotal.toFixed(2)}`);
-    doc.text(`Average Usage (avg total): ${summary.avgUsage.toFixed(2)}`);
+    doc.text(`Average Total: ${summary.avgUsage.toFixed(2)}`);
     doc.text(
-      `Authenticity (avg confidence): ${(summary.avgConfidence * 100).toFixed(1)}%`,
+      `Average Confidence: ${(summary.avgConfidence * 100).toFixed(1)}%`,
     );
     doc.moveDown();
     doc.fontSize(14).text("By Document Type");
@@ -84,23 +84,31 @@ export async function generateSummaryCsv(
     category ? { category } : undefined,
   );
   const lines: string[] = [];
-  lines.push(`Total Documents,${summary.totalDocs}`);
-  lines.push(`Sum Total,${summary.sumTotal.toFixed(2)}`);
-  lines.push(`Average Usage,${summary.avgUsage.toFixed(2)}`);
-  lines.push(`Authenticity,${(summary.avgConfidence * 100).toFixed(1)}%`);
+  lines.push(csvRow("Total Documents", summary.totalDocs));
+  lines.push(csvRow("Sum Total", summary.sumTotal.toFixed(2)));
+  lines.push(csvRow("Average Total", summary.avgUsage.toFixed(2)));
+  lines.push(csvRow("Average Confidence", `${(summary.avgConfidence * 100).toFixed(1)}%`));
   lines.push("");
   lines.push("By Type,Count,Sum");
   for (const r of summary.byType)
-    lines.push(`${r.document_type},${r.cnt},${r.sum.toFixed(2)}`);
+    lines.push(csvRow(r.document_type, r.cnt, r.sum.toFixed(2)));
   lines.push("");
   lines.push("Date,Count,Sum");
   for (const r of summary.trend)
-    lines.push(`${r.date},${r.cnt},${r.sum.toFixed(2)}`);
+    lines.push(csvRow(r.date, r.cnt, r.sum.toFixed(2)));
   lines.push("");
   lines.push("Vendor,Count,Sum");
   for (const r of summary.topVendors)
-    lines.push(
-      `"${r.vendor.replace(/"/g, '""')}",${r.cnt},${r.sum.toFixed(2)}`,
-    );
+    lines.push(csvRow(r.vendor, r.cnt, r.sum.toFixed(2)));
   return lines.join("\n");
+}
+
+function csvRow(...values: Array<string | number>): string {
+  return values.map(csvCell).join(",");
+}
+
+function csvCell(value: string | number): string {
+  if (typeof value === "number") return String(value);
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
 }

@@ -28,7 +28,7 @@ export function errorHandler(
     return;
   }
   if (err instanceof Error) {
-    if (err.message.includes("Invalid file type")) {
+    if (/Invalid file type|Suspicious file name/.test(err.message)) {
       res.status(400).json({ error: err.message });
       return;
     }
@@ -39,7 +39,7 @@ export function errorHandler(
   }
   logger.error("Unhandled error", {
     method: req.method,
-    url: req.originalUrl,
+    path: req.path,
     error: err instanceof Error ? err.message : String(err),
     stack: err instanceof Error ? err.stack : undefined,
   });

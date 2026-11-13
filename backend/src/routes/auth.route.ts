@@ -2,8 +2,8 @@
  * routes/auth.route.ts — Authentication endpoints.
  */
 
-import { Router } from "express";
-import { randomUUID } from "crypto";
+import { Router, type Response } from "express";
+import { createHash, randomInt, randomUUID } from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
@@ -30,11 +30,11 @@ const nameSchema = z.string().trim().min(1, "Required").max(50);
 const registerSchema = z.object({
   first_name: nameSchema,
   last_name: nameSchema,
-  email: z.string().email(),
+  email: z.string().trim().email().transform((email) => email.toLowerCase()),
   password: passwordSchema,
 });
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().transform((email) => email.toLowerCase()),
   password: z.string().min(1),
 });
 const resetPasswordSchema = z.object({
@@ -49,15 +49,29 @@ const resetPasswordSchema = z.object({
  * @returns JWT string
  */
 function signToken(id: string, email: string) {
-  return jwt.sign({ id, email }, config.jwtSecret, {
+  return jwt.sign({ id, email, emailVerified: true }, config.jwtSecret, {
     expiresIn: config.jwtExpiry as unknown as jwt.SignOptions["expiresIn"],
+    algorithm: "HS256",
   });
+}
+
+function setAuthCookie(res: Response, token: string) {
+  res.cookie("token", token, {
+    httpOnly: true,
+    sameSite: config.cookieSameSite,
+    secure:
+      process.env.NODE_ENV === "production" || config.cookieSameSite === "none",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
+}
+
+function hashResetToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 router.post("/register", async (req, res) => {
   if (
     isSuspicious(req.body?.email) ||
-    isSuspicious(req.body?.password) ||
     isSuspicious(req.body?.first_name) ||
     isSuspicious(req.body?.last_name)
   ) {
@@ -74,20 +88,25 @@ router.post("/register", async (req, res) => {
     return;
   }
   const { first_name, last_name, email, password } = parsed.data;
+  if (!config.smtp.host && !config.allowUnverified) {
+    res.status(503).json({
+      error: "Email verification is unavailable",
+      code: "EMAIL_DELIVERY_UNAVAILABLE",
+    });
+    return;
+  }
   const hash = await bcrypt.hash(password, 10);
   const id = randomUUID();
   const verificationToken = randomUUID();
-  const verificationCode = Math.floor(
-    100000 + Math.random() * 900000,
-  ).toString();
-  const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const verificationCode = randomInt(0, 1_000_000).toString().padStart(6, "0");
+  const verificationExpires = new Date(Date.now() + 15 * 60 * 1000);
   let verificationEmailSent = true;
   try {
     await pool.query(
       "INSERT INTO users (id, email, first_name, last_name, password_hash, verification_token, verification_code, verification_expires) VALUES (?,?,?,?,?,?,?,?)",
       [
         id,
-        email.trim().toLowerCase(),
+        email,
         first_name.trim(),
         last_name.trim(),
         hash,
@@ -104,12 +123,13 @@ router.post("/register", async (req, res) => {
     }
     throw e;
   }
-  if (!config.smtp.host) {
+  const emailVerified = !config.smtp.host && config.allowUnverified;
+  if (emailVerified) {
     await pool.query(
-      "UPDATE users SET email_verified=TRUE, verification_token=NULL, verification_code=NULL, verification_expires=NULL WHERE id=?",
+      "UPDATE users SET email_verified=TRUE, verification_token=NULL, verification_code=NULL, verification_expires=NULL, verification_attempts=0 WHERE id=?",
       [id],
     );
-  } else {
+  } else if (config.smtp.host) {
     try {
       await sendVerificationEmail(email, verificationToken, verificationCode);
     } catch (error) {
@@ -120,18 +140,13 @@ router.post("/register", async (req, res) => {
       });
     }
   }
-  const token = signToken(id, email);
-  res.cookie("token", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    maxAge: 24 * 60 * 60 * 1000,
-  });
+  if (emailVerified) setAuthCookie(res, signToken(id, email));
   res.status(201).json({
     id,
     email,
     first_name: first_name.trim(),
     last_name: last_name.trim(),
-    email_verified: !config.smtp.host,
+    email_verified: emailVerified,
     verification_email_sent: verificationEmailSent,
   });
 });
@@ -176,11 +191,7 @@ router.post("/login", async (req, res) => {
     return;
   }
   const token = signToken(user.id, user.email);
-  res.cookie("token", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    maxAge: 24 * 60 * 60 * 1000,
-  });
+  setAuthCookie(res, token);
   res.json({
     id: user.id,
     email: user.email,
@@ -191,7 +202,12 @@ router.post("/login", async (req, res) => {
 });
 
 router.post("/logout", (_req, res) => {
-  res.clearCookie("token");
+  res.clearCookie("token", {
+    httpOnly: true,
+    sameSite: config.cookieSameSite,
+    secure:
+      process.env.NODE_ENV === "production" || config.cookieSameSite === "none",
+  });
   res.json({ ok: true });
 });
 
@@ -388,12 +404,10 @@ router.post("/resend-verification", async (req, res) => {
   // Always ok to avoid enumeration; only send if unverified
   if (user && !user.email_verified) {
     const verificationToken = randomUUID();
-    const verificationCode = Math.floor(
-      100000 + Math.random() * 900000,
-    ).toString();
-    const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const verificationCode = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    const verificationExpires = new Date(Date.now() + 15 * 60 * 1000);
     await pool.query(
-      "UPDATE users SET verification_token=?, verification_code=?, verification_expires=? WHERE id=?",
+      "UPDATE users SET verification_token=?, verification_code=?, verification_expires=?, verification_attempts=0 WHERE id=?",
       [verificationToken, verificationCode, verificationExpires, user.id],
     );
     try {
@@ -411,34 +425,32 @@ router.post("/resend-verification", async (req, res) => {
 router.post("/verify-email", async (req, res) => {
   const token = (req.body?.token as string) || (req.query.token as string);
   const code = (req.body?.code as string) || (req.query.code as string);
-  const email = (req.body?.email as string) || (req.query.email as string);
-  const raw = token || code;
-  if (isSuspicious(raw) || isSuspicious(email)) {
-    res.status(400).json({
-      error: "Suspicious input detected — not saved",
-      code: "SUSPICIOUS_INPUT",
-    });
+  const rawEmail = (req.body?.email as string) || (req.query.email as string);
+  const email = typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
+  if (!email || !z.string().email().safeParse(email).success) {
+    res.status(400).json({ error: "Valid email required" });
     return;
   }
   if (token) {
     const [rows] = await pool.query(
-      "SELECT id FROM users WHERE verification_token=? AND verification_expires > NOW()",
-      [token],
+      "SELECT id, email FROM users WHERE email=? AND verification_token=? AND verification_expires > NOW()",
+      [email, token],
     );
-    const user = (rows as Array<{ id: string }>)[0];
+    const user = (rows as Array<{ id: string; email: string }>)[0];
     if (!user) {
       res.status(400).json({ error: "Invalid or expired token" });
       return;
     }
     await pool.query(
-      "UPDATE users SET email_verified=TRUE, verification_token=NULL, verification_code=NULL, verification_expires=NULL WHERE id=?",
+      "UPDATE users SET email_verified=TRUE, verification_token=NULL, verification_code=NULL, verification_expires=NULL, verification_attempts=0 WHERE id=?",
       [user.id],
     );
+    setAuthCookie(res, signToken(user.id, user.email));
     res.json({ ok: true });
     return;
   }
   if (!code) {
-    res.status(400).json({ error: "Token or code required" });
+    res.status(400).json({ error: "Email and code required" });
     return;
   }
   const cleanCode = code.trim();
@@ -446,31 +458,51 @@ router.post("/verify-email", async (req, res) => {
     res.status(400).json({ error: "Code must be 6 digits" });
     return;
   }
-  let rows: unknown;
-  if (email)
-    [rows] = await pool.query(
-      "SELECT id FROM users WHERE email=? AND verification_code=? AND verification_expires > NOW()",
-      [email.trim().toLowerCase(), cleanCode],
-    );
-  else
-    [rows] = await pool.query(
-      "SELECT id FROM users WHERE verification_code=? AND verification_expires > NOW()",
-      [cleanCode],
-    );
-  const user = (rows as Array<{ id: string }>)[0];
+  const [rows] = await pool.query(
+    "SELECT id, email, verification_code, verification_attempts FROM users WHERE email=? AND verification_code IS NOT NULL AND verification_expires > NOW()",
+    [email],
+  );
+  const user = (
+    rows as Array<{
+      id: string;
+      email: string;
+      verification_code: string;
+      verification_attempts: number;
+    }>
+  )[0];
   if (!user) {
     res.status(400).json({ error: "Invalid or expired code" });
     return;
   }
-  await pool.query(
-    "UPDATE users SET email_verified=TRUE, verification_token=NULL, verification_code=NULL, verification_expires=NULL WHERE id=?",
-    [user.id],
+  if (user.verification_code !== cleanCode) {
+    await pool.query(
+      "UPDATE users SET verification_attempts=verification_attempts+1, verification_code=IF(verification_attempts+1 >= 5, NULL, verification_code), verification_token=IF(verification_attempts+1 >= 5, NULL, verification_token), verification_expires=IF(verification_attempts+1 >= 5, NULL, verification_expires) WHERE id=? AND verification_attempts < 5",
+      [user.id],
+    );
+    if (user.verification_attempts >= 4) {
+      res.status(429).json({
+        error: "Too many incorrect verification codes; request a new code",
+        code: "VERIFICATION_CODE_INVALIDATED",
+      });
+      return;
+    }
+    res.status(400).json({ error: "Invalid or expired code" });
+    return;
+  }
+  const [verified] = await pool.query(
+    "UPDATE users SET email_verified=TRUE, verification_token=NULL, verification_code=NULL, verification_expires=NULL, verification_attempts=0 WHERE id=? AND verification_code=? AND verification_expires > NOW() AND verification_attempts < 5",
+    [user.id, cleanCode],
   );
+  if ((verified as { affectedRows?: number }).affectedRows !== 1) {
+    res.status(400).json({ error: "Invalid or expired code" });
+    return;
+  }
+  setAuthCookie(res, signToken(user.id, user.email));
   res.json({ ok: true });
 });
 
 router.post("/forgot-password", async (req, res) => {
-  const email = (req.body?.email as string)?.trim();
+  const email = (req.body?.email as string)?.trim()?.toLowerCase();
   if (isSuspicious(email)) {
     res.status(400).json({
       error: "Suspicious input detected — not saved",
@@ -488,19 +520,27 @@ router.post("/forgot-password", async (req, res) => {
   const user = (rows as Array<{ id: string }>)[0];
   if (user) {
     const token = randomUUID();
+    const tokenHash = hashResetToken(token);
     const expires = new Date(Date.now() + 60 * 60 * 1000);
     await pool.query(
       "INSERT INTO password_reset_tokens (id, user_id, token, expires_at) VALUES (?,?,?,?)",
-      [randomUUID(), user.id, token, expires],
+      [randomUUID(), user.id, tokenHash, expires],
     );
-    sendResetEmail(email, token).catch(() => {});
+    try {
+      await sendResetEmail(email, token);
+    } catch (error) {
+      logger.error("Password reset email delivery failed", {
+        userId: user.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   res.json({ ok: true });
 });
 
 router.post("/reset-password", async (req, res) => {
   const { token, password } = req.body as { token?: string; password?: string };
-  if (isSuspicious(token) || isSuspicious(password)) {
+  if (isSuspicious(token)) {
     res.status(400).json({
       error: "Suspicious input detected — not saved",
       code: "SUSPICIOUS_INPUT",
@@ -514,9 +554,10 @@ router.post("/reset-password", async (req, res) => {
     return;
   }
   const { token: validToken, password: validPassword } = parsed.data;
+  const tokenHash = hashResetToken(validToken);
   const [rows] = await pool.query(
     "SELECT user_id FROM password_reset_tokens WHERE token=? AND expires_at > NOW() AND used=FALSE",
-    [validToken],
+    [tokenHash],
   );
   const row = (rows as Array<{ user_id: string }>)[0];
   if (!row) {
@@ -529,7 +570,7 @@ router.post("/reset-password", async (req, res) => {
     row.user_id,
   ]);
   await pool.query("UPDATE password_reset_tokens SET used=TRUE WHERE token=?", [
-    validToken,
+    tokenHash,
   ]);
   res.json({ ok: true });
 });

@@ -72,7 +72,7 @@ const STRATEGIES: Record<string, TypeStrategy> = {
     promptFocus:
       "Focus: settlement/contract/FnF statements — vendor is the broker or employer; total is the net payable/settlement amount; number is the settlement/contract number when printed; date may be absent (null is honest).",
     localExample: {
-      text: "Northstar Analytics Ltd.\nSettlement Slip for August 2026\nNET PAY (₹) : 48,250.00",
+      text: "Northstar Analytics Ltd.\nSettlement Statement for August 2026\nNET PAY (₹) : 48,250.00",
       json: '{"vendor":"Northstar Analytics Ltd.","invoiceNumber":null,"invoiceDate":null,"totalAmount":48250,"currency":"INR"}',
     },
   },

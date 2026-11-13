@@ -34,6 +34,17 @@ describe("middleware/error", () => {
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
+  it("handles suspicious filenames as a client error", () => {
+    const res = mockRes();
+    errorHandler(
+      new Error("Suspicious file name — not saved"),
+      { method: "POST", path: "/api/documents/upload" } as any,
+      res,
+      (() => {}) as any,
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
   it("handles LIMIT_FILE_SIZE → 413", () => {
     const err: any = new Error("File too large");
     err.code = "LIMIT_FILE_SIZE";

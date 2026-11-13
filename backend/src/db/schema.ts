@@ -27,6 +27,7 @@ export async function ensureSchema(): Promise<void> {
       verification_token VARCHAR(255) NULL,
       verification_code VARCHAR(10) NULL,
       verification_expires DATETIME NULL,
+      verification_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -141,13 +142,9 @@ export async function ensureSchema(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
-  try {
-    await migrateDocuments();
-    await migrateUsers();
-    await migrateAttempts();
-  } catch {
-    // ignore migration errors (e.g., concurrent ALTER)
-  }
+  await migrateDocuments();
+  await migrateUsers();
+  await migrateAttempts();
 }
 
 /**
@@ -269,6 +266,10 @@ async function migrateUsers(): Promise<void> {
     [
       "verification_code",
       "ALTER TABLE users ADD COLUMN verification_code VARCHAR(10) NULL AFTER verification_token",
+    ],
+    [
+      "verification_attempts",
+      "ALTER TABLE users ADD COLUMN verification_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER verification_expires",
     ],
     [
       "first_name",
