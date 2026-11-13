@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("fs/promises", () => ({
+  default: { readFile: vi.fn(), unlink: vi.fn() },
+}));
 vi.mock("../db/pool.js", () => ({ pool: { query: vi.fn() } }));
 vi.mock("../services/extraction.service.js", () => ({
   extract: vi.fn(),
@@ -7,6 +10,7 @@ vi.mock("../services/extraction.service.js", () => ({
 }));
 vi.mock("../services/dedup.service.js", () => ({
   findDuplicateByContent: vi.fn(),
+  createContentFingerprint: vi.fn(() => "fingerprint"),
 }));
 vi.mock("../utils/conversion.js", () => ({
   convertWithMeta: vi.fn(),
@@ -15,6 +19,7 @@ vi.mock("../utils/conversion.js", () => ({
 }));
 
 import { pool } from "../db/pool.js";
+import fs from "fs/promises";
 import { extract } from "../services/extraction.service.js";
 import { findDuplicateByContent } from "../services/dedup.service.js";
 import {
@@ -35,7 +40,11 @@ function mockRes() {
 }
 
 describe("controller — uploadDocument", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fs.readFile).mockResolvedValue(Buffer.from("%PDF-1.4\nstub") as any);
+    vi.mocked(fs.unlink).mockResolvedValue(undefined);
+  });
 
   it("400 when no file", async () => {
     const res = mockRes();
@@ -49,7 +58,7 @@ describe("controller — uploadDocument", () => {
 
   it("inline flow: pending→processing→done, returns 201", async () => {
     const mockQuery = vi.mocked(pool.query);
-    // INSERT pending, SELECT created_at, UPDATE processing, extract, dedup, UPDATE done, final 201
+    // INSERT pending, SELECT created_at, UPDATE processing, extract, dedup, UPDATE done.
     mockQuery
       .mockResolvedValueOnce([[]] as any) // INSERT
       .mockResolvedValueOnce([
@@ -79,6 +88,7 @@ describe("controller — uploadDocument", () => {
         filename: "550e8400-e29b-41d4-a716-446655440000-test.pdf",
         originalname: "test.pdf",
         path: "/tmp/test",
+        mimetype: "application/pdf",
       },
     };
     const res = mockRes();
@@ -87,6 +97,11 @@ describe("controller — uploadDocument", () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ id: expect.any(String), status: "done" }),
     );
+    expect(extract).toHaveBeenCalledWith(
+      Buffer.from("%PDF-1.4\nstub"),
+      expect.objectContaining({ allowCloud: false }),
+    );
+    expect(fs.readFile).toHaveBeenCalledOnce();
   });
 
   it("duplicate preserves corrections and recomputes converted totals", async () => {
@@ -122,16 +137,19 @@ describe("controller — uploadDocument", () => {
       attempts: [],
       typeVotes: ["invoice"],
     } as any);
-    vi.mocked(findDuplicateByContent).mockResolvedValue({
+    vi.mocked(findDuplicateByContent)
+      .mockResolvedValueOnce({ duplicate: false } as any)
+      .mockResolvedValueOnce({
       duplicate: true,
       duplicateOf: "existing-id",
-    } as any);
+      } as any);
     const req: any = {
       user: { id: "test-user", email: "test@example.com" },
       file: {
         filename: "550e8400-e29b-41d4-a716-446655440000-dup3.pdf",
         originalname: "dup3.pdf",
         path: "/tmp/dup3",
+        mimetype: "application/pdf",
       },
     };
     const res = mockRes();
@@ -155,7 +173,13 @@ describe("controller — uploadDocument", () => {
   it("duplicate → 409 updates existing, does not add", async () => {
     const mockQuery = vi.mocked(pool.query);
     // For duplicate, uploadDocument extracts first, finds duplicate, updates existing, deletes new file — no INSERT
-    mockQuery.mockResolvedValueOnce([[]] as any); // UPDATE existing duplicate
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      if (String(sql).includes("SELECT created_at"))
+        return [[{ created_at: new Date().toISOString() }]] as any;
+      if (String(sql).includes("FROM corrections WHERE document_id="))
+        return [[]] as any;
+      return [[]] as any;
+    });
     vi.mocked(extract).mockResolvedValue({
       data: {
         vendor: "V",
@@ -169,10 +193,12 @@ describe("controller — uploadDocument", () => {
       documentTypeConfidence: 0.85,
       documentCategory: "financial",
     } as any);
-    vi.mocked(findDuplicateByContent).mockResolvedValue({
-      duplicate: true,
-      duplicateOf: "existing-id",
-    } as any);
+    vi.mocked(findDuplicateByContent)
+      .mockResolvedValueOnce({ duplicate: false } as any)
+      .mockResolvedValueOnce({
+        duplicate: true,
+        duplicateOf: "existing-id",
+      } as any);
 
     const req: any = {
       user: { id: "test-user", email: "test@example.com" },
@@ -180,6 +206,7 @@ describe("controller — uploadDocument", () => {
         filename: "550e8400-e29b-41d4-a716-446655440000-dup.pdf",
         originalname: "dup.pdf",
         path: "/tmp/dup",
+        mimetype: "application/pdf",
       },
     };
     const res = mockRes();
@@ -195,6 +222,40 @@ describe("controller — uploadDocument", () => {
     expect(mockQuery).toHaveBeenCalledWith(
       expect.stringContaining("UPDATE documents SET data="),
       expect.anything(),
+    );
+  });
+
+  it("short-circuits exact byte duplicates before extraction", async () => {
+    vi.mocked(findDuplicateByContent).mockResolvedValue({
+      duplicate: true,
+      duplicateOf: "existing-id",
+      matchedDocumentType: "invoice",
+      matchedCategory: "financial",
+      matchedData: { totalAmount: 10 },
+    } as any);
+    const req: any = {
+      user: { id: "test-user", email: "test@example.com" },
+      file: {
+        filename: "server-generated-name.pdf",
+        originalname: "same.pdf",
+        path: "/tmp/same",
+        mimetype: "application/pdf",
+      },
+    };
+    const res = mockRes();
+
+    await uploadDocument(req, res, vi.fn());
+
+    expect(extract).not.toHaveBeenCalled();
+    expect(pool.query).not.toHaveBeenCalled();
+    expect(fs.unlink).toHaveBeenCalledWith("/tmp/same");
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        duplicateOf: "existing-id",
+        document_type: "invoice",
+        data: { totalAmount: 10 },
+      }),
     );
   });
 });

@@ -3,7 +3,7 @@
  */
 
 import type { Request, Response, NextFunction } from "express";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import fs from "fs/promises";
 import { pool } from "../db/pool.js";
 import { logger } from "../config/logger.js";
@@ -17,7 +17,10 @@ import { parseAmount } from "../utils/amount.js";
 import { applyConversion, clearConversion } from "../utils/conversion.js";
 import { parseJsonColumn } from "../utils/json.js";
 import { enqueueRefineJob, retryRefineJobNow } from "../jobs/refine.js";
-import { findDuplicateByContent } from "../services/dedup.service.js";
+import {
+  createContentFingerprint,
+  findDuplicateByContent,
+} from "../services/dedup.service.js";
 import { uuidSchema } from "../middleware/validate.js";
 import { getUser } from "../middleware/auth.js";
 import { getSummary as getSummaryData } from "../services/summary.service.js";
@@ -50,7 +53,7 @@ async function maybeEnqueueRefine(
   userId: string,
   data: unknown,
   docType: string,
-  attempts: Array<{ fallbackReason?: string }> | undefined,
+  attempts: Array<{ conflicts?: string[] }> | undefined,
 ): Promise<string | null> {
   try {
     const { needed, reason } = needsRefinement(
@@ -169,10 +172,11 @@ async function handleDuplicateUpdate(
     result.data as Record<string, unknown>,
   );
   await pool.query(
-    "UPDATE documents SET data=?, extracted_text=?, document_type=?, document_category=?, updated_at=NOW() WHERE id=? AND user_id=?",
+    "UPDATE documents SET data=?, extracted_text=?, content_fingerprint=?, document_type=?, document_category=?, updated_at=NOW() WHERE id=? AND user_id=?",
     [
       JSON.stringify(preserved),
       result.extractedText,
+      createContentFingerprint(result.data, result.documentType),
       result.documentType,
       result.documentCategory,
       targetId,
@@ -208,22 +212,25 @@ async function completeUpload(
   userId: string,
   result: ExtractOutcome | null,
   extractError: string | null,
+  contentHash: string,
 ): Promise<"done" | "failed"> {
   if (extractError || !result) {
     await pool.query(
-      "UPDATE documents SET status='failed', error=? WHERE id=?",
+      "UPDATE documents SET status='failed', error=?, content_hash=NULL, content_fingerprint=NULL WHERE id=?",
       [extractError ?? "Extraction failed", docId],
     );
     logger.error("Extraction failed", { docId, error: extractError });
     return "failed";
   }
   await pool.query(
-    "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, error=NULL WHERE id=?",
+    "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, content_hash=?, content_fingerprint=?, error=NULL WHERE id=?",
     [
       result.documentType,
       result.documentCategory,
       JSON.stringify(result.data),
       result.extractedText,
+      contentHash,
+      createContentFingerprint(result.data, result.documentType),
       docId,
     ],
   );
@@ -245,6 +252,23 @@ async function completeUpload(
     fieldCount: Object.keys(result.data).length,
   });
   return "done";
+}
+
+function respondDuplicate(
+  res: Response,
+  duplicate: Awaited<ReturnType<typeof findDuplicateByContent>>,
+  result?: ExtractOutcome,
+): void {
+  res.status(409).json({
+    error: "Duplicate document — updated existing record",
+    code: "DUPLICATE_UPDATED",
+    duplicateOf: duplicate.duplicateOf,
+    document_type:
+      result?.documentType ?? duplicate.matchedDocumentType ?? "unknown",
+    document_category:
+      result?.documentCategory ?? duplicate.matchedCategory ?? "unknown",
+    data: result?.data ?? duplicate.matchedData ?? {},
+  });
 }
 
 /**
@@ -283,12 +307,8 @@ export async function uploadDocument(
       return;
     }
     const filePath = file.path;
-    let header: Buffer;
-    try {
-      header = await fs.readFile(filePath).then((buffer) => buffer.subarray(0, 8));
-    } catch {
-      header = Buffer.alloc(0);
-    }
+    const buffer = await fs.readFile(filePath);
+    const header = buffer.subarray(0, 8);
     const isPdf = header.subarray(0, 4).toString("latin1") === "%PDF";
     const isPng =
       header[0] === 0x89 &&
@@ -307,7 +327,59 @@ export async function uploadDocument(
       });
       return;
     }
-    let result: Awaited<ReturnType<typeof extract>> | null = null;
+    const id = randomUUID();
+    const contentHash = createHash("sha256").update(buffer).digest("hex");
+    const exactDuplicate = await findDuplicateByContent(
+      {} as ExtractOutcome["data"],
+      user.id,
+      undefined,
+      { contentHash },
+    );
+    if (exactDuplicate.duplicate && exactDuplicate.duplicateOf) {
+      await fs.unlink(filePath);
+      respondDuplicate(res, exactDuplicate);
+      return;
+    }
+
+    try {
+      await pool.query(
+        "INSERT INTO documents (id, name, path, status, document_type, document_category, user_id, content_hash) VALUES (?, ?, ?, 'pending', 'unknown', 'unknown', ?, ?)",
+        [id, file.originalname, filePath, user.id, contentHash],
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code === "ER_DUP_ENTRY") {
+        const duplicate = await findDuplicateByContent(
+          {} as ExtractOutcome["data"],
+          user.id,
+          undefined,
+          { contentHash },
+        );
+        if (duplicate.duplicate && duplicate.duplicateOf) {
+          await fs.unlink(filePath);
+          respondDuplicate(res, duplicate);
+          return;
+        }
+      }
+      throw error;
+    }
+    const [createdRows] = await pool.query(
+      "SELECT created_at FROM documents WHERE id=?",
+      [id],
+    );
+    const created_at =
+      (createdRows as Array<{ created_at: string }>)[0]?.created_at ??
+      new Date().toISOString();
+    logger.info("Document uploaded", {
+      docId: id,
+      name: file.originalname,
+      path: filePath,
+    });
+    await pool.query("UPDATE documents SET status='processing' WHERE id=?", [
+      id,
+    ]);
+    logger.info("Extraction started", { docId: id });
+
+    let result: ExtractOutcome | null = null;
     let extractError: string | null = null;
     try {
       const requestedLanguage =
@@ -324,7 +396,7 @@ export async function uploadDocument(
         te: "tel",
       };
       const hintLang = supportedLanguages[requestedLanguage.toLowerCase()];
-      result = await extract(filePath, {
+      result = await extract(buffer, {
         allowCloud: false,
         hintLang,
       });
@@ -337,6 +409,7 @@ export async function uploadDocument(
         result.data,
         user.id,
         result.documentType as string,
+        { contentHash, excludeDocumentId: id },
       );
       if (dup.duplicate && dup.duplicateOf) {
         await handleDuplicateUpdate(
@@ -345,125 +418,18 @@ export async function uploadDocument(
           result,
           filePath,
           file.originalname,
+          id,
         );
-        res.status(409).json({
-          error: "Duplicate document — updated existing record",
-          code: "DUPLICATE_UPDATED",
-          duplicateOf: dup.duplicateOf,
-          document_type: result.documentType,
-          document_category: result.documentCategory,
-          data: result.data,
-        });
+        respondDuplicate(res, dup, result);
         return;
       }
     }
-    const basename = file.filename;
-    const idFromFile = basename.split("-")[0] ?? "";
-    const id = (() => {
-      try {
-        uuidSchema.parse(idFromFile);
-        return idFromFile;
-      } catch {
-        return randomUUID();
-      }
-    })();
-    const storedPath = filePath;
-    try {
-      await pool.query(
-        "INSERT INTO documents (id, name, path, status, document_type, document_category, user_id) VALUES (?, ?, ?, 'pending', 'unknown', 'unknown', ?)",
-        [id, file.originalname, storedPath, user.id],
-      );
-    } catch (e: unknown) {
-      const code = (e as { code?: string })?.code;
-      if (code === "ER_DUP_ENTRY") {
-        const newId = randomUUID();
-        await pool.query(
-          "INSERT INTO documents (id, name, path, status, document_type, document_category, user_id) VALUES (?, ?, ?, 'pending', 'unknown', 'unknown', ?)",
-          [newId, file.originalname, storedPath, user.id],
-        );
-        const [rows] = await pool.query(
-          "SELECT created_at FROM documents WHERE id=?",
-          [newId],
-        );
-        const created_at =
-          (rows as Array<{ created_at: string }>)[0]?.created_at ??
-          new Date().toISOString();
-        let finalResult = result;
-        let finalError = extractError;
-        if (!finalResult && !finalError) {
-          try {
-            finalResult = await extract(filePath, { allowCloud: false });
-          } catch (err) {
-            finalError = (err as Error).message;
-          }
-        }
-        await pool.query(
-          "UPDATE documents SET status='processing' WHERE id=?",
-          [newId],
-        );
-        if (finalResult && !finalError) {
-          const dup2 = await findDuplicateByContent(
-            finalResult.data,
-            user.id,
-            finalResult.documentType as string,
-          );
-          if (dup2.duplicate && dup2.duplicateOf) {
-            await handleDuplicateUpdate(
-              dup2.duplicateOf,
-              user.id,
-              finalResult,
-              filePath,
-              file.originalname,
-              newId,
-            );
-            res.status(409).json({
-              error: "Duplicate document — updated existing record",
-              code: "DUPLICATE_UPDATED",
-              duplicateOf: dup2.duplicateOf,
-              document_type: finalResult.documentType,
-              document_category: finalResult.documentCategory,
-              data: finalResult.data,
-            });
-            return;
-          }
-        }
-        const newStatus = await completeUpload(
-          newId,
-          user.id,
-          finalResult,
-          finalError,
-        );
-        res.status(201).json({
-          id: newId,
-          name: file.originalname,
-          status: newStatus,
-          created_at,
-        });
-        return;
-      }
-      throw e;
-    }
-    const [createdRows] = await pool.query(
-      "SELECT created_at FROM documents WHERE id=?",
-      [id],
-    );
-    const created_at =
-      (createdRows as Array<{ created_at: string }>)[0]?.created_at ??
-      new Date().toISOString();
-    logger.info("Document uploaded", {
-      docId: id,
-      name: file.originalname,
-      path: storedPath,
-    });
-    await pool.query("UPDATE documents SET status='processing' WHERE id=?", [
-      id,
-    ]);
-    logger.info("Extraction started", { docId: id });
     const responseStatus = await completeUpload(
       id,
       user.id,
       result,
       extractError,
+      contentHash,
     );
     res.status(201).json({
       id,
