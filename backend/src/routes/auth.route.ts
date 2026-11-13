@@ -138,6 +138,13 @@ router.post("/register", async (req, res) => {
         userId: id,
         error: error instanceof Error ? error.message : String(error),
       });
+      if (process.env.NODE_ENV === "production") {
+        res.status(503).json({
+          error: "Verification email could not be sent; request a new code later",
+          code: "EMAIL_DELIVERY_FAILED",
+        });
+        return;
+      }
     }
   }
   if (emailVerified) setAuthCookie(res, signToken(id, email));
@@ -391,6 +398,13 @@ router.delete("/avatar", authenticate, async (req, res) => {
 });
 
 router.post("/resend-verification", async (req, res) => {
+  if (process.env.NODE_ENV === "production" && !config.smtp.host) {
+    res.status(503).json({
+      error: "Email service is not configured",
+      code: "EMAIL_DELIVERY_UNAVAILABLE",
+    });
+    return;
+  }
   const email = (req.body?.email as string)?.trim()?.toLowerCase();
   if (!email) {
     res.status(400).json({ error: "Email required" });
@@ -417,6 +431,13 @@ router.post("/resend-verification", async (req, res) => {
         userId: user.id,
         error: error instanceof Error ? error.message : String(error),
       });
+      if (process.env.NODE_ENV === "production") {
+        res.status(503).json({
+          error: "Verification email could not be sent",
+          code: "EMAIL_DELIVERY_FAILED",
+        });
+        return;
+      }
     }
   }
   res.json({ ok: true });
@@ -502,6 +523,13 @@ router.post("/verify-email", async (req, res) => {
 });
 
 router.post("/forgot-password", async (req, res) => {
+  if (process.env.NODE_ENV === "production" && !config.smtp.host) {
+    res.status(503).json({
+      error: "Email service is not configured",
+      code: "EMAIL_DELIVERY_UNAVAILABLE",
+    });
+    return;
+  }
   const email = (req.body?.email as string)?.trim()?.toLowerCase();
   if (isSuspicious(email)) {
     res.status(400).json({
@@ -533,6 +561,13 @@ router.post("/forgot-password", async (req, res) => {
         userId: user.id,
         error: error instanceof Error ? error.message : String(error),
       });
+      if (process.env.NODE_ENV === "production") {
+        res.status(503).json({
+          error: "Password reset email could not be sent",
+          code: "EMAIL_DELIVERY_FAILED",
+        });
+        return;
+      }
     }
   }
   res.json({ ok: true });

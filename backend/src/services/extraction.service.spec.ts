@@ -32,6 +32,7 @@ import { tryAI } from "./ai.service.js";
 import { runLocalLLMExtraction } from "./transformers.service.js";
 import { extract } from "./extraction.service.js";
 import { config } from "../config.js";
+const initialAiConfig = { ...config.ai };
 const mockReadFile = vi.mocked(fs.readFile);
 const mockOcr = vi.mocked(ocrBuffer);
 const mockTryAI = vi.mocked(tryAI);
@@ -45,7 +46,7 @@ function ocrText(t: string, c = 95, p = 1) {
 describe("extraction.service — Flan local -> Gemini", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (config as any).ai = { ...config.ai, apiKey: "" };
+    (config as any).ai = { ...initialAiConfig, apiKey: "" };
     mockLocal.mockResolvedValue({
       data: {},
       confidence: 0,
@@ -115,6 +116,7 @@ describe("extraction.service — Flan local -> Gemini", () => {
       confidence: 0.8,
       documentType: "invoice",
     });
+
     mockTryAI.mockResolvedValue({
       data: { vendor: "AI Vendor" },
       confidence: 0.99,
@@ -125,6 +127,34 @@ describe("extraction.service — Flan local -> Gemini", () => {
     const r = await extract(pngBuffer);
     expect(r.data.vendor).not.toBe("AI Vendor");
     expect(mockTryAI).not.toHaveBeenCalled();
+  });
+  it("runs configured Groq when Gemini has no API key", async () => {
+    (config as any).ai = {
+      ...initialAiConfig,
+      providers: ["groq"],
+      apiKey: "",
+      groqApiKey: "groq-key",
+    };
+    mockOcr.mockResolvedValue(
+      ocrText("Invoice from Example Co with a total amount of 55"),
+    );
+    mockLocal.mockResolvedValue({
+      data: {},
+      confidence: 0,
+      documentType: "invoice",
+    });
+    mockTryAI.mockResolvedValue({
+      data: { vendor: "Example Co" },
+      confidence: 0.8,
+      method: "llm",
+      documentType: "invoice",
+      documentTypeConfidence: 0.8,
+      documentCategory: "financial",
+    } as any);
+
+    await extract(pngBuffer, { order: "model-first" });
+    expect(mockTryAI).toHaveBeenCalled();
+    expect(mockTryAI.mock.calls[0]?.[2]).toBe("image/png");
   });
   it("low local confidence calls AI and prefers AI", async () => {
     (config as any).ai.apiKey = "fake-key";
