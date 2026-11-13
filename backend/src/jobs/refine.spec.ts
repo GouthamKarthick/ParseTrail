@@ -233,6 +233,7 @@ describe('jobs/refine — worker', () => {
         },
       ],
       typeVotes: ['invoice'],
+      conflicts: [],
       extractedText: 'Invoice amount 99',
     });
     expect(await firstTick).toBe('done');
@@ -424,6 +425,7 @@ describe('jobs/refine — worker', () => {
       documentCategory: 'financial',
       attempts: [],
       typeVotes: ['invoice'],
+      conflicts: [],
       extractedText: 'Invoice amount 99',
     });
     expect(await activeTick).toBe('idle');

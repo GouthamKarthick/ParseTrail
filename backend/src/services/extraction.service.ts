@@ -14,6 +14,7 @@ import { logger } from '../config/logger.js';
 import { pool } from '../db/pool.js';
 import type {
   AttemptRecord,
+  ExtractionCascadeResult,
   ExtractionOrder,
   ExtractionResult,
   ExtractedData,
@@ -671,9 +672,16 @@ async function runCloudStage(args: {
 
 /**
  * Extracts structured data from file path or buffer.
+ *
+ * Cascade order (see ExtractionCascadeResult docs):
+ *   heuristic-detect → rule-based → local-llm → cloud (only when needed)
+ * Rules win on any conflict with ML outputs; cloud arbitration is forced
+ * on rules/model disagreement. Cloud quota is spent only on successful
+ * calls. See PRD deviations #10 and #16.
+ *
  * @param filePathOrBuffer File path or buffer
  * @param opts Optional cascade ordering (default rules-first) and cloud flag
- * @returns Extraction result with per-stage attempts and type votes
+ * @returns Extraction result with the full cascade ledger
  */
 export async function extract(
   filePathOrBuffer: string | Buffer,
@@ -683,13 +691,7 @@ export async function extract(
     cloudOnly?: boolean;
     hintLang?: string;
   }
-): Promise<
-  ExtractionResult & {
-    attempts: AttemptRecord[];
-    typeVotes: string[];
-    extractedText: string;
-  }
-> {
+): Promise<ExtractionCascadeResult> {
   const start = Date.now();
   let text = '';
   let buffer: Buffer | null = null;
@@ -796,6 +798,7 @@ export async function extract(
       attempts,
       typeVotes,
       extractedText,
+      conflicts: [],
     };
   }
   const seed = rulesOut?.data ? { data: rulesOut.data, conf: rulesOut.conf } : null;
@@ -814,6 +817,7 @@ export async function extract(
       attempts,
       typeVotes,
       extractedText,
+      conflicts: local.conflicts,
     };
   }
   const clouded = await runCloudStage({
@@ -829,7 +833,8 @@ export async function extract(
     attempts,
     typeVotes,
   });
-  if (clouded) return { ...clouded, extractedText };
+  if (clouded)
+    return { ...clouded, extractedText, conflicts: local?.conflicts ?? [] };
   if (local && local.data && Object.keys(local.data).length > 0) {
     await enrichWithConversion(local.data as ExtractedData);
     return {
@@ -842,6 +847,7 @@ export async function extract(
       attempts,
       typeVotes,
       extractedText,
+      conflicts: local.conflicts,
     };
   }
   const latency = Date.now() - start;
@@ -861,6 +867,7 @@ export async function extract(
     attempts,
     typeVotes,
     extractedText,
+    conflicts: [],
   };
 }
 
@@ -868,13 +875,7 @@ export async function extract(
  * Runs cloud extraction over previously extracted text without reopening or
  * OCRing the original upload.
  */
-export async function extractFromText(text: string): Promise<
-  ExtractionResult & {
-    attempts: AttemptRecord[];
-    typeVotes: string[];
-    extractedText: string;
-  }
-> {
+export async function extractFromText(text: string): Promise<ExtractionCascadeResult> {
   const started = Date.now();
   const detected = detectDocTypeLight(text);
   const result = await tryAI(text, undefined, undefined, getPromptForType(detected.type));
@@ -896,5 +897,6 @@ export async function extractFromText(text: string): Promise<
     attempts,
     typeVotes: [detected.type, result.documentType],
     extractedText: text.slice(0, 100_000),
+    conflicts: [],
   };
 }

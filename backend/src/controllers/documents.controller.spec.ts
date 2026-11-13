@@ -261,101 +261,101 @@ describe('controller — listDocuments / getDocument', () => {
     expect(res.json.mock.calls[0][0]).not.toHaveProperty('path');
   });
 
-describe('controller — deleteDocument', () => {
-  beforeEach(() => vi.clearAllMocks());
+  describe('controller — deleteDocument', () => {
+    beforeEach(() => vi.clearAllMocks());
 
-  it('400 invalid uuid', async () => {
-    const res = mockRes();
-    await deleteDocument(
-      {
-        params: { id: 'bad' },
-        user: { id: 'test-user', email: 'test@example.com' },
-      } as any,
-      res,
-      vi.fn()
-    );
-    expect(res.status).toHaveBeenCalledWith(400);
-  });
+    it('400 invalid uuid', async () => {
+      const res = mockRes();
+      await deleteDocument(
+        {
+          params: { id: 'bad' },
+          user: { id: 'test-user', email: 'test@example.com' },
+        } as any,
+        res,
+        vi.fn()
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
 
-  it('404 when document not found for user', async () => {
-    vi.mocked(pool.query).mockResolvedValue([[]] as any);
-    const res = mockRes();
-    await deleteDocument(
-      {
-        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
-        user: { id: 'test-user', email: 'test@example.com' },
-      } as any,
-      res,
-      vi.fn()
-    );
-    expect(res.status).toHaveBeenCalledWith(404);
-    expect(vi.mocked(fs.unlink)).not.toHaveBeenCalled();
-  });
+    it('404 when document not found for user', async () => {
+      vi.mocked(pool.query).mockResolvedValue([[]] as any);
+      const res = mockRes();
+      await deleteDocument(
+        {
+          params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          user: { id: 'test-user', email: 'test@example.com' },
+        } as any,
+        res,
+        vi.fn()
+      );
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(vi.mocked(fs.unlink)).not.toHaveBeenCalled();
+    });
 
-  it('204 deletes row and unlinks file', async () => {
-    vi.mocked(pool.query)
-      .mockResolvedValueOnce([[{ path: '/tmp/test.pdf' }]] as any) // SELECT path
-      .mockResolvedValueOnce([] as any); // DELETE
-    vi.mocked(fs.unlink).mockResolvedValue(undefined);
-    const res = mockRes();
-    await deleteDocument(
-      {
-        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
-        user: { id: 'test-user', email: 'test@example.com' },
-      } as any,
-      res,
-      vi.fn()
-    );
-    expect(res.status).toHaveBeenCalledWith(204);
-    expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith('/tmp/test.pdf');
-  });
+    it('204 deletes row and unlinks file', async () => {
+      vi.mocked(pool.query)
+        .mockResolvedValueOnce([[{ path: '/tmp/test.pdf' }]] as any) // SELECT path
+        .mockResolvedValueOnce([] as any); // DELETE
+      vi.mocked(fs.unlink).mockResolvedValue(undefined);
+      const res = mockRes();
+      await deleteDocument(
+        {
+          params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          user: { id: 'test-user', email: 'test@example.com' },
+        } as any,
+        res,
+        vi.fn()
+      );
+      expect(res.status).toHaveBeenCalledWith(204);
+      expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith('/tmp/test.pdf');
+    });
 
-  it('204 ignores ENOENT when unlinking missing file', async () => {
-    const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    vi.mocked(pool.query)
-      .mockResolvedValueOnce([[{ path: '/tmp/missing.pdf' }]] as any) // SELECT path
-      .mockResolvedValueOnce([] as any); // DELETE
-    vi.mocked(fs.unlink).mockRejectedValue(enoent);
-    const res = mockRes();
-    await deleteDocument(
-      {
-        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
-        user: { id: 'test-user', email: 'test@example.com' },
-      } as any,
-      res,
-      vi.fn()
-    );
-    expect(res.status).toHaveBeenCalledWith(204);
-  });
+    it('204 ignores ENOENT when unlinking missing file', async () => {
+      const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      vi.mocked(pool.query)
+        .mockResolvedValueOnce([[{ path: '/tmp/missing.pdf' }]] as any) // SELECT path
+        .mockResolvedValueOnce([] as any); // DELETE
+      vi.mocked(fs.unlink).mockRejectedValue(enoent);
+      const res = mockRes();
+      await deleteDocument(
+        {
+          params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          user: { id: 'test-user', email: 'test@example.com' },
+        } as any,
+        res,
+        vi.fn()
+      );
+      expect(res.status).toHaveBeenCalledWith(204);
+    });
 
-  it('idempotent: second delete returns 404', async () => {
-    vi.mocked(pool.query).mockResolvedValue([[]] as any); // no row
-    const res = mockRes();
-    await deleteDocument(
-      {
-        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
-        user: { id: 'test-user', email: 'test@example.com' },
-      } as any,
-      res,
-      vi.fn()
-    );
-    expect(res.status).toHaveBeenCalledWith(404);
-  });
+    it('idempotent: second delete returns 404', async () => {
+      vi.mocked(pool.query).mockResolvedValue([[]] as any); // no row
+      const res = mockRes();
+      await deleteDocument(
+        {
+          params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          user: { id: 'test-user', email: 'test@example.com' },
+        } as any,
+        res,
+        vi.fn()
+      );
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
 
-  it('404 for foreign user (ownership enforced, never 403)', async () => {
-    vi.mocked(pool.query).mockResolvedValue([[]] as any); // no row for this user
-    const res = mockRes();
-    await deleteDocument(
-      {
-        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
-        user: { id: 'other-user', email: 'other@example.com' },
-      } as any,
-      res,
-      vi.fn()
-    );
-    expect(res.status).toHaveBeenCalledWith(404);
+    it('404 for foreign user (ownership enforced, never 403)', async () => {
+      vi.mocked(pool.query).mockResolvedValue([[]] as any); // no row for this user
+      const res = mockRes();
+      await deleteDocument(
+        {
+          params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          user: { id: 'other-user', email: 'other@example.com' },
+        } as any,
+        res,
+        vi.fn()
+      );
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
   });
-});
 
   it('getAttempts 401 when unauthenticated', async () => {
     const res = mockRes();

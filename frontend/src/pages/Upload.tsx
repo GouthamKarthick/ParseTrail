@@ -98,7 +98,9 @@ export default function Upload() {
       ) {
         show(
           'warning',
-          `Duplicate document — updated existing record (id ${err.duplicateOf ?? ''}). Not added as new.`
+          err.duplicateOf
+            ? `This looks like a duplicate of an existing document. Open it`
+            : 'This looks like a duplicate of an existing document.'
         );
         if (err.duplicateOf) nav(`/documents/${err.duplicateOf}`);
       } else if (err.code === 'SUSPICIOUS_INPUT') {

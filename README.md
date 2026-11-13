@@ -59,7 +59,7 @@ Uploads run the local stages synchronously. A MySQL-backed worker performs a clo
 - **Cloud refinement:** Google Gemini by default; provider is configurable
 - **Local database:** MySQL database `parsetrail`
 
-Project docs: [PRD](docs/ParseTrail-PRD.md) · [Technical spec](docs/TECHNICAL_SPEC.md) · [Test plan](docs/TEST_PLAN.md)
+Project docs: [PRD](docs/ParseTrail-PRD.md) · [Technical spec](docs/TECHNICAL_SPEC.md) · [Architecture](docs/ARCHITECTURE.md) · [Test plan](docs/TEST_PLAN.md)
 
 ## Quick start
 
