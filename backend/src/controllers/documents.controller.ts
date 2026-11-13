@@ -143,117 +143,6 @@ async function latestRefineStatus(
 
 type ExtractOutcome = NonNullable<Awaited<ReturnType<typeof extract>>>;
 
-/**
- * Applies a duplicate re-upload onto the existing record: removes the new
- * file, re-applies corrections, persists, records attempts, maybe enqueues.
- * @param targetId Existing document id
- * @param userId Owner id
- * @param result Fresh extraction result
- * @param filePath New file to delete
- * @param originalName New file name for logs
- * @param deleteId Placeholder row to delete (dup-entry branch), if any
- * @returns void
- */
-async function handleDuplicateUpdate(
-  targetId: string,
-  userId: string,
-  result: ExtractOutcome,
-  filePath: string,
-  originalName: string,
-  deleteId?: string,
-): Promise<void> {
-  try {
-    await fs.unlink(filePath);
-  } catch {}
-  if (deleteId)
-    await pool.query("DELETE FROM documents WHERE id=?", [deleteId]);
-  const preserved = await withCorrectionsReapplied(
-    targetId,
-    result.data as Record<string, unknown>,
-  );
-  await pool.query(
-    "UPDATE documents SET data=?, extracted_text=?, content_fingerprint=?, document_type=?, document_category=?, updated_at=NOW() WHERE id=? AND user_id=?",
-    [
-      JSON.stringify(preserved),
-      result.extractedText,
-      createContentFingerprint(result.data, result.documentType),
-      result.documentType,
-      result.documentCategory,
-      targetId,
-      userId,
-    ],
-  );
-  await recordAttempts(targetId, result.attempts);
-  await maybeEnqueueRefine(
-    targetId,
-    userId,
-    preserved,
-    result.documentType,
-    result.attempts,
-  );
-  logger.warn("Duplicate document — updated existing record", {
-    duplicateOf: targetId,
-    newFile: originalName,
-    fieldCount: Object.keys(result.data).length,
-  });
-}
-
-/**
- * Completes a fresh upload: done/failed write, attempts, refine enqueue.
- * Caller sets status='processing' first (preserves query order).
- * @param docId Document id
- * @param userId Owner id
- * @param result Extraction result or null
- * @param extractError Extraction error or null
- * @returns Terminal status for the response
- */
-async function completeUpload(
-  docId: string,
-  userId: string,
-  result: ExtractOutcome | null,
-  extractError: string | null,
-  contentHash: string,
-): Promise<"done" | "failed"> {
-  if (extractError || !result) {
-    await pool.query(
-      "UPDATE documents SET status='failed', error=?, content_hash=NULL, content_fingerprint=NULL WHERE id=?",
-      [extractError ?? "Extraction failed", docId],
-    );
-    logger.error("Extraction failed", { docId, error: extractError });
-    return "failed";
-  }
-  await pool.query(
-    "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, content_hash=?, content_fingerprint=?, error=NULL WHERE id=?",
-    [
-      result.documentType,
-      result.documentCategory,
-      JSON.stringify(result.data),
-      result.extractedText,
-      contentHash,
-      createContentFingerprint(result.data, result.documentType),
-      docId,
-    ],
-  );
-  await recordAttempts(docId, result.attempts);
-  await maybeEnqueueRefine(
-    docId,
-    userId,
-    result.data,
-    result.documentType,
-    result.attempts,
-  );
-  logger.info("Extraction done", {
-    docId,
-    method: result.method,
-    confidence: result.confidence,
-    documentType: result.documentType,
-    documentCategory: result.documentCategory,
-    documentTypeConfidence: result.documentTypeConfidence,
-    fieldCount: Object.keys(result.data).length,
-  });
-  return "done";
-}
-
 function respondDuplicate(
   res: Response,
   duplicate: Awaited<ReturnType<typeof findDuplicateByContent>>,
@@ -377,64 +266,16 @@ export async function uploadDocument(
     await pool.query("UPDATE documents SET status='processing' WHERE id=?", [
       id,
     ]);
-    logger.info("Extraction started", { docId: id });
+    logger.info("Extraction queued", { docId: id });
 
-    let result: ExtractOutcome | null = null;
-    let extractError: string | null = null;
-    try {
-      const requestedLanguage =
-        typeof req.body?.language === "string" ? req.body.language.trim() : "";
-      const supportedLanguages: Record<string, string> = {
-        de: "deu",
-        en: "eng",
-        es: "spa",
-        fr: "fra",
-        hi: "hin",
-        kn: "kan",
-        ml: "mal",
-        ta: "tam",
-        te: "tel",
-      };
-      const hintLang = supportedLanguages[requestedLanguage.toLowerCase()];
-      result = await extract(buffer, {
-        allowCloud: false,
-        hintLang,
-      });
-    } catch (e) {
-      extractError = (e as Error).message;
-      logger.error("Extraction failed before dedup", { error: extractError });
-    }
-    if (result && !extractError) {
-      const dup = await findDuplicateByContent(
-        result.data,
-        user.id,
-        result.documentType as string,
-        { contentHash, excludeDocumentId: id },
-      );
-      if (dup.duplicate && dup.duplicateOf) {
-        await handleDuplicateUpdate(
-          dup.duplicateOf,
-          user.id,
-          result,
-          filePath,
-          file.originalname,
-          id,
-        );
-        respondDuplicate(res, dup, result);
-        return;
-      }
-    }
-    const responseStatus = await completeUpload(
-      id,
-      user.id,
-      result,
-      extractError,
-      contentHash,
-    );
-    res.status(201).json({
+    // Extraction runs in the background worker so uploads stay fast even for
+    // large scanned PDFs. The frontend polls /api/documents/:id until the
+    // status reaches done / failed / dead.
+    await enqueueRefineJob(id, user.id, "initial extraction");
+    res.status(202).json({
       id,
       name: file.originalname,
-      status: responseStatus,
+      status: "pending",
       created_at,
     });
   } catch (err) {
