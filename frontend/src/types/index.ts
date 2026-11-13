@@ -75,4 +75,5 @@ export interface Document {
   created_at: string;
   updated_at: string;
   refine_status?: string | null;
+  refine_error?: string | null;
 }

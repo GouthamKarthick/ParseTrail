@@ -129,12 +129,13 @@ async function withCorrectionsReapplied(
 async function latestRefineStatus(
   docId: string,
   userId: string,
-): Promise<string | null> {
+): Promise<{ status: string | null; error: string | null }> {
   const [rows] = await pool.query(
-    "SELECT status FROM refine_jobs WHERE document_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1",
+    "SELECT status, error FROM refine_jobs WHERE document_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1",
     [docId, userId],
   );
-  return (rows as Array<{ status: string }>)[0]?.status ?? null;
+  const row = (rows as Array<{ status: string; error: string | null }>)[0];
+  return { status: row?.status ?? null, error: row?.error ?? null };
 }
 
 type ExtractOutcome = NonNullable<Awaited<ReturnType<typeof extract>>>;
@@ -168,9 +169,10 @@ async function handleDuplicateUpdate(
     result.data as Record<string, unknown>,
   );
   await pool.query(
-    "UPDATE documents SET data=?, document_type=?, document_category=?, updated_at=NOW() WHERE id=? AND user_id=?",
+    "UPDATE documents SET data=?, extracted_text=?, document_type=?, document_category=?, updated_at=NOW() WHERE id=? AND user_id=?",
     [
       JSON.stringify(preserved),
+      result.extractedText,
       result.documentType,
       result.documentCategory,
       targetId,
@@ -188,7 +190,7 @@ async function handleDuplicateUpdate(
   logger.warn("Duplicate document — updated existing record", {
     duplicateOf: targetId,
     newFile: originalName,
-    data: result.data,
+    fieldCount: Object.keys(result.data).length,
   });
 }
 
@@ -216,11 +218,12 @@ async function completeUpload(
     return "failed";
   }
   await pool.query(
-    "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, error=NULL WHERE id=?",
+    "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, error=NULL WHERE id=?",
     [
       result.documentType,
       result.documentCategory,
       JSON.stringify(result.data),
+      result.extractedText,
       docId,
     ],
   );
@@ -239,7 +242,7 @@ async function completeUpload(
     documentType: result.documentType,
     documentCategory: result.documentCategory,
     documentTypeConfidence: result.documentTypeConfidence,
-    data: result.data,
+    fieldCount: Object.keys(result.data).length,
   });
   return "done";
 }
@@ -538,21 +541,29 @@ export async function listDocuments(
       [...params, limit, offset],
     );
     const list = rows as Array<Record<string, unknown>>;
-    const refineByDoc: Record<string, string> = {};
+    const refineByDoc: Record<
+      string,
+      { status: string; error: string | null }
+    > = {};
     if (list.length > 0) {
       const ids = list.map((r) => r.id as string);
       const placeholders = ids.map(() => "?").join(",");
       const [rrows] = await pool.query(
-        `SELECT r.document_id, r.status FROM refine_jobs r INNER JOIN (SELECT document_id, MAX(created_at) AS mc FROM refine_jobs WHERE document_id IN (${placeholders}) GROUP BY document_id) latest ON latest.document_id = r.document_id AND latest.mc = r.created_at`,
+        `SELECT r.document_id, r.status, r.error FROM refine_jobs r INNER JOIN (SELECT document_id, MAX(created_at) AS mc FROM refine_jobs WHERE document_id IN (${placeholders}) GROUP BY document_id) latest ON latest.document_id = r.document_id AND latest.mc = r.created_at`,
         ids,
       );
-      for (const r of rrows as Array<{ document_id: string; status: string }>)
-        refineByDoc[r.document_id] = r.status;
+      for (const r of rrows as Array<{
+        document_id: string;
+        status: string;
+        error: string | null;
+      }>)
+        refineByDoc[r.document_id] = { status: r.status, error: r.error };
     }
     const documents = list.map((r) => ({
       ...r,
       data: parseDataField(r as { data: string | null }),
-      refine_status: refineByDoc[r.id as string] ?? null,
+      refine_status: refineByDoc[r.id as string]?.status ?? null,
+      refine_error: refineByDoc[r.id as string]?.error ?? null,
     }));
     res.json({ documents, total, limit, offset });
   } catch (err) {
@@ -593,11 +604,12 @@ export async function getDocument(
       res.status(404).json({ error: "Document not found" });
       return;
     }
-    const refineStatus = await latestRefineStatus(parsed.data, user.id);
+    const refine = await latestRefineStatus(parsed.data, user.id);
     res.json({
       ...row,
       data: parseDataField(row as { data: string | null }),
-      refine_status: refineStatus,
+      refine_status: refine.status,
+      refine_error: refine.error,
     });
   } catch (err) {
     next(err);
@@ -637,7 +649,7 @@ export async function getAttempts(
       return;
     }
     const [rows] = await pool.query(
-      "SELECT method, predicted_type, confidence, latency_ms, cost_estimate, succeeded, fallback_reason, created_at FROM extraction_attempts WHERE document_id=? ORDER BY seq ASC",
+      "SELECT method, predicted_type, confidence, latency_ms, cost_estimate, input_tokens, output_tokens, succeeded, fallback_reason, created_at FROM extraction_attempts WHERE document_id=? ORDER BY created_at ASC, id ASC",
       [id],
     );
     res.json({ attempts: rows });
@@ -695,11 +707,12 @@ export async function reprocessDocument(
       result.data as Record<string, unknown>,
     );
     await pool.query(
-      "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, error=NULL WHERE id=?",
+      "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, error=NULL WHERE id=?",
       [
         result.documentType,
         result.documentCategory,
         JSON.stringify(preservedRe),
+        result.extractedText,
         parsed.data,
       ],
     );
@@ -880,7 +893,7 @@ export async function correctField(
     let confidence: number | null = null;
     try {
       const [arows] = await pool.query(
-        "SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY seq DESC LIMIT 1",
+        "SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1",
         [parsed.data],
       );
       const last = (arows as Array<{ method: string; confidence: number }>)[0];

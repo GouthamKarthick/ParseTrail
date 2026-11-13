@@ -2,23 +2,29 @@
  * jobs/refine.ts — Background cloud-refinement worker (Phase 2 async).
  *
  * Uploads stay synchronous and local-only; documents that need cloud help
- * get a refine_jobs row. This worker polls the queue, spends Gemini quota
+ * get a refine_jobs row. This worker polls the queue, spends provider quota
  * sparingly (rate bucket + daily cap + per-user fairness), merges
  * cloud-filled nulls into stored rows, and records every attempt.
  * No new infra: setInterval + MySQL queue.
  */
 
 import { randomUUID } from "crypto";
+import fs from "fs/promises";
 import { pool } from "../db/pool.js";
+import { config } from "../config.js";
 import { logger } from "../config/logger.js";
-import { extract, recordAttempts } from "../services/extraction.service.js";
+import {
+  extract,
+  extractFromText,
+  recordAttempts,
+} from "../services/extraction.service.js";
 import { needsRefinement } from "../services/confidence.service.js";
 import { parseJsonColumn } from "../utils/json.js";
 
-export const REFINE_MAX_ATTEMPTS = 5;
-const POLL_MS = Number(process.env.REFINE_POLL_MS ?? 15000);
-const RATE_PER_MIN = 10;
-const DAILY_CAP = Number(process.env.REFINE_DAILY_CAP ?? 100);
+export const REFINE_MAX_ATTEMPTS = config.refine.maxAttempts;
+const POLL_MS = config.refine.pollMs;
+const RATE_PER_MIN = config.refine.ratePerMinute;
+const DAILY_CAP = config.refine.dailyCap;
 
 type Outcome = "done" | "dead" | "retry" | "idle" | "quota";
 
@@ -33,6 +39,9 @@ let tokens = RATE_PER_MIN;
 let lastRefill = Date.now();
 let lastUserId: string | null = null;
 let timer: NodeJS.Timeout | null = null;
+let isTicking = false;
+let isStopping = false;
+let activeJobId: string | null = null;
 
 /**
  * Refills the in-memory token bucket (10 cloud calls per minute).
@@ -46,28 +55,20 @@ function refillTokens(): void {
 }
 
 /**
- * Checks the daily free-tier quota without consuming.
- * @returns True if a cloud call may proceed
+ * Atomically reserves one daily cloud call.
+ * @returns True when the reservation was accepted
  */
-async function quotaAllows(): Promise<boolean> {
-  const day = new Date().toISOString().slice(0, 10);
-  const [rows] = await pool.query("SELECT used FROM refine_quota WHERE day=?", [
-    day,
-  ]);
-  const used = (rows as Array<{ used: number }>)[0]?.used ?? 0;
-  return used < DAILY_CAP;
-}
-
-/**
- * Records one spent cloud call against the daily quota.
- * @returns void
- */
-async function quotaConsume(): Promise<void> {
+export async function reserveRefineQuota(): Promise<boolean> {
   const day = new Date().toISOString().slice(0, 10);
   await pool.query(
-    "INSERT INTO refine_quota (day, used) VALUES (?, 1) ON DUPLICATE KEY UPDATE used = used + 1",
+    "INSERT INTO refine_quota (day, used) VALUES (?, 0) ON DUPLICATE KEY UPDATE used=used",
     [day],
   );
+  const [result] = await pool.query(
+    "UPDATE refine_quota SET used=used+1 WHERE day=? AND used < ?",
+    [day, DAILY_CAP],
+  );
+  return (result as { affectedRows?: number }).affectedRows === 1;
 }
 
 /**
@@ -166,7 +167,7 @@ async function finishJob(
     );
     return;
   }
-  if (outcome === "dead" || job.attempts > REFINE_MAX_ATTEMPTS) {
+  if (outcome === "dead" || job.attempts >= REFINE_MAX_ATTEMPTS) {
     await pool.query(
       "UPDATE refine_jobs SET status='dead', error=? WHERE id=?",
       [(error ?? "attempts exhausted").slice(0, 500), job.id],
@@ -189,16 +190,33 @@ async function finishJob(
  * @returns Outcome for logging
  */
 export async function processOneRefineJob(): Promise<Outcome> {
+  if (isTicking || isStopping) return "idle";
+  isTicking = true;
+  try {
+    return await processRefineJob();
+  } finally {
+    isTicking = false;
+    activeJobId = null;
+  }
+}
+
+async function processRefineJob(): Promise<Outcome> {
   refillTokens();
   if (tokens < 1) return "idle";
-  if (!(await quotaAllows())) return "quota";
   const job = await claimJob();
   if (!job) return "idle";
+  activeJobId = job.id;
+  if (isStopping) {
+    await pool.query(
+      "UPDATE refine_jobs SET status='queued', attempts=GREATEST(0, attempts-1), next_retry_at=NOW() WHERE id=? AND status='working'",
+      [job.id],
+    );
+    return "idle";
+  }
   lastUserId = job.user_id;
-  tokens -= 1;
   try {
     const [rows] = await pool.query(
-      "SELECT id, path, status, data FROM documents WHERE id=?",
+      "SELECT id, path, status, data, extracted_text FROM documents WHERE id=?",
       [job.document_id],
     );
     const doc = (
@@ -207,8 +225,10 @@ export async function processOneRefineJob(): Promise<Outcome> {
         path: string;
         status: string;
         data: string | null;
+        extracted_text: string | null;
       }>
     )[0];
+    if (isStopping) return "idle";
     if (!doc) {
       await finishJob(job, "dead", "document gone");
       return "dead";
@@ -221,13 +241,52 @@ export async function processOneRefineJob(): Promise<Outcome> {
       );
       return "dead";
     }
+    const hasCachedText = Boolean(doc.extracted_text?.trim());
+    if (!hasCachedText) {
+      try {
+        await fs.access(doc.path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          await finishJob(job, "dead", "source_unavailable");
+          return "dead";
+        }
+        throw error;
+      }
+    }
+    const quotaReserved = await reserveRefineQuota();
+    if (!quotaReserved) {
+      await pool.query(
+        "UPDATE refine_jobs SET status='queued', attempts=GREATEST(0, attempts-1), next_retry_at=DATE_ADD(NOW(), INTERVAL 1 HOUR) WHERE id=? AND status='working'",
+        [job.id],
+      );
+      return "quota";
+    }
+    if (isStopping) return "idle";
+    tokens -= 1;
     const stored: Record<string, unknown> = parseJsonColumn<
       Record<string, unknown>
     >(doc.data as string, {});
-    const r = await extract(doc.path, { cloudOnly: true });
+    let r: Awaited<ReturnType<typeof extract>>;
+    try {
+      r = hasCachedText
+        ? await extractFromText(doc.extracted_text as string)
+        : await extract(doc.path, { cloudOnly: true });
+    } catch (error) {
+      if (!hasCachedText && (error as NodeJS.ErrnoException).code === "ENOENT") {
+        await finishJob(job, "dead", "source_unavailable");
+        return "dead";
+      }
+      throw error;
+    }
+    if (isStopping) return "idle";
+    if (!hasCachedText && r.extractedText) {
+      await pool.query(
+        "UPDATE documents SET extracted_text=? WHERE id=? AND extracted_text IS NULL",
+        [r.extractedText, job.document_id],
+      );
+    }
     await recordAttempts(job.document_id, r.attempts);
     const cloudOk = r.attempts.some((a) => a.method === "llm" && a.succeeded);
-    if (cloudOk) await quotaConsume();
     const merged: Record<string, unknown> = { ...stored };
     let filled = 0;
     for (const [k, v] of Object.entries(r.data as Record<string, unknown>)) {
@@ -244,11 +303,13 @@ export async function processOneRefineJob(): Promise<Outcome> {
     }
     const stillNeeded = needsRefinement(merged, r.documentType, r.attempts);
     if (!cloudOk && stillNeeded.needed) {
+      const exhausted = job.attempts >= REFINE_MAX_ATTEMPTS;
       await finishJob(
         job,
-        "retry",
+        exhausted ? "dead" : "retry",
         `cloud unavailable (${stillNeeded.reason}), backing off`,
       );
+      if (exhausted) return "dead";
       logger.info("Refine job requeued — cloud unavailable", {
         jobId: job.id,
         documentId: job.document_id,
@@ -265,7 +326,9 @@ export async function processOneRefineJob(): Promise<Outcome> {
     return "done";
   } catch (e) {
     const msg = (e as Error).message;
-    await finishJob(job, "retry", msg);
+    const exhausted = job.attempts >= REFINE_MAX_ATTEMPTS;
+    await finishJob(job, exhausted ? "dead" : "retry", msg);
+    if (exhausted) return "dead";
     logger.warn("Refine job failed, backing off", {
       jobId: job.id,
       error: msg.slice(0, 200),
@@ -280,7 +343,8 @@ export async function processOneRefineJob(): Promise<Outcome> {
  * instances (or a restart) overlap. NOTE: quota check-then-consume and
  * job claiming assume a single worker; multi-replica deploys need an
  * atomic claim (UPDATE ... WHERE status='queued' already narrows it) and
- * a transactional quota counter.
+ * quota reservations are atomic, while the claim update prevents duplicate
+ * processing of a given job across instances.
  * @returns void
  */
 export async function sweepStale(): Promise<void> {
@@ -305,9 +369,11 @@ export async function sweepStale(): Promise<void> {
  * @returns Stop function
  */
 export function startRefineWorker(): () => void {
+  isStopping = false;
   void sweepStale();
   if (timer) return () => stopRefineWorker();
   timer = setInterval(() => {
+    if (isTicking) return;
     processOneRefineJob()
       .then((outcome) => {
         if (outcome !== "idle") logger.info("Refine tick", { outcome });
@@ -332,4 +398,19 @@ export function stopRefineWorker(): void {
     clearInterval(timer);
     timer = null;
   }
+}
+
+/**
+ * Stops new ticks and releases this process's claimed job for another worker.
+ */
+export async function releaseWorkingJobs(): Promise<void> {
+  isStopping = true;
+  stopRefineWorker();
+  if (!activeJobId) return;
+  const jobId = activeJobId;
+  activeJobId = null;
+  await pool.query(
+    "UPDATE refine_jobs SET status='queued', attempts=GREATEST(0, attempts-1), next_retry_at=NOW() WHERE id=? AND status='working'",
+    [jobId],
+  );
 }

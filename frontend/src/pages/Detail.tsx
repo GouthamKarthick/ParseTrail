@@ -327,8 +327,9 @@ export default function Detail() {
       {doc.status === "done" &&
         (doc.refine_status === "dead" || latestLlmFailure) && (
           <Text variant="small" className={styles["detail-refinement-note"]}>
-            Document processing completed, but optional AI enhancement couldn’t
-            finish.
+            {doc.refine_error === "source_unavailable"
+              ? "AI enhancement could not continue because the original file and cached text are unavailable. Upload the document again to retry."
+              : "Document processing completed, but optional AI enhancement couldn’t finish."}
           </Text>
         )}
 

@@ -43,6 +43,7 @@ export interface ExtractionResult {
   documentType: DocumentType;
   documentTypeConfidence: number;
   documentCategory: DocumentCategory;
+  tokenUsage?: { inputTokens: number; outputTokens: number };
 }
 
 /**
@@ -57,6 +58,8 @@ export interface AttemptRecord {
   cost: number;
   succeeded: boolean;
   fallbackReason?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export type ExtractionOrder = "model-first" | "rules-first";

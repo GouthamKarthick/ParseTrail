@@ -3,6 +3,8 @@
  */
 
 import fs from "fs/promises";
+import os from "os";
+import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { randomUUID } from "crypto";
@@ -37,10 +39,7 @@ async function enrichWithConversion(data: ExtractedData): Promise<void> {
   try {
     await applyConversion(data);
   } catch {
-    logger.warn("Skipping currency conversion enrichment", {
-      totalAmount: data.totalAmount,
-      currency: data.currency,
-    });
+    logger.warn("Skipping currency conversion enrichment");
   }
 }
 
@@ -80,18 +79,18 @@ async function parsePdf(buffer: Buffer): Promise<string> {
     });
   }
   try {
-    const { writeFile, unlink } = await import("fs/promises");
-    const tmp = `/tmp/clarity-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`;
-    await writeFile(tmp, buffer);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "parsetrail-pdf-"));
+    const tmp = path.join(tmpDir, "input.pdf");
     try {
-      const { stdout } = await execFileAsync("pdftotext", [
-        "-layout",
-        tmp,
-        "-",
-      ]);
+      await fs.writeFile(tmp, buffer);
+      const { stdout } = await execFileAsync(
+        "pdftotext",
+        ["-layout", tmp, "-"],
+        { timeout: 15_000, maxBuffer: 16 * 1024 * 1024 },
+      );
       text = stdout || "";
     } finally {
-      await unlink(tmp).catch(() => {});
+      await fs.rm(tmpDir, { recursive: true, force: true });
     }
     if (text.trim().length > 5) return text;
   } catch (e) {
@@ -222,7 +221,7 @@ export async function recordAttempts(
     if (!documentId || !attempts || attempts.length === 0) return;
     for (const a of attempts) {
       await pool.query(
-        "INSERT INTO extraction_attempts (id, document_id, method, predicted_type, confidence, latency_ms, cost_estimate, succeeded, fallback_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO extraction_attempts (id, document_id, method, predicted_type, confidence, latency_ms, cost_estimate, succeeded, fallback_reason, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           randomUUID(),
           documentId,
@@ -233,6 +232,8 @@ export async function recordAttempts(
           a.cost,
           a.succeeded ? 1 : 0,
           a.fallbackReason ?? null,
+          a.inputTokens ?? null,
+          a.outputTokens ?? null,
         ],
       );
     }
@@ -262,6 +263,15 @@ type FinalResult = ExtractionResult & {
   attempts: AttemptRecord[];
   typeVotes: string[];
 };
+
+function hasConfiguredCloudProviderKey(): boolean {
+  return config.ai.providers.some((provider) => {
+    if (provider === "groq") return Boolean(config.ai.groqApiKey);
+    if (provider === "openrouter")
+      return Boolean(config.ai.openRouterApiKey);
+    return Boolean(config.ai.apiKey);
+  });
+}
 
 /**
  * Runs the deterministic rules stage (rules-first order only).
@@ -458,7 +468,7 @@ async function runLocalStage(
       succeeded: false,
       fallbackReason: "local model error",
     });
-    logger.warn("Local LLM failed, will escalate to Gemini", {
+    logger.warn("Local LLM failed, will escalate to cloud provider", {
       errorType: e instanceof Error ? e.name : "UnknownError",
     });
     return seed
@@ -482,7 +492,7 @@ async function runLocalStage(
 }
 
 /**
- * Runs the cloud stage (Gemini) with merge/keep/direct semantics.
+ * Runs the cloud stage with merge/keep/direct semantics.
  * @param args Stage inputs including local output and ledgers
  * @returns Final result, or null when cloud is skipped/inapplicable
  */
@@ -526,7 +536,7 @@ async function runCloudStage(args: {
     localTypeConf < 0.6;
   if (!(
     allowCloud &&
-    config.ai.apiKey &&
+    hasConfiguredCloudProviderKey() &&
     (hasText || isImage || isScannedPdf || needAI)
   ))
     return null;
@@ -536,7 +546,9 @@ async function runCloudStage(args: {
     const prompt = getPromptForType(guessedType);
     const imageBase64 =
       isImage || isScannedPdf ? buffer!.toString("base64") : undefined;
-    const imageMime = isScannedPdf ? "application/pdf" : "image/jpeg";
+    const imageMime = isScannedPdf
+      ? "application/pdf"
+      : getImageMime(buffer!);
     const aiText = hasText
       ? text
       : `Scanned ${guessedType} with no text layer — extract from image.`;
@@ -575,6 +587,8 @@ async function runCloudStage(args: {
           latencyMs: aiLatency,
           cost: 0,
           succeeded: true,
+          inputTokens: ai.tokenUsage?.inputTokens,
+          outputTokens: ai.tokenUsage?.outputTokens,
         });
         attempts.push({
           method: "fallback-merge",
@@ -593,6 +607,7 @@ async function runCloudStage(args: {
             ai.documentType || (localType as ExtractionResult["documentType"]),
           documentTypeConfidence: ai.documentTypeConfidence || localTypeConf,
           documentCategory: getCategory(ai.documentType || localType),
+          tokenUsage: ai.tokenUsage,
           attempts,
           typeVotes,
         };
@@ -612,6 +627,8 @@ async function runCloudStage(args: {
         cost: 0,
         succeeded: false,
         fallbackReason: `cloud confidence ${ai.confidence} < local ${localConf}, keeping local`,
+        inputTokens: ai.tokenUsage?.inputTokens,
+        outputTokens: ai.tokenUsage?.outputTokens,
       });
       await enrichWithConversion(localData as ExtractedData);
       return {
@@ -621,6 +638,7 @@ async function runCloudStage(args: {
         documentType: localType as ExtractionResult["documentType"],
         documentTypeConfidence: localTypeConf,
         documentCategory: getCategory(localType),
+        tokenUsage: ai.tokenUsage,
         attempts,
         typeVotes,
       };
@@ -632,6 +650,8 @@ async function runCloudStage(args: {
       latencyMs: aiLatency,
       cost: 0,
       succeeded: ai.confidence > 0,
+      inputTokens: ai.tokenUsage?.inputTokens,
+      outputTokens: ai.tokenUsage?.outputTokens,
       fallbackReason:
         ai.confidence <= 0 ? "cloud returned no confidence" : undefined,
     });
@@ -643,6 +663,7 @@ async function runCloudStage(args: {
       documentType: ai.documentType as ExtractionResult["documentType"],
       documentTypeConfidence: ai.documentTypeConfidence,
       documentCategory: getCategory(ai.documentType as string),
+      tokenUsage: ai.tokenUsage,
       attempts,
       typeVotes,
     };
@@ -691,7 +712,11 @@ export async function extract(
     hintLang?: string;
   },
 ): Promise<
-  ExtractionResult & { attempts: AttemptRecord[]; typeVotes: string[] }
+  ExtractionResult & {
+    attempts: AttemptRecord[];
+    typeVotes: string[];
+    extractedText: string;
+  }
 > {
   const start = Date.now();
   let text = "";
@@ -785,6 +810,7 @@ export async function extract(
     },
   ];
   const typeVotes: string[] = [lightType.type];
+  const extractedText = text.slice(0, 100_000);
   const rulesFirst = (opts?.order ?? "rules-first") === "rules-first";
   const allowCloud = opts?.allowCloud !== false;
   const cloudOnly = opts?.cloudOnly === true;
@@ -802,6 +828,7 @@ export async function extract(
       documentCategory: getCategory(lightType.type),
       attempts,
       typeVotes,
+      extractedText,
     };
   }
   const seed = rulesOut?.data
@@ -834,6 +861,7 @@ export async function extract(
       documentCategory: getCategory(local.type),
       attempts,
       typeVotes,
+      extractedText,
     };
   }
   const clouded = await runCloudStage({
@@ -849,7 +877,7 @@ export async function extract(
     attempts,
     typeVotes,
   });
-  if (clouded) return clouded;
+  if (clouded) return { ...clouded, extractedText };
   if (local && local.data && Object.keys(local.data).length > 0) {
     await enrichWithConversion(local.data as ExtractedData);
     return {
@@ -861,10 +889,11 @@ export async function extract(
       documentCategory: getCategory(local.type),
       attempts,
       typeVotes,
+      extractedText,
     };
   }
   const latency = Date.now() - start;
-  logger.info("Extraction latency (no local/Gemini)", {
+  logger.info("Extraction completed without cloud provider", {
     latency,
     method: "local-llm",
     ocrConfidence,
@@ -879,5 +908,48 @@ export async function extract(
     documentCategory: getCategory(lightType.type),
     attempts,
     typeVotes,
+    extractedText,
+  };
+}
+
+/**
+ * Runs cloud extraction over previously extracted text without reopening or
+ * OCRing the original upload.
+ */
+export async function extractFromText(
+  text: string,
+): Promise<
+  ExtractionResult & {
+    attempts: AttemptRecord[];
+    typeVotes: string[];
+    extractedText: string;
+  }
+> {
+  const started = Date.now();
+  const detected = detectDocTypeLight(text);
+  const result = await tryAI(
+    text,
+    undefined,
+    undefined,
+    getPromptForType(detected.type),
+  );
+  const attempts: AttemptRecord[] = [
+    {
+      method: "llm",
+      predictedType: result.documentType,
+      confidence: result.confidence,
+      latencyMs: Date.now() - started,
+      cost: 0,
+      succeeded: result.confidence > 0,
+      inputTokens: result.tokenUsage?.inputTokens,
+      outputTokens: result.tokenUsage?.outputTokens,
+    },
+  ];
+  await enrichWithConversion(result.data as ExtractedData);
+  return {
+    ...result,
+    attempts,
+    typeVotes: [detected.type, result.documentType],
+    extractedText: text.slice(0, 100_000),
   };
 }
