@@ -6,6 +6,7 @@
  */
 
 import { logger } from "../config/logger.js";
+import { config } from "../config.js";
 import { stripJsonFence } from "../utils/json.js";
 import { normalizeCurrency } from "../utils/currency.js";
 import { normalizeDateISO } from "../utils/date.js";
@@ -26,12 +27,14 @@ type Text2TextPipeline = (prompt: string, opts?: { max_new_tokens?: number; temp
 
 let llmPipeline: Text2TextPipeline | null = null;
 let llmLoadPromise: Promise<Text2TextPipeline | null> | null = null;
+let llmFailedUntil = 0;
 
 /**
  * Loads and caches the quantized local Flan-T5 pipeline.
  * @returns Pipeline or null when the model is unavailable
  */
 async function getLocalLLM(): Promise<Text2TextPipeline | null> {
+  if (!config.localLlmEnabled || Date.now() < llmFailedUntil) return null;
   if (llmPipeline) return llmPipeline;
   if (llmLoadPromise) return llmLoadPromise;
   llmLoadPromise = (async () => {
@@ -45,10 +48,14 @@ async function getLocalLLM(): Promise<Text2TextPipeline | null> {
         dtype: "q8",
       });
       llmPipeline = p as Text2TextPipeline;
+      llmFailedUntil = 0;
       logger.info("Minimal local LLM loaded", { model });
       return llmPipeline;
     } catch (e) {
-      logger.warn("Failed to load local LLM, will fallback to Gemini", { error: (e as Error).message });
+      llmFailedUntil = Date.now() + 60_000;
+      logger.warn("Failed to load local LLM; cooling down before retry", {
+        errorType: e instanceof Error ? e.name : "UnknownError",
+      });
       return null;
     } finally {
       llmLoadPromise = null;
