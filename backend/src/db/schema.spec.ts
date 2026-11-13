@@ -41,7 +41,7 @@ describe("db/schema — ensureSchema", () => {
     mockQuery.mockImplementation(async (sql: unknown) => {
       if (String(sql).includes("SELECT version FROM schema_migrations"))
         return [
-          [{ version: 1 }, { version: 2 }, { version: 3 }],
+          [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }],
           [],
         ] as any;
       return [[{ cnt: 1 }], []] as any;

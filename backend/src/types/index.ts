@@ -58,6 +58,7 @@ export interface AttemptRecord {
   cost: number;
   succeeded: boolean;
   fallbackReason?: string;
+  conflicts?: string[];
   inputTokens?: number;
   outputTokens?: number;
 }

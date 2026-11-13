@@ -79,6 +79,8 @@ export async function ensureSchema(): Promise<void> {
       document_category VARCHAR(20) NOT NULL DEFAULT 'unknown' COMMENT 'financial|unknown',
       data JSON NULL,
       extracted_text MEDIUMTEXT NULL,
+      content_hash CHAR(64) NULL,
+      content_fingerprint CHAR(64) NULL,
       error TEXT NULL,
       user_id CHAR(36) NULL COMMENT 'FK→users.id',
       expires_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL ${RETENTION_DAYS} DAY) COMMENT 'retention window',
@@ -88,6 +90,8 @@ export async function ensureSchema(): Promise<void> {
       INDEX idx_type_status (document_type, status),
       INDEX idx_category (document_category),
       INDEX idx_user_created (user_id, created_at),
+      INDEX idx_user_fingerprint (user_id, content_fingerprint),
+      UNIQUE KEY uq_user_content_hash (user_id, content_hash),
       INDEX idx_expires (expires_at),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -188,6 +192,12 @@ export async function ensureSchema(): Promise<void> {
     await migrateRedundantIndexes();
     await pool.query(
       "INSERT IGNORE INTO schema_migrations (version, name) VALUES (3, 'remove-redundant-indexes')",
+    );
+  }
+  if (!applied.has(4)) {
+    await migrateContentFingerprints();
+    await pool.query(
+      "INSERT IGNORE INTO schema_migrations (version, name) VALUES (4, 'document-content-fingerprints')",
     );
   }
 }
@@ -294,6 +304,39 @@ async function migrateRedundantIndexes(): Promise<void> {
     if ((rows as Array<{ cnt: number }>)[0]?.cnt > 0) {
       await pool.query(`ALTER TABLE ${table} DROP INDEX ${index}`);
     }
+  }
+}
+
+async function migrateContentFingerprints(): Promise<void> {
+  for (const [column, ddl] of [
+    ["content_hash", "ALTER TABLE documents ADD COLUMN content_hash CHAR(64) NULL"],
+    [
+      "content_fingerprint",
+      "ALTER TABLE documents ADD COLUMN content_fingerprint CHAR(64) NULL",
+    ],
+  ]) {
+    const [rows] = await pool.query(
+      "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='documents' AND COLUMN_NAME=?",
+      [column],
+    );
+    if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) await runDdl(ddl);
+  }
+
+  for (const [index, ddl] of [
+    [
+      "uq_user_content_hash",
+      "ALTER TABLE documents ADD UNIQUE KEY uq_user_content_hash (user_id, content_hash)",
+    ],
+    [
+      "idx_user_fingerprint",
+      "ALTER TABLE documents ADD INDEX idx_user_fingerprint (user_id, content_fingerprint)",
+    ],
+  ]) {
+    const [rows] = await pool.query(
+      "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='documents' AND INDEX_NAME=?",
+      [index],
+    );
+    if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) await runDdl(ddl);
   }
 }
 
