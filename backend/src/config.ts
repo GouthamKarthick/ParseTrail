@@ -32,6 +32,30 @@ function parsePositiveInt(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+const configuredProviders = (
+  process.env.AI_PROVIDERS ||
+  process.env.AI_PROVIDER ||
+  "gemini"
+)
+  .split(",")
+  .map((provider) => provider.trim().toLowerCase())
+  .filter(Boolean)
+  .map((provider) => (provider === "google" ? "gemini" : provider));
+if (configuredProviders.length === 0)
+  throw new Error("AI_PROVIDERS must contain at least one provider");
+const supportedProviders = new Set([
+  "gemini",
+  "groq",
+  "openrouter",
+  "anthropic",
+]);
+const unknownProvider = configuredProviders.find(
+  (provider) => !supportedProviders.has(provider),
+);
+if (unknownProvider) {
+  throw new Error(`Unsupported AI provider: ${unknownProvider}`);
+}
+
 function isCookieSameSite(
   value: string,
 ): value is "lax" | "strict" | "none" {
@@ -75,21 +99,33 @@ export const config = {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean),
-  retentionDays: Number(process.env.RETENTION_DAYS) || 30,
+  retentionDays: parsePositiveInt(process.env.RETENTION_DAYS, 30),
   smtp: {
     host: process.env.SMTP_HOST || "",
     port: Number(process.env.SMTP_PORT) || 587,
     user: process.env.SMTP_USER || "",
     pass: process.env.SMTP_PASS || "",
     from: process.env.SMTP_FROM || "noreply@parsetrail.local",
+    timeoutMs: parsePositiveInt(process.env.SMTP_TIMEOUT_MS, 10_000),
   },
   ai: {
-    provider:
-      (process.env.AI_PROVIDER as "google" | "anthropic" | "openai") ||
-      "google",
+    providers: configuredProviders as Array<
+      "gemini" | "groq" | "openrouter" | "anthropic"
+    >,
     model: process.env.AI_MODEL || "gemini-flash-latest",
     apiKey: process.env.AI_API_KEY || "",
+    groqApiKey: process.env.GROQ_API_KEY || "",
+    openRouterApiKey: process.env.OPENROUTER_API_KEY || "",
+    timeoutMs: parsePositiveInt(process.env.AI_TIMEOUT_MS, 20_000),
   },
+  refine: {
+    pollMs: parsePositiveInt(process.env.REFINE_POLL_MS, 15_000),
+    dailyCap: parsePositiveInt(process.env.REFINE_DAILY_CAP, 100),
+    maxAttempts: parsePositiveInt(process.env.REFINE_MAX_ATTEMPTS, 5),
+    ratePerMinute: parsePositiveInt(process.env.REFINE_RATE_PER_MIN, 10),
+  },
+  localLlmEnabled: process.env.LOCAL_LLM_ENABLED !== "false",
+  ocrMaxPages: parsePositiveInt(process.env.OCR_MAX_PAGES, 3),
   logs: {
     dir: "./logs",
     level: process.env.LOG_LEVEL || "debug",
