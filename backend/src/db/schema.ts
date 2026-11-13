@@ -5,10 +5,22 @@
 import { pool } from "./pool.js";
 import { config } from "../config.js";
 
-const RETENTION_DAYS =
-  Number.isFinite(config.retentionDays) && config.retentionDays > 0
-    ? Math.floor(config.retentionDays)
-    : 30;
+const RETENTION_DAYS = Math.floor(config.retentionDays);
+
+async function runDdl(sql: string): Promise<void> {
+  try {
+    await pool.query(sql);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (
+      code === "ER_DUP_FIELDNAME" ||
+      code === "ER_DUP_KEYNAME" ||
+      code === "ER_FK_DUP_NAME"
+    )
+      return;
+    throw error;
+  }
+}
 
 /**
  * Ensures all tables, columns, and indexes exist.
@@ -53,7 +65,6 @@ export async function ensureSchema(): Promise<void> {
       used BOOLEAN NOT NULL DEFAULT FALSE,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      INDEX idx_token (token),
       INDEX idx_user_expires (user_id, expires_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
@@ -67,13 +78,13 @@ export async function ensureSchema(): Promise<void> {
       document_type VARCHAR(50) NOT NULL DEFAULT 'unknown' COMMENT 'invoice|receipt|payment|bill|payslip|settlement_slip|other|unknown',
       document_category VARCHAR(20) NOT NULL DEFAULT 'unknown' COMMENT 'financial|unknown',
       data JSON NULL,
+      extracted_text MEDIUMTEXT NULL,
       error TEXT NULL,
       user_id CHAR(36) NULL COMMENT 'FK→users.id',
-      expires_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL 30 DAY) COMMENT 'retention window, synced to RETENTION_DAYS below',
+      expires_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL ${RETENTION_DAYS} DAY) COMMENT 'retention window',
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_status_created (status, created_at),
-      INDEX idx_document_type (document_type),
       INDEX idx_type_status (document_type, status),
       INDEX idx_category (document_category),
       INDEX idx_user_created (user_id, created_at),
@@ -92,6 +103,8 @@ export async function ensureSchema(): Promise<void> {
       confidence FLOAT NOT NULL DEFAULT 0,
       latency_ms INT NOT NULL DEFAULT 0,
       cost_estimate DECIMAL(10,4) NOT NULL DEFAULT 0 COMMENT 'USD, 0 for local/free-tier',
+      input_tokens INT NULL,
+      output_tokens INT NULL,
       succeeded BOOLEAN NOT NULL DEFAULT FALSE,
       fallback_reason VARCHAR(255) NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -142,9 +155,41 @@ export async function ensureSchema(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
-  await migrateDocuments();
-  await migrateUsers();
-  await migrateAttempts();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INT PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+  const [migrationRows] = await pool.query(
+    "SELECT version FROM schema_migrations",
+  );
+  const applied = new Set(
+    (migrationRows as Array<{ version: number }>).map((row) =>
+      Number(row.version),
+    ),
+  );
+  if (!applied.has(1)) {
+    await migrateDocuments();
+    await migrateUsers();
+    await migrateAttempts();
+    await pool.query(
+      "INSERT IGNORE INTO schema_migrations (version, name) VALUES (1, 'initial-schema-migrations')",
+    );
+  }
+  if (!applied.has(2)) {
+    await migrateExtractedText();
+    await pool.query(
+      "INSERT IGNORE INTO schema_migrations (version, name) VALUES (2, 'cache-extracted-text')",
+    );
+  }
+  if (!applied.has(3)) {
+    await migrateRedundantIndexes();
+    await pool.query(
+      "INSERT IGNORE INTO schema_migrations (version, name) VALUES (3, 'remove-redundant-indexes')",
+    );
+  }
 }
 
 /**
@@ -169,30 +214,26 @@ async function migrateDocuments(): Promise<void> {
       "document_category",
       "ALTER TABLE documents ADD COLUMN document_category VARCHAR(20) NOT NULL DEFAULT 'unknown' COMMENT 'financial|unknown' AFTER document_type",
     ],
+    [
+      "extracted_text",
+      "ALTER TABLE documents ADD COLUMN extracted_text MEDIUMTEXT NULL AFTER data",
+    ],
   ];
   for (const [col, sql] of colChecks) {
     const [cols] = await pool.query(
       "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='documents' AND COLUMN_NAME=?",
       [col],
     );
-    if ((cols as Array<{ cnt: number }>)[0]?.cnt === 0) await pool.query(sql);
+    if ((cols as Array<{ cnt: number }>)[0]?.cnt === 0) await runDdl(sql);
   }
-  try {
-    await pool.query(
-      "ALTER TABLE documents MODIFY COLUMN document_category VARCHAR(20) NOT NULL DEFAULT 'unknown' COMMENT 'financial|unknown'",
-    );
-  } catch {}
-  try {
-    await pool.query(
-      `ALTER TABLE documents MODIFY COLUMN expires_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL ${RETENTION_DAYS} DAY)`,
-    );
-  } catch {}
+  await pool.query(
+    "ALTER TABLE documents MODIFY COLUMN document_category VARCHAR(20) NOT NULL DEFAULT 'unknown' COMMENT 'financial|unknown'",
+  );
+  await pool.query(
+    `ALTER TABLE documents MODIFY COLUMN expires_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL ${RETENTION_DAYS} DAY)`,
+  );
 
   const idxChecks: Array<[string, string]> = [
-    [
-      "idx_document_type",
-      "ALTER TABLE documents ADD INDEX idx_document_type (document_type)",
-    ],
     [
       "idx_type_status",
       "ALTER TABLE documents ADD INDEX idx_type_status (document_type, status)",
@@ -224,14 +265,46 @@ async function migrateDocuments(): Promise<void> {
       "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='documents' AND INDEX_NAME=?",
       [idx],
     );
-    if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) await pool.query(sql);
+    if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) await runDdl(sql);
   }
 
-  try {
-    await pool.query(
+  const [oldTypeIndex] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='documents' AND INDEX_NAME='idx_document_type'",
+  );
+  if ((oldTypeIndex as Array<{ cnt: number }>)[0]?.cnt > 0)
+    await pool.query("ALTER TABLE documents DROP INDEX idx_document_type");
+
+  const [foreignKey] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='documents' AND COLUMN_NAME='user_id' AND REFERENCED_TABLE_NAME='users' AND REFERENCED_COLUMN_NAME='id'",
+  );
+  if ((foreignKey as Array<{ cnt: number }>)[0]?.cnt === 0)
+    await runDdl(
       "ALTER TABLE documents ADD CONSTRAINT fk_doc_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
     );
-  } catch {}
+}
+
+async function migrateRedundantIndexes(): Promise<void> {
+  for (const [table, index] of [
+    ["password_reset_tokens", "idx_token"],
+  ] as const) {
+    const [rows] = await pool.query(
+      "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME=? AND INDEX_NAME=?",
+      [table, index],
+    );
+    if ((rows as Array<{ cnt: number }>)[0]?.cnt > 0) {
+      await pool.query(`ALTER TABLE ${table} DROP INDEX ${index}`);
+    }
+  }
+}
+
+async function migrateExtractedText(): Promise<void> {
+  const [rows] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='documents' AND COLUMN_NAME='extracted_text'",
+  );
+  if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0)
+    await runDdl(
+      "ALTER TABLE documents ADD COLUMN extracted_text MEDIUMTEXT NULL AFTER data",
+    );
 }
 
 /**
@@ -243,7 +316,7 @@ async function migrateAttempts(): Promise<void> {
     "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='extraction_attempts' AND COLUMN_NAME='predicted_type'",
   );
   if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) {
-    await pool.query(
+    await runDdl(
       "ALTER TABLE extraction_attempts ADD COLUMN predicted_type VARCHAR(50) NULL AFTER method",
     );
   }
@@ -251,9 +324,26 @@ async function migrateAttempts(): Promise<void> {
     "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='extraction_attempts' AND COLUMN_NAME='seq'",
   );
   if ((seqRows as Array<{ cnt: number }>)[0]?.cnt === 0) {
-    await pool.query(
+    await runDdl(
       "ALTER TABLE extraction_attempts ADD COLUMN seq INT NOT NULL AUTO_INCREMENT, ADD UNIQUE KEY uq_attempt_seq (seq)",
     );
+  }
+  for (const [column, ddl] of [
+    [
+      "input_tokens",
+      "ALTER TABLE extraction_attempts ADD COLUMN input_tokens INT NULL",
+    ],
+    [
+      "output_tokens",
+      "ALTER TABLE extraction_attempts ADD COLUMN output_tokens INT NULL",
+    ],
+  ]) {
+    const [columnRows] = await pool.query(
+      "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='extraction_attempts' AND COLUMN_NAME=?",
+      [column],
+    );
+    if ((columnRows as Array<{ cnt: number }>)[0]?.cnt === 0)
+      await runDdl(ddl);
   }
 }
 
@@ -289,15 +379,13 @@ async function migrateUsers(): Promise<void> {
       "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME=?",
       [col],
     );
-    if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) await pool.query(sql);
+    if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) await runDdl(sql);
   }
-  try {
-    const [codeIdx] = await pool.query(
-      "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='users' AND INDEX_NAME='idx_verification_code'",
+  const [codeIdx] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='users' AND INDEX_NAME='idx_verification_code'",
+  );
+  if ((codeIdx as Array<{ cnt: number }>)[0]?.cnt === 0)
+    await runDdl(
+      "ALTER TABLE users ADD INDEX idx_verification_code (verification_code)",
     );
-    if ((codeIdx as Array<{ cnt: number }>)[0]?.cnt === 0)
-      await pool.query(
-        "ALTER TABLE users ADD INDEX idx_verification_code (verification_code)",
-      );
-  } catch {}
 }

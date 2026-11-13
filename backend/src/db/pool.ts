@@ -39,6 +39,8 @@ function getSslConfig():
   return { rejectUnauthorized: true };
 }
 
+const ssl = getSslConfig();
+
 export const pool = mysql.createPool({
   host: config.db.host,
   port: config.db.port,
@@ -47,6 +49,12 @@ export const pool = mysql.createPool({
   database: config.db.database,
   waitForConnections: true,
   connectionLimit: 10,
+  maxIdle: 5,
+  idleTimeout: 60_000,
+  queueLimit: 100,
+  connectTimeout: 10_000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
   dateStrings: true,
-  ...(getSslConfig() ? { ssl: getSslConfig() } : {}),
+  ...(ssl ? { ssl } : {}),
 });
