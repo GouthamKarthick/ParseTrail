@@ -97,7 +97,7 @@ async function ocrImageBuffer(
     lang,
     confidence,
     pages: 1,
-    textSnippet: text.slice(0, 400),
+    textLength: text.length,
   });
   return { text, confidence, pages: 1 };
 }
@@ -223,7 +223,7 @@ export async function ocrBuffer(
   logger.info("pdf ocr combined", {
     pages: pagesDone,
     confidence: meanConf,
-    textSnippet: combined.slice(0, 600),
+    textLength: combined.length,
   });
   return { text: combined, confidence: meanConf, pages: pagesDone };
 }

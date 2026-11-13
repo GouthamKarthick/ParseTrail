@@ -98,9 +98,9 @@ describe("transformers — null-precision guards", () => {
     ).toBe("YOUR COMPANY NAME");
     expect(
       firstVendorLine(
-        "Zoomrx Healthcare Technology Solutions Private Limited\nRegistered Office",
+        "Northstar Analytics Technology Solutions Private Limited\nRegistered Office",
       ),
-    ).toBe("Zoomrx Healthcare Technology Solutions Private Limited");
+    ).toBe("Northstar Analytics Technology Solutions Private Limited");
   });
   it("strips label prefixes and control chars from vendor", () => {
     expect(cleanVendorCandidate("Name : MR. KUMAR")).toBe("MR. KUMAR");

@@ -9,6 +9,7 @@ import { config } from "../config.js";
 export interface AuthUser {
   id: string;
   email: string;
+  emailVerified: true;
 }
 
 /**
@@ -25,19 +26,20 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
       ? req.headers.authorization.slice(7)
       : null);
   if (!token) {
-    if (process.env.NODE_ENV === "test" || process.env.VITEST) {
-      (req as unknown as { user: AuthUser }).user = {
-        id: "test-user",
-        email: "test@example.com",
-      };
-      next();
-      return;
-    }
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
   try {
-    const payload = jwt.verify(token, config.jwtSecret) as AuthUser;
+    const payload = jwt.verify(token, config.jwtSecret, {
+      algorithms: ["HS256"],
+    }) as AuthUser;
+    if (payload.emailVerified !== true) {
+      res.status(403).json({
+        error: "Email not verified",
+        code: "EMAIL_NOT_VERIFIED",
+      });
+      return;
+    }
     (req as unknown as { user: AuthUser }).user = payload;
     next();
   } catch {

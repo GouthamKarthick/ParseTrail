@@ -404,7 +404,7 @@ async function runLocalStage(
       logger.info("Local LLM extraction", {
         documentType: type,
         confidence: conf,
-        data,
+        fieldCount: Object.keys(data).length,
       });
       if (!typeVotes.includes(type)) typeVotes.push(type);
       const localOk = conf >= 0.4 && typeConf >= 0.4 && !conflictNote;
@@ -456,10 +456,10 @@ async function runLocalStage(
       latencyMs: Date.now() - t0,
       cost: 0,
       succeeded: false,
-      fallbackReason: `local model error: ${(e as Error).message.slice(0, 120)}`,
+      fallbackReason: "local model error",
     });
     logger.warn("Local LLM failed, will escalate to Gemini", {
-      error: (e as Error).message,
+      errorType: e instanceof Error ? e.name : "UnknownError",
     });
     return seed
       ? {
@@ -549,7 +549,7 @@ async function runCloudStage(args: {
     logger.info("AI extraction", {
       method: ai.method,
       confidence: ai.confidence,
-      data: ai.data,
+      fieldCount: Object.keys(ai.data).length,
       documentType: ai.documentType,
     });
     const aiLatency = Date.now() - t0;
@@ -719,7 +719,7 @@ export async function extract(
             logger.info("Lib OCR succeeded for PDF", {
               confidence: ocrConfidence,
               pages: ocrPages,
-              textSnippet: text.slice(0, 600),
+              textLength: text.length,
             });
           }
         } catch (e) {
@@ -742,7 +742,7 @@ export async function extract(
         logger.info("Lib OCR succeeded for image", {
           mime,
           confidence: ocrConfidence,
-          textSnippet: text.slice(0, 600),
+          textLength: text.length,
         });
       } catch (e) {
         logger.warn("Lib OCR failed for image", {
@@ -768,7 +768,7 @@ export async function extract(
     docType: lightType.type,
     docTypeConfidence: lightType.confidence,
     ocrConfidence,
-    textSnippet: text.slice(0, 800),
+    textLength: text.length,
   });
   const attempts: AttemptRecord[] = [
     {

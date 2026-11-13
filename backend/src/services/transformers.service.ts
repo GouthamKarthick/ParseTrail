@@ -112,10 +112,10 @@ export async function runLocalLLMExtraction(text: string, documentType: string):
       }
       const filledF = Object.keys(dataFallback).length;
       if (filledF > 0) {
-        logger.info("Local LLM non-JSON fallback used", { raw: raw.slice(0, 80), dataFallback });
+        logger.info("Local LLM non-JSON fallback used", { fieldCount: filledF });
         return { data: dataFallback, confidence: localLlmConfidence(filledF), documentType };
       }
-      throw new Error(`Invalid JSON from Flan: ${raw.slice(0, 80)}`);
+      throw new Error("Invalid JSON from local model");
     }
     const data: Record<string, unknown> = {};
     const parsedVendor = cleanVendorCandidate(typeof parsed.vendor === "string" ? parsed.vendor : undefined);
@@ -133,10 +133,12 @@ export async function runLocalLLMExtraction(text: string, documentType: string):
     }
     const filled = Object.keys(data).length;
     const confidence = ruleBasedConfidence(filled);
-    logger.info("Local LLM extraction", { documentType, filled, confidence, data });
+    logger.info("Local LLM extraction", { documentType, filled, confidence });
     return { data, confidence, documentType };
   } catch (e) {
-    logger.warn("Local LLM extraction failed", { error: (e as Error).message });
+    logger.warn("Local LLM extraction failed", {
+      errorType: e instanceof Error ? e.name : "UnknownError",
+    });
     return { data: {}, confidence: 0, documentType };
   }
 }

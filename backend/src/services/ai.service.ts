@@ -126,7 +126,7 @@ async function callGemini(
   const key = config.ai.apiKey;
   if (!key) throw new Error("AI_API_KEY not set in backend/.env");
   const model = config.ai.model || "gemini-flash-latest";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const prompt = customPrompt || DOCUMENT_EXTRACTION_PROMPT;
   const parts: Array<Record<string, unknown>> = [
     { text: prompt },
@@ -147,7 +147,10 @@ async function callGemini(
   for (let attempt = 0; attempt <= 3; attempt++) {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": key,
+      },
       body: JSON.stringify(body),
     });
     if (res.ok) {
@@ -158,14 +161,13 @@ async function callGemini(
       if (!outText) throw new Error("Gemini empty response");
       return JSON.parse(stripJsonFence(outText));
     }
-    const errText = await res.text().catch(() => "");
     const isRetryable =
       res.status === 503 || res.status === 429 || res.status === 500;
     logger.warn(`Gemini ${res.status} attempt ${attempt + 1}/4`, {
-      err: errText.slice(0, 200),
+      status: res.status,
     });
     if (!isRetryable || attempt === 3)
-      throw new Error(`Gemini ${res.status}: ${errText.slice(0, 500)}`);
+      throw new Error(`Gemini request failed with status ${res.status}`);
     await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
   }
   throw new Error("Gemini retry exhausted");
@@ -254,7 +256,7 @@ export async function extractWithAI(
   logger.debug("AI request", {
     provider,
     model: config.ai.model,
-    textSnippet: text.slice(0, 400),
+    textLength: text.length,
     promptLen: opts?.prompt?.length,
   });
   const raw =
@@ -273,7 +275,6 @@ export async function extractWithAI(
     method: "llm",
     confidence,
     latency,
-    data,
     documentType,
   });
   return {

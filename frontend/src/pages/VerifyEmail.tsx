@@ -43,7 +43,7 @@ export default function VerifyEmail() {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, email: presetEmail }),
       },
     )
       .then(async (r) => {
@@ -61,7 +61,7 @@ export default function VerifyEmail() {
         setStatus("error");
         setMsg((e as Error).message);
       });
-  }, [token, refresh]);
+  }, [token, presetEmail, refresh]);
 
   /**
    * Submit 6-digit verification code.
@@ -70,6 +70,12 @@ export default function VerifyEmail() {
   async function onCodeSubmit(e: React.FormEvent) {
     e.preventDefault();
     
+    if (!email.trim()) {
+      setCodeStatus("error");
+      setCodeMsg("Email is required");
+      return;
+    }
+
     if (!/^\d{6}$/.test(code.trim())) {
       setCodeStatus("error");
       setCodeMsg("Code must be 6 digits");
@@ -79,9 +85,7 @@ export default function VerifyEmail() {
     setCodeStatus("loading");
     setCodeMsg("");
     try {
-      const body: Record<string, string> = { code: code.trim() };
-
-      if (email.trim()) body.email = email.trim();
+      const body = { email: email.trim(), code: code.trim() };
 
       const r = await fetch(
         `${import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || ""}/api/auth/verify-email`,
@@ -158,20 +162,21 @@ export default function VerifyEmail() {
       ) : (
         <p className={authStyles["auth-hint"]}>
           No link token — enter code manually below. Link format:{" "}
-          <code>/verify-email?token=...</code>
+          <code>/verify-email?token=...&amp;email=...</code>
         </p>
       )}
 
       <form onSubmit={onCodeSubmit} className={authStyles["auth-verify-form"]}>
         <h3 className={authStyles["auth-label"]}>Verify with code</h3>
         <label className={authStyles["auth-label"]}>
-          Email (optional, helps if code not unique)
+          Email
         </label>
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
           type="email"
+          required
           className={authStyles["auth-input"]}
         />
         <label className={authStyles["auth-label"]}>6-digit code</label>

@@ -32,24 +32,49 @@ function parsePositiveInt(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function isCookieSameSite(
+  value: string,
+): value is "lax" | "strict" | "none" {
+  return value === "lax" || value === "strict" || value === "none";
+}
+
+const cookieSameSiteValue =
+  cleanVal(process.env.COOKIE_SAME_SITE) ||
+  (process.env.NODE_ENV === "production" ? "none" : "lax");
+if (!isCookieSameSite(cookieSameSiteValue)) {
+  throw new Error("COOKIE_SAME_SITE must be lax, strict, or none");
+}
+
 export const config = {
   port: Number(process.env.PORT) || 4000,
   uploadDir: process.env.UPLOAD_DIR || "./uploads",
   maxFileSize: Number(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024,
   db: {
-    host: cleanVal(process.env.DB_HOST) || "localhost",
+    host:
+      cleanVal(process.env.DB_HOST) ||
+      (process.env.NODE_ENV === "production" ? "" : "localhost"),
     port: Number(process.env.DB_PORT) || 3306,
-    user: cleanVal(process.env.DB_USER) || "parsetrail_user",
-    password: cleanVal(process.env.DB_PASSWORD) || "parsetrail_pass",
-    database: cleanVal(process.env.DB_NAME) || "parsetrail",
-    ssl:
-      process.env.DB_SSL === "true" ||
-      (cleanVal(process.env.DB_HOST) || "").includes("aivencloud.com"),
+    user:
+      cleanVal(process.env.DB_USER) ||
+      (process.env.NODE_ENV === "production" ? "" : "parsetrail_user"),
+    password:
+      cleanVal(process.env.DB_PASSWORD) ||
+      (process.env.NODE_ENV === "production" ? "" : "parsetrail_pass"),
+    database:
+      cleanVal(process.env.DB_NAME) ||
+      (process.env.NODE_ENV === "production" ? "" : "parsetrail"),
+    ssl: process.env.DB_SSL === "true",
     sslCaPath: cleanVal(process.env.DB_CA_PATH) || "./ca.pem",
     sslCa: cleanVal(process.env.DB_CA_CERT) || "",
   },
-  jwtSecret: process.env.JWT_SECRET || "dev-secret-change-me",
+  jwtSecret: cleanVal(process.env.JWT_SECRET) || "dev-secret-change-me",
   jwtExpiry: process.env.JWT_EXPIRY || "1d",
+  cookieSameSite: cookieSameSiteValue,
+  allowUnverified: process.env.ALLOW_UNVERIFIED === "true",
+  corsOrigins: (process.env.CORS_ORIGINS || "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   retentionDays: Number(process.env.RETENTION_DAYS) || 30,
   smtp: {
     host: process.env.SMTP_HOST || "",
@@ -86,3 +111,24 @@ export const config = {
     ),
   },
 } as const;
+
+if (process.env.NODE_ENV === "production") {
+  if (
+    config.jwtSecret === "dev-secret-change-me" ||
+    config.jwtSecret.length < 32
+  ) {
+    throw new Error(
+      "JWT_SECRET must be set to at least 32 characters in production",
+    );
+  }
+  if (
+    !config.db.host ||
+    !config.db.user ||
+    !config.db.password ||
+    !config.db.database
+  ) {
+    throw new Error(
+      "DB_HOST, DB_USER, DB_PASSWORD, and DB_NAME are required in production",
+    );
+  }
+}
