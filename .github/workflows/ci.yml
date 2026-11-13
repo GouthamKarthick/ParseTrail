@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, fix/*]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass
+          MYSQL_DATABASE: parsetrail
+          MYSQL_USER: parsetrail_user
+          MYSQL_PASSWORD: parsetrail_pass
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+      - name: Install backend deps
+        run: npm ci
+        working-directory: backend
+      - name: Type-check backend
+        run: npx tsc --noEmit
+        working-directory: backend
+      - name: Lint backend
+        run: npx eslint "src/**/*.ts"
+        working-directory: backend
+      - name: Format check backend
+        run: npx prettier --check "src/**/*.{ts,js}" "*.{json,js}"
+        working-directory: backend
+      - name: Run backend tests
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: parsetrail_user
+          DB_PASSWORD: parsetrail_pass
+          DB_NAME: parsetrail
+          JWT_SECRET: test-secret-that-is-at-least-32-chars-long
+          NODE_ENV: test
+          LOCAL_LLM_ENABLED: "false"
+        run: npx vitest run
+        working-directory: backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+      - name: Type-check frontend
+        run: npx tsc --noEmit
+        working-directory: frontend
+      - name: Lint frontend
+        run: npx eslint "src/**/*.{ts,tsx}"
+        working-directory: frontend
+      - name: Format check frontend
+        run: npx prettier --check "src/**/*.{ts,tsx,js,jsx}" "*.{json,js}"
+        working-directory: frontend
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
