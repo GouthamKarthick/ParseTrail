@@ -11,9 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:legacy": "tsx src/services/extraction.test.ts",
-    "test:spec": "vitest run src/services/extraction.service.spec.ts",
-    "eval:fetch": "bash eval/fetch-fixtures.sh",
-    "eval:compare": "npx tsx eval/compare.ts"
+    "test:spec": "vitest run src/services/extraction.service.spec.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
@@ -33,7 +31,6 @@
     "pdfkit": "^0.20.2",
     "sharp": "^0.35.4",
     "tesseract.js": "^7.0.0",
-    "uuid": "^11.0.0",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
     "zod": "^4.6.7"
@@ -49,7 +46,11 @@
     "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
     "@types/supertest": "^7.2.1",
+    "@typescript-eslint/eslint-plugin": "^8.72.2",
+    "@typescript-eslint/parser": "^8.72.2",
     "@vitest/coverage-v8": "^5.0.0",
+    "eslint": "^10.14.0",
+    "prettier": "^3.10.1",
     "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
