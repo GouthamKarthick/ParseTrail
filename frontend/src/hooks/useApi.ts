@@ -39,7 +39,7 @@ export function useApi<T>(fn: () => Promise<T>, immediate = true) {
   );
 
   useEffect(() => {
-    if (immediate) void run(false);
+    if (immediate) void Promise.resolve().then(() => run(false));
   }, [immediate, run]);
 
   return { data, error, loading, run };

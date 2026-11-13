@@ -13,6 +13,7 @@ import { Input } from '../components/ui/Input';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/Feedback';
 import { Button } from '../components/ui/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Text } from '../components/ui/Text';
 import { statusBadges } from '../utils/badges';
 import { formatMoney } from '../utils/format';
@@ -311,11 +312,10 @@ export default function List() {
         />
       )}
       {confirmDeleteId && (
-        <dialog
-          className={styles['list-confirm-dialog']}
-          onClick={e => {
-            if (e.target === e.currentTarget) setConfirmDeleteId(null);
-          }}
+        <ConfirmDialog
+          label="Delete document"
+          dialogClassName={styles['list-confirm-dialog']}
+          onCancel={() => setConfirmDeleteId(null)}
         >
           <div className={styles['list-confirm-panel']}>
             <Heading level={3}>Delete document?</Heading>
@@ -340,7 +340,7 @@ export default function List() {
               </Button>
             </div>
           </div>
-        </dialog>
+        </ConfirmDialog>
       )}
     </div>
   );

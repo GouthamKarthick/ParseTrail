@@ -17,6 +17,7 @@ import type { ExtractionAttempt, Correction } from '../types';
 import { Heading } from '../components/ui/Heading';
 import { Text } from '../components/ui/Text';
 import { Button } from '../components/ui/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Input } from '../components/ui/Input';
 import { EmptyState, ErrorState } from '../components/Feedback';
 import { statusBadges } from '../utils/badges';
@@ -385,11 +386,10 @@ export default function Detail() {
       )}
 
       {confirmDeleteId && (
-        <dialog
-          className={styles['detail-confirm-dialog']}
-          onClick={e => {
-            if (e.target === e.currentTarget) setConfirmDeleteId(null);
-          }}
+        <ConfirmDialog
+          label="Delete document"
+          dialogClassName={styles['detail-confirm-dialog']}
+          onCancel={() => setConfirmDeleteId(null)}
         >
           <div className={styles['detail-confirm-panel']}>
             <Heading level={3}>Delete document?</Heading>
@@ -414,7 +414,7 @@ export default function Detail() {
               </Button>
             </div>
           </div>
-        </dialog>
+        </ConfirmDialog>
       )}
     </div>
   );

@@ -3,5 +3,11 @@
     { "source": "/api/:path*", "destination": "https://parsetrail.onrender.com/api/:path*" },
     { "source": "/health", "destination": "https://parsetrail.onrender.com/health" },
     { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "**": false,
+      "main": true
+    }
+  }
 }
