@@ -11,7 +11,6 @@ import { pool, withTransaction } from '../db/pool.js';
 import { config } from '../config.js';
 import { sendVerificationEmail, sendResetEmail } from '../services/email.service.js';
 import { authenticate } from '../middleware/auth.js';
-import { isSuspicious } from '../utils/security.js';
 import { logger } from '../config/logger.js';
 
 const router = Router();
@@ -79,17 +78,6 @@ function hashResetToken(token: string): string {
 }
 
 router.post('/register', async (req, res) => {
-  if (
-    isSuspicious(req.body?.email) ||
-    isSuspicious(req.body?.first_name) ||
-    isSuspicious(req.body?.last_name)
-  ) {
-    res.status(400).json({
-      error: 'Suspicious input detected — not saved',
-      code: 'SUSPICIOUS_INPUT',
-    });
-    return;
-  }
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     const msg = parsed.error.issues.map(i => i.message).join('; ');
@@ -238,13 +226,6 @@ router.post('/register', async (req, res) => {
 });
 
 router.post('/login', async (req, res) => {
-  if (isSuspicious(req.body?.email)) {
-    res.status(400).json({
-      error: 'Suspicious input detected — not saved',
-      code: 'SUSPICIOUS_INPUT',
-    });
-    return;
-  }
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request' });
@@ -344,7 +325,7 @@ router.patch('/profile', authenticate, async (req, res) => {
     }
     if (wantFirst) {
       const v = String(body.first_name ?? '').trim();
-      if (isSuspicious(v) || v.length < 1 || v.length > 50) {
+      if (v.length < 1 || v.length > 50) {
         res.status(400).json({ error: 'Invalid first_name' });
         return;
       }
@@ -353,7 +334,7 @@ router.patch('/profile', authenticate, async (req, res) => {
     }
     if (wantLast) {
       const v = String(body.last_name ?? '').trim();
-      if (isSuspicious(v) || v.length < 1 || v.length > 50) {
+      if (v.length < 1 || v.length > 50) {
         res.status(400).json({ error: 'Invalid last_name' });
         return;
       }
@@ -363,13 +344,6 @@ router.patch('/profile', authenticate, async (req, res) => {
   }
 
   if (body.phone !== undefined) {
-    if (isSuspicious(body.phone as string)) {
-      res.status(400).json({
-        error: 'Suspicious input detected — not saved',
-        code: 'SUSPICIOUS_INPUT',
-      });
-      return;
-    }
     const phone =
       typeof body.phone === 'string' ? body.phone.trim().replace(/[\s\-()]/g, '') : body.phone;
     if (
@@ -606,13 +580,6 @@ router.post('/forgot-password', async (req, res) => {
     return;
   }
   const email = (req.body?.email as string)?.trim()?.toLowerCase();
-  if (isSuspicious(email)) {
-    res.status(400).json({
-      error: 'Suspicious input detected — not saved',
-      code: 'SUSPICIOUS_INPUT',
-    });
-    return;
-  }
   if (!email) {
     res.status(400).json({ error: 'Email required' });
     return;

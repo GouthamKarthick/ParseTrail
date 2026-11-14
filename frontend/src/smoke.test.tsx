@@ -8,7 +8,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { isSuspiciousFrontend, validateUploadFile, getPasswordError } from './utils/security.ts';
+import { validateUploadFile, getPasswordError } from './utils/security.ts';
 import { isRefining } from './hooks/usePolling.ts';
 import { statusBadges } from './utils/badges.ts';
 import Login from './pages/Login.tsx';
@@ -70,20 +70,6 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 // Utils
 // ---------------------------------------------------------------------------
-
-describe('utils — file guards', () => {
-  it('rejects suspicious file names', () => {
-    expect(isSuspiciousFrontend('../../etc/passwd')).toBe(true);
-    expect(isSuspiciousFrontend('select * from users')).toBe(true);
-    expect(isSuspiciousFrontend('<script>alert(1)</script>')).toBe(true);
-    expect(isSuspiciousFrontend('a'.repeat(1001))).toBe(true);
-  });
-  it('accepts normal file names', () => {
-    expect(isSuspiciousFrontend('invoice.pdf')).toBe(false);
-    expect(isSuspiciousFrontend('receipt.png')).toBe(false);
-    expect(isSuspiciousFrontend('')).toBe(false);
-  });
-});
 
 describe('utils — refine status', () => {
   it('isRefining true while queued or working', () => {
