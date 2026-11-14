@@ -5,7 +5,7 @@
 import { useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { isSuspiciousFrontend, getPasswordError } from '../utils/security';
+import { getPasswordError } from '../utils/security';
 import { useToastContext } from '../context/ToastContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -52,16 +52,6 @@ export default function Register() {
         const msg = 'First name and last name are required';
         setErr(msg);
         show('warning', msg);
-        return;
-      }
-      if (
-        isSuspiciousFrontend(email) ||
-        isSuspiciousFrontend(password) ||
-        isSuspiciousFrontend(confirmPassword) ||
-        isSuspiciousFrontend(firstName) ||
-        isSuspiciousFrontend(lastName)
-      ) {
-        show('warning', 'Suspicious input detected — not saved');
         return;
       }
       const pwErr = getPasswordError(password);

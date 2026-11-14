@@ -6,7 +6,7 @@ import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { uploadDocument, ApiError } from '../api/client';
 import { useToastContext, kindFromStatus } from '../context/ToastContext';
-import { isSuspiciousFrontend, validateUploadFile } from '../utils/security';
+import { validateUploadFile } from '../utils/security';
 import { Button } from '../components/ui/Button';
 import { Heading } from '../components/ui/Heading';
 import { Text } from '../components/ui/Text';
@@ -45,11 +45,6 @@ export default function Upload() {
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const f = e.target.files?.[0] ?? null;
-      if (f && isSuspiciousFrontend(f.name)) {
-        show('warning', 'Suspicious file name detected — not saved');
-        e.target.value = '';
-        return;
-      }
       if (!f) return;
       const validationError = validateUploadFile(f);
       if (validationError) {
@@ -72,10 +67,6 @@ export default function Upload() {
     e.preventDefault();
     if (!file) return;
     const fileToUpload = file;
-    if (isSuspiciousFrontend(fileToUpload.name)) {
-      show('warning', 'Suspicious file name detected — not saved');
-      return;
-    }
     const validationError = validateUploadFile(fileToUpload);
     if (validationError) {
       show('warning', validationError);

@@ -8,7 +8,6 @@ import fs from 'fs/promises';
 import { z } from 'zod';
 import { pool, withTransaction } from '../db/pool.js';
 import { logger } from '../config/logger.js';
-import { isSuspicious } from '../utils/security.js';
 import { extract } from '../services/extraction.service.js';
 import { isValidDate } from '../services/confidence.service.js';
 import { normalizeCurrency } from '../utils/currency.js';
@@ -86,19 +85,6 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
   const file = (req as unknown as { file?: Express.Multer.File }).file;
   if (!file) {
     res.status(400).json({ error: "No file uploaded. Field name must be 'file'." });
-    return;
-  }
-  if (isSuspicious(file.originalname)) {
-    // Multer already wrote the file to disk; remove it before rejecting.
-    try {
-      await fs.unlink(file.path);
-    } catch {
-      // ignore - file may already be gone
-    }
-    res.status(400).json({
-      error: 'Suspicious file name detected — not saved',
-      code: 'SUSPICIOUS_INPUT',
-    });
     return;
   }
 

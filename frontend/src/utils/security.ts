@@ -1,8 +1,3 @@
-const SQL_RE =
-  /(\bUNION\b.*\bSELECT\b|\bSELECT\b.*\bFROM\b|\bINSERT\b.*\bINTO\b|\bDELETE\b.*\bFROM\b|\bDROP\b.*\bTABLE\b|--|;\s*--|\bOR\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+)/i;
-const XSS_RE = /<script|javascript:|onerror\s*=|<iframe|<img[^>]*onerror/i;
-const PATH_RE = /\.\.\//;
-
 // Shared upload limits — used by Upload client-side validation and must match
 // backend middleware/upload.ts limits.
 export const UPLOAD_LIMITS = {
@@ -10,11 +5,6 @@ export const UPLOAD_LIMITS = {
   allowedMimes: new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/jpg']),
   allowedExtensions: ['.pdf', '.png', '.jpg', '.jpeg'],
 } as const;
-
-export function isSuspiciousFrontend(input: string): boolean {
-  if (!input) return false;
-  return SQL_RE.test(input) || XSS_RE.test(input) || PATH_RE.test(input) || input.length > 1000;
-}
 
 /**
  * Validates a file against client-side upload limits.

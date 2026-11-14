@@ -7,7 +7,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { listDocuments, deleteDocument, ApiError } from '../api/client';
 import type { Document } from '../types';
 import { useToastContext, kindFromStatus } from '../context/ToastContext';
-import { isSuspiciousFrontend } from '../utils/security';
 import { Heading } from '../components/ui/Heading';
 import { Input } from '../components/ui/Input';
 import { Skeleton } from '../components/Skeleton';
@@ -77,10 +76,6 @@ export default function List() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      if (isSuspiciousFrontend(qInput)) {
-        show('warning', 'Suspicious search input — not saved');
-        return;
-      }
       setDebouncedQ(qInput.trim());
     }, 300);
     return () => clearTimeout(t);

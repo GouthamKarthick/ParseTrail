@@ -5,7 +5,6 @@
 import { useCallback, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { isSuspiciousFrontend } from '../utils/security';
 import { useToastContext } from '../context/ToastContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -40,10 +39,6 @@ export default function Login() {
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (isSuspiciousFrontend(email) || isSuspiciousFrontend(password)) {
-        show('warning', 'Suspicious input detected — not saved');
-        return;
-      }
       setErr(null);
       setBusy(true);
       try {
