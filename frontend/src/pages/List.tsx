@@ -95,11 +95,6 @@ export default function List() {
   }, [debouncedQ]);
 
   useEffect(() => {
-    setQInput(qParam);
-  }, [qParam]);
-
-  useEffect(() => {
-    setLoading(true);
     const opts: { q?: string; document_type?: string } = {};
     if (qParam) opts.q = qParam;
     if (selectedTypes.length) opts.document_type = selectedTypes.join(',');
@@ -107,15 +102,16 @@ export default function List() {
       .then(r => {
         setDocs(r.documents);
         setTotal(r.total);
+        setLoading(false);
       })
       .catch(e => {
         const err = e as ApiError | Error;
         const status = (err as ApiError).status ?? 500;
         const kind = kindFromStatus(status);
         show(kind, err.message || 'Failed to list documents');
-      })
-      .finally(() => setLoading(false));
-  }, [qParam, typeParam, show]);
+        setLoading(false);
+      });
+  }, [qParam, typeParam, show, selectedTypes]);
 
   const toggleType = useCallback(
     (value: string) => {

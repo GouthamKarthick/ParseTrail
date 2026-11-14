@@ -2,7 +2,7 @@
  * @fileoverview Profile — center avatar with hover edit, names editable only when empty (legacy).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { putAvatar, deleteAvatar, updateProfile } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToastContext } from '../context/ToastContext';
@@ -24,13 +24,6 @@ export default function Profile() {
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  // Sync when user loads / refreshes
-  useEffect(() => {
-    setFirstName(user?.first_name ?? '');
-    setLastName(user?.last_name ?? '');
-    setPhone(user?.phone ?? '');
-  }, [user?.first_name, user?.last_name, user?.phone]);
 
   const firstEditable = !(user?.first_name || '').trim();
   const lastEditable = !(user?.last_name || '').trim();
