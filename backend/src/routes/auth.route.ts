@@ -64,7 +64,7 @@ function setAuthCookie(res: Response, token: string) {
   res.cookie('token', token, {
     httpOnly: true,
     sameSite: config.cookieSameSite,
-    secure: process.env.NODE_ENV === 'production' || config.cookieSameSite === 'none',
+    secure: config.isProduction || config.cookieSameSite === 'none',
     maxAge: 24 * 60 * 60 * 1000,
   });
 }
@@ -142,7 +142,7 @@ router.post('/register', async (req, res) => {
         userId: id,
         error: error instanceof Error ? error.message : String(error),
       });
-      if (process.env.NODE_ENV === 'production') {
+      if (config.isProduction) {
         res.status(503).json({
           error: 'Verification email could not be sent; request a new code later',
           code: 'EMAIL_DELIVERY_FAILED',
@@ -216,7 +216,7 @@ router.post('/logout', (_req, res) => {
   res.clearCookie('token', {
     httpOnly: true,
     sameSite: config.cookieSameSite,
-    secure: process.env.NODE_ENV === 'production' || config.cookieSameSite === 'none',
+    secure: config.isProduction || config.cookieSameSite === 'none',
   });
   res.json({ ok: true });
 });
@@ -387,7 +387,7 @@ router.delete('/avatar', authenticate, async (req, res) => {
 });
 
 router.post('/resend-verification', async (req, res) => {
-  if (process.env.NODE_ENV === 'production' && !config.smtp.host) {
+  if (config.isProduction && !config.smtp.host) {
     res.status(503).json({
       error: 'Email service is not configured',
       code: 'EMAIL_DELIVERY_UNAVAILABLE',
@@ -417,7 +417,7 @@ router.post('/resend-verification', async (req, res) => {
         userId: user.id,
         error: error instanceof Error ? error.message : String(error),
       });
-      if (process.env.NODE_ENV === 'production') {
+      if (config.isProduction) {
         res.status(503).json({
           error: 'Verification email could not be sent',
           code: 'EMAIL_DELIVERY_FAILED',
@@ -509,7 +509,7 @@ router.post('/verify-email', async (req, res) => {
 });
 
 router.post('/forgot-password', async (req, res) => {
-  if (process.env.NODE_ENV === 'production' && !config.smtp.host) {
+  if (config.isProduction && !config.smtp.host) {
     res.status(503).json({
       error: 'Email service is not configured',
       code: 'EMAIL_DELIVERY_UNAVAILABLE',
@@ -545,7 +545,7 @@ router.post('/forgot-password', async (req, res) => {
         userId: user.id,
         error: error instanceof Error ? error.message : String(error),
       });
-      if (process.env.NODE_ENV === 'production') {
+      if (config.isProduction) {
         res.status(503).json({
           error: 'Password reset email could not be sent',
           code: 'EMAIL_DELIVERY_FAILED',

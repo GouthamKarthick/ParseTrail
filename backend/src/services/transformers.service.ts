@@ -45,7 +45,7 @@ async function getLocalLLM(): Promise<Text2TextPipeline | null> {
       const mod: unknown = await import('@huggingface/transformers');
       const fn = (mod as { default?: unknown }).default ?? mod;
       if (typeof fn !== 'function') throw new Error('pipeline not found');
-      const model = process.env.LOCAL_LLM_MODEL || 'Xenova/LaMini-Flan-T5-77M';
+      const model = config.localLlmModel || 'Xenova/LaMini-Flan-T5-77M';
       const p = await fn('text2text-generation', model, {
         quantized: true,
         dtype: 'q8',

@@ -57,28 +57,24 @@ if (!isCookieSameSite(cookieSameSiteValue)) {
 }
 
 export const config = {
+  isProduction: process.env.NODE_ENV === 'production',
   port: Number(process.env.PORT) || 4000,
   uploadDir: process.env.UPLOAD_DIR || './uploads',
   maxFileSize: Number(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024,
   db: {
-    host:
-      cleanVal(process.env.DB_HOST) || (process.env.NODE_ENV === 'production' ? '' : 'localhost'),
+    host: cleanVal(process.env.DB_HOST) || '',
     port: Number(process.env.DB_PORT) || 3306,
-    user:
-      cleanVal(process.env.DB_USER) ||
-      (process.env.NODE_ENV === 'production' ? '' : 'parsetrail_user'),
-    password:
-      cleanVal(process.env.DB_PASSWORD) ||
-      (process.env.NODE_ENV === 'production' ? '' : 'parsetrail_pass'),
-    database:
-      cleanVal(process.env.DB_NAME) || (process.env.NODE_ENV === 'production' ? '' : 'parsetrail'),
+    user: cleanVal(process.env.DB_USER) || '',
+    password: cleanVal(process.env.DB_PASSWORD) || '',
+    database: cleanVal(process.env.DB_NAME) || '',
     ssl: process.env.DB_SSL === 'true',
     sslCaPath: cleanVal(process.env.DB_CA_PATH) || './ca.pem',
     sslCa: cleanVal(process.env.DB_CA_CERT) || '',
   },
-  jwtSecret: cleanVal(process.env.JWT_SECRET) || 'dev-secret-change-me',
+  jwtSecret: cleanVal(process.env.JWT_SECRET) || '',
   jwtExpiry: process.env.JWT_EXPIRY || '1d',
   cookieSameSite: cookieSameSiteValue,
+  frontendUrl: cleanVal(process.env.FRONTEND_URL) || cleanVal(process.env.APP_URL) || '',
   allowUnverified: process.env.ALLOW_UNVERIFIED === 'true',
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173')
     .split(',')
@@ -99,6 +95,8 @@ export const config = {
     apiKey: process.env.AI_API_KEY || '',
     groqApiKey: process.env.GROQ_API_KEY || '',
     openRouterApiKey: process.env.OPENROUTER_API_KEY || '',
+    groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    openRouterModel: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
     timeoutMs: parsePositiveInt(process.env.AI_TIMEOUT_MS, 20_000),
   },
   refine: {
@@ -108,6 +106,7 @@ export const config = {
     ratePerMinute: parsePositiveInt(process.env.REFINE_RATE_PER_MIN, 10),
   },
   localLlmEnabled: process.env.LOCAL_LLM_ENABLED !== 'false',
+  localLlmModel: process.env.LOCAL_LLM_MODEL || 'Xenova/LaMini-Flan-T5-77M',
   ocrMaxPages: parsePositiveInt(process.env.OCR_MAX_PAGES, 3),
   logs: {
     dir: './logs',
@@ -123,11 +122,32 @@ export const config = {
   },
 } as const;
 
-if (process.env.NODE_ENV === 'production') {
-  if (config.jwtSecret === 'dev-secret-change-me' || config.jwtSecret.length < 32) {
+const isTest = process.env.NODE_ENV === 'test';
+
+if (config.isProduction) {
+  if (!config.jwtSecret || config.jwtSecret.length < 32) {
     throw new Error('JWT_SECRET must be set to at least 32 characters in production');
   }
   if (!config.db.host || !config.db.user || !config.db.password || !config.db.database) {
     throw new Error('DB_HOST, DB_USER, DB_PASSWORD, and DB_NAME are required in production');
+  }
+  if (config.allowUnverified) {
+    throw new Error('ALLOW_UNVERIFIED must not be true in production');
+  }
+  if (!config.frontendUrl) {
+    throw new Error('FRONTEND_URL is required in production');
+  }
+  if (!config.smtp.host) {
+    throw new Error('SMTP_HOST is required in production');
+  }
+}
+
+// Require secrets and DB credentials outside test (tests keep working via .env).
+if (!isTest) {
+  if (!config.jwtSecret || config.jwtSecret.length < 32) {
+    throw new Error('JWT_SECRET must be set to at least 32 characters');
+  }
+  if (!config.db.host || !config.db.user || !config.db.password || !config.db.database) {
+    throw new Error('DB_HOST, DB_USER, DB_PASSWORD, and DB_NAME must be set');
   }
 }
