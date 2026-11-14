@@ -397,6 +397,108 @@ describe('ai.service — extractWithAI / tryAI', () => {
     vi.useRealTimers();
   });
 
+  it('three consecutive 503s trigger 60s failure cooldown, success resets counter, timeout counts like 503', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+
+    mockAiConfig.providers = ['gemini', 'groq'];
+    mockAiConfig.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+      groq: { apiKey: 'groq-key', model: 'llama-3.3-70b-versatile' },
+    };
+
+    const gemini503 = {
+      ok: false,
+      status: 503,
+      body: { cancel: vi.fn().mockResolvedValue(undefined) },
+    } as any;
+    const groqOk = {
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                vendor: 'Groq Co',
+                confidence: 0.8,
+                documentType: 'invoice',
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+    } as any;
+
+    // Call 1: gemini 503 (count=1), groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(gemini503).mockResolvedValueOnce(groqOk);
+    const { extractWithAI } = await import('./ai.service.js');
+    let r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Call 2: gemini 503 (count=2), groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(gemini503).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Call 3: gemini 503 (count=3 -> 60s cooldown), groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(gemini503).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Call 4 immediately: gemini in failure cooldown, skipped; groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+    expect(fetch).toHaveBeenCalledTimes(7); // 2+2+2+1
+
+    // Advance past 60s cooldown -> gemini retried; success resets counter
+    vi.setSystemTime(now + 60 * 1000 + 1000);
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    vendor: 'Gemini Back',
+                    confidence: 0.9,
+                    documentType: 'invoice',
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    } as any);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Gemini Back');
+
+    // Counter reset: next gemini 503 starts count at 1, groq still used afterward
+    vi.mocked(fetch).mockResolvedValueOnce(gemini503).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Timeout counts the same as 503 (count=2 now)
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new Error('fetch timeout'))
+      .mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Third failure (503) -> cooldown again; gemini skipped, groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(gemini503).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+    expect(fetch).toHaveBeenCalledTimes(14);
+
+    vi.useRealTimers();
+  });
+
   it('all providers fail -> throws the existing cloud-failed error', async () => {
     mockAiConfig.providers = ['gemini', 'groq'];
     mockAiConfig.providerKeys = {
