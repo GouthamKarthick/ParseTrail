@@ -49,9 +49,18 @@ const providerSkipUntil = new Map<string, number>();
 const provider429Count = new Map<string, number>();
 const provider429CooldownUntil = new Map<string, number>();
 
+/**
+ * Tracks consecutive 5xx/timeout/network failures per provider.
+ * 3 consecutive such failures triggers a 60-second cooldown.
+ */
+const providerFailureCount = new Map<string, number>();
+const providerFailureCooldownUntil = new Map<string, number>();
+
 const SKIP_401_MS = 10 * 60 * 1000;
 const COOLDOWN_429_MS = 2 * 60 * 1000;
+const COOLDOWN_FAILURE_MS = 60 * 1000;
 const CONSECUTIVE_429_THRESHOLD = 3;
+const CONSECUTIVE_FAILURE_THRESHOLD = 3;
 
 function isProviderSkipped(name: string): boolean {
   const until = providerSkipUntil.get(name);
@@ -78,6 +87,24 @@ function record429(name: string): void {
 function reset429(name: string): void {
   provider429Count.delete(name);
   provider429CooldownUntil.delete(name);
+}
+
+function isProviderFailureCooldown(name: string): boolean {
+  const until = providerFailureCooldownUntil.get(name);
+  return Boolean(until && Date.now() < until);
+}
+
+function recordFailure(name: string): void {
+  const count = (providerFailureCount.get(name) || 0) + 1;
+  providerFailureCount.set(name, count);
+  if (count >= CONSECUTIVE_FAILURE_THRESHOLD) {
+    providerFailureCooldownUntil.set(name, Date.now() + COOLDOWN_FAILURE_MS);
+  }
+}
+
+function resetFailure(name: string): void {
+  providerFailureCount.delete(name);
+  providerFailureCooldownUntil.delete(name);
 }
 
 function providerApiKey(name: string): string | undefined {
@@ -176,7 +203,7 @@ interface ProviderResult {
   tokenUsage?: TokenUsage;
 }
 
-async function fetchWithRetry(provider: string, url: string, init: RequestInit): Promise<Response> {
+async function fetchProvider(provider: string, url: string, init: RequestInit): Promise<Response> {
   const response = await fetch(url, {
     ...init,
     signal: AbortSignal.timeout(config.ai.timeoutMs),
@@ -207,7 +234,7 @@ async function callGemini(
     parts.splice(1, 0, {
       inline_data: { mime_type: mimeType || 'image/jpeg', data: imageBase64 },
     });
-  const response = await fetchWithRetry('Gemini', url, {
+  const response = await fetchProvider('Gemini', url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -268,7 +295,7 @@ async function callAnthropic(
         data: imageBase64,
       },
     });
-  const response = await fetchWithRetry('Anthropic', 'https://api.anthropic.com/v1/messages', {
+  const response = await fetchProvider('Anthropic', 'https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -315,7 +342,7 @@ async function callCompatibleProvider(
     provider === 'groq'
       ? 'https://api.groq.com/openai/v1/chat/completions'
       : 'https://openrouter.ai/api/v1/chat/completions';
-  const response = await fetchWithRetry(provider, url, {
+  const response = await fetchProvider(provider, url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -384,6 +411,10 @@ export async function extractWithAI(
       errors.push(`${candidate} skipped (429 cooldown)`);
       continue;
     }
+    if (isProviderFailureCooldown(candidate)) {
+      errors.push(`${candidate} skipped (failure cooldown)`);
+      continue;
+    }
     try {
       provider = candidate;
       response =
@@ -393,6 +424,7 @@ export async function extractWithAI(
             ? await callAnthropic(text, opts?.imageBase64, opts?.mimeType, opts?.prompt)
             : await callCompatibleProvider(candidate, text, opts?.prompt);
       reset429(candidate);
+      resetFailure(candidate);
       break;
     } catch (error) {
       if (error instanceof ProviderError) {
@@ -407,11 +439,17 @@ export async function extractWithAI(
           errors.push(`${candidate} rate limited (status 429)`);
           continue;
         }
-        // 5xx or other HTTP error: try next provider
+        if (status != null && status >= 500) {
+          recordFailure(candidate);
+          errors.push(error.message);
+          continue;
+        }
+        // 4xx or other HTTP error: try next provider
         errors.push(error.message);
         continue;
       }
       // Network error, timeout, or unexpected: try next provider
+      recordFailure(candidate);
       errors.push(error instanceof Error ? error.message : `${candidate} request failed`);
       continue;
     }
