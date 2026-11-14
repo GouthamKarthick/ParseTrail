@@ -22,7 +22,7 @@ export interface AuthUser {
  */
 export async function authenticate(req: Request, res: Response, next: NextFunction) {
   const token =
-    (req as unknown as { cookies?: Record<string, string> }).cookies?.token ||
+    req.cookies?.token ||
     (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
   if (!token) {
     res.status(401).json({ error: 'Not authenticated' });
@@ -57,7 +57,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
       res.status(401).json({ error: 'Invalid or expired token' });
       return;
     }
-    (req as unknown as { user: AuthUser }).user = payload;
+    req.user = payload;
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });
@@ -70,5 +70,21 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
  * @returns Auth user or null
  */
 export function getUser(req: Request): AuthUser | null {
-  return (req as unknown as { user?: AuthUser }).user ?? null;
+  return req.user ?? null;
+}
+
+/**
+ * Requires an authenticated user; calls next() with 401 if not present.
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
+export function requireUser(req: Request, res: Response, next: NextFunction): void {
+  const user = getUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  next();
 }

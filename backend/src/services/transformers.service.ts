@@ -112,7 +112,7 @@ export async function runLocalLLMExtraction(
   try {
     const pipe = await getLocalLLM();
     if (!pipe) return { data: {}, confidence: 0, documentType };
-    const out = await pipe(prompt, { max_new_tokens: 256, temperature: 0.0 } as unknown as Record<
+    const out = await pipe(prompt, { max_new_tokens: 256, temperature: 0.0 } as Record<
       string,
       unknown
     >);
