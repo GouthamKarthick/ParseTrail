@@ -198,6 +198,12 @@ export async function ensureSchema(): Promise<void> {
       "INSERT IGNORE INTO schema_migrations (version, name) VALUES (5, 'users-password-changed-at')"
     );
   }
+  if (!applied.has(6)) {
+    await migrateUserIdNotNull();
+    await pool.query(
+      "INSERT IGNORE INTO schema_migrations (version, name) VALUES (6, 'users-user-id-not-null')"
+    );
+  }
 }
 
 /**
@@ -408,5 +414,82 @@ async function migratePasswordChangedAt(): Promise<void> {
   );
   if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) {
     await runDdl('ALTER TABLE users ADD COLUMN password_changed_at DATETIME NULL AFTER updated_at');
+  }
+}
+
+/**
+ * Adds FOREIGN KEYs and makes user_id NOT NULL on documents, corrections,
+ * and refine_jobs to enforce ownership integrity.
+ *
+ * Data safety: this migration does NOT delete or modify any rows. If any
+ * table contains rows with NULL user_id, the migration throws an error and
+ * aborts, leaving the database unchanged. The operator must first handle
+ * those orphaned rows (assign to a valid user or delete them) before
+ * re-running the migration.
+ * @returns void
+ */
+async function migrateUserIdNotNull(): Promise<void> {
+  // Count NULL user_id rows per table to enforce data safety before making
+  // columns NOT NULL.
+  const checkNulls: Array<[string, string]> = [
+    ['documents', 'user_id'],
+    ['corrections', 'user_id'],
+    ['refine_jobs', 'user_id'],
+  ];
+  const nullCounts: Array<{ table: string; column: string; nullCount: number }> = [];
+  for (const [table, column] of checkNulls) {
+    const [rows] = await pool.query(`SELECT COUNT(*) as cnt FROM ${table} WHERE ${column} IS NULL`);
+    const count = (rows as Array<{ cnt: number }>)[0]?.cnt ?? 0;
+    nullCounts.push({ table, column, nullCount: count });
+  }
+  const hasNulls = nullCounts.some(row => row.nullCount > 0);
+  if (hasNulls) {
+    const details = nullCounts
+      .map(row => `${row.table}.${row.column} (${row.nullCount})`)
+      .join(', ');
+    throw new Error(
+      `Cannot make user_id NOT NULL: NULL user_id rows found in ${details}. ` +
+        'Update or delete those rows before running this migration.'
+    );
+  }
+
+  // documents.user_id: already has FOREIGN KEY, just make it NOT NULL
+  const [docCol] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='documents' AND COLUMN_NAME='user_id' AND IS_NULLABLE='YES'"
+  );
+  if ((docCol as Array<{ cnt: number }>)[0]?.cnt === 0) {
+    await runDdl('ALTER TABLE documents MODIFY COLUMN user_id CHAR(36) NOT NULL');
+  }
+
+  // corrections.user_id: add NOT NULL + FOREIGN KEY
+  const [corrCol] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='corrections' AND COLUMN_NAME='user_id' AND IS_NULLABLE='YES'"
+  );
+  if ((corrCol as Array<{ cnt: number }>)[0]?.cnt === 0) {
+    await runDdl('ALTER TABLE corrections MODIFY COLUMN user_id CHAR(36) NOT NULL');
+  }
+  const [corrFk] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='corrections' AND COLUMN_NAME='user_id' AND REFERENCED_TABLE_NAME='users' AND REFERENCED_COLUMN_NAME='id'"
+  );
+  if ((corrFk as Array<{ cnt: number }>)[0]?.cnt === 0) {
+    await runDdl(
+      'ALTER TABLE corrections ADD CONSTRAINT fk_corrections_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE'
+    );
+  }
+
+  // refine_jobs.user_id: add NOT NULL + FOREIGN KEY
+  const [refineCol] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='refine_jobs' AND COLUMN_NAME='user_id' AND IS_NULLABLE='YES'"
+  );
+  if ((refineCol as Array<{ cnt: number }>)[0]?.cnt === 0) {
+    await runDdl('ALTER TABLE refine_jobs MODIFY COLUMN user_id CHAR(36) NOT NULL');
+  }
+  const [refineFk] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='refine_jobs' AND COLUMN_NAME='user_id' AND REFERENCED_TABLE_NAME='users' AND REFERENCED_COLUMN_NAME='id'"
+  );
+  if ((refineFk as Array<{ cnt: number }>)[0]?.cnt === 0) {
+    await runDdl(
+      'ALTER TABLE refine_jobs ADD CONSTRAINT fk_refine_jobs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE'
+    );
   }
 }
