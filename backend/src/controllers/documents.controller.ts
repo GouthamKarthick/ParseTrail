@@ -9,8 +9,8 @@ import { z } from 'zod';
 import { pool, withTransaction } from '../db/pool.js';
 import { logger } from '../config/logger.js';
 import { isSuspicious } from '../utils/security.js';
-import { extract, recordAttempts } from '../services/extraction.service.js';
-import { needsRefinement, isValidDate } from '../services/confidence.service.js';
+import { extract } from '../services/extraction.service.js';
+import { isValidDate } from '../services/confidence.service.js';
 import { normalizeCurrency } from '../utils/currency.js';
 import { parseAmount } from '../utils/amount.js';
 import { applyConversion, clearConversion } from '../utils/conversion.js';
@@ -29,92 +29,6 @@ import { generateSummaryPdf, generateSummaryCsv } from '../services/export.servi
  */
 function parseDataField(row: { data: string | null }) {
   return parseJsonColumn<Record<string, unknown> | null>(row.data, null);
-}
-
-/**
- * Checks a finished local result and enqueues cloud refinement if needed.
- * Never throws — refinement is best-effort.
- * @param docId Document id
- * @param userId Owner id
- * @param data Extracted data
- * @param docType Decided type
- * @param attempts Cascade attempts
- * @returns Enqueue reason or null
- */
-async function maybeEnqueueRefine(
-  docId: string,
-  userId: string,
-  data: unknown,
-  docType: string,
-  attempts: Array<{ conflicts?: string[] }> | undefined
-): Promise<string | null> {
-  try {
-    const { needed, reason } = needsRefinement(
-      (data ?? {}) as Record<string, unknown>,
-      docType,
-      attempts ?? []
-    );
-    if (needed && reason) {
-      await enqueueRefineJob(docId, userId, reason);
-      return reason;
-    }
-    return null;
-  } catch (e) {
-    logger.warn('Refine enqueue check failed', { error: (e as Error).message });
-    return null;
-  }
-}
-
-/**
- * Re-applies recorded user corrections over freshly extracted data so
- * duplicate re-uploads and reprocessing never clobber human fixes.
- * @param docId Document id holding the corrections
- * @param data Freshly extracted data
- * @returns Data with corrections re-applied
- */
-async function withCorrectionsReapplied(
-  docId: string,
-  data: Record<string, unknown>
-): Promise<Record<string, unknown>> {
-  try {
-    const [rows] = await pool.query(
-      'SELECT field, corrected_value FROM corrections WHERE document_id=? ORDER BY created_at ASC',
-      [docId]
-    );
-    const list = rows as Array<{
-      field: string;
-      corrected_value: string | null;
-    }>;
-    if (list.length === 0) return data;
-    const merged: Record<string, unknown> = { ...data };
-    let financialAmountCorrected = false;
-    for (const c of list) {
-      if (c.corrected_value == null) continue;
-      if (c.field === 'totalAmount') {
-        const n = Number(c.corrected_value);
-        merged[c.field] = isFinite(n) ? n : c.corrected_value;
-        financialAmountCorrected = true;
-      } else {
-        merged[c.field] = c.corrected_value;
-        if (c.field === 'currency') financialAmountCorrected = true;
-      }
-    }
-    if (financialAmountCorrected) {
-      clearConversion(merged);
-      try {
-        await applyConversion(merged);
-      } catch {
-        logger.warn('Reapplied-correction FX recompute failed', { docId });
-      }
-    }
-    return merged;
-  } catch (e) {
-    logger.warn('Corrections lookup failed, using uncorrected data', {
-      docId,
-      error: (e as Error).message,
-    });
-    return data;
-  }
 }
 
 /**
@@ -494,7 +408,9 @@ export async function getAttempts(req: Request, res: Response, next: NextFunctio
 }
 
 /**
- * Re-runs local extraction on a document and enqueues cloud refinement.
+ * Reprocess a document: enqueues a background refine job instead of running
+ * extraction inline, so uploads stay fast and user corrections are never lost
+ * (the worker re-applies them via withCorrectionsReapplied).
  * @param req Express request
  * @param res Express response
  * @param next Next middleware
@@ -522,44 +438,14 @@ export async function reprocessDocument(req: Request, res: Response, next: NextF
       res.status(404).json({ error: 'Document not found' });
       return;
     }
-    let result: Awaited<ReturnType<typeof extract>> | null = null;
-    try {
-      result = await extract(row.path, { allowCloud: false });
-    } catch (e) {
-      await pool.query("UPDATE documents SET status='failed', error=? WHERE id=?", [
-        (e as Error).message.slice(0, 500),
-        id,
-      ]);
-      res.json({ id, status: 'failed', enqueued: false });
-      return;
-    }
-    const preservedRe = await withCorrectionsReapplied(
+    await pool.query("UPDATE documents SET status='processing', error=NULL WHERE id=?", [
       parsed.data,
-      result.data as Record<string, unknown>
-    );
-    await pool.query(
-      "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, error=NULL WHERE id=?",
-      [
-        result.documentType,
-        result.documentCategory,
-        JSON.stringify(preservedRe),
-        result.extractedText,
-        parsed.data,
-      ]
-    );
-    await recordAttempts(parsed.data, result.attempts);
-    const reason = await maybeEnqueueRefine(
-      parsed.data,
-      user.id,
-      preservedRe,
-      result.documentType,
-      result.attempts
-    );
-    res.json({
+    ]);
+    await enqueueRefineJob(parsed.data, user.id, 'reprocess');
+    res.status(202).json({
       id: parsed.data,
-      status: 'done',
-      enqueued: reason != null,
-      reason,
+      status: 'processing',
+      enqueued: true,
     });
   } catch (err) {
     next(err);

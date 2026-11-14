@@ -511,7 +511,7 @@ describe('controller — listDocuments / getDocument', () => {
     expect(res.status).toHaveBeenCalledWith(404);
   });
 
-  it('reprocessDocument 200 re-runs local and enqueues when incomplete', async () => {
+  it('reprocessDocument 202 enqueues job instead of extracting inline', async () => {
     const mockQuery = vi.mocked(pool.query);
     mockQuery
       .mockResolvedValueOnce([
@@ -520,16 +520,6 @@ describe('controller — listDocuments / getDocument', () => {
       .mockResolvedValueOnce([[]] as any)
       .mockResolvedValueOnce([[]] as any)
       .mockResolvedValueOnce([[]] as any);
-    vi.mocked(extract).mockResolvedValue({
-      data: { vendor: 'V' },
-      confidence: 0.3,
-      method: 'rule-based',
-      documentType: 'invoice',
-      documentTypeConfidence: 0.8,
-      documentCategory: 'financial',
-      attempts: [],
-      typeVotes: ['invoice'],
-    } as any);
     const { reprocessDocument } = await import('./documents.controller.js');
     const res: any = { json: vi.fn(), status: vi.fn().mockReturnThis() };
     await reprocessDocument(
@@ -540,9 +530,15 @@ describe('controller — listDocuments / getDocument', () => {
       res,
       vi.fn()
     );
+    expect(res.status).toHaveBeenCalledWith(202);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'done', enqueued: true })
+      expect.objectContaining({
+        id: '550e8400-e29b-41d4-a716-446655440000',
+        status: 'processing',
+        enqueued: true,
+      })
     );
+    expect(extract).not.toHaveBeenCalled();
   });
 
   it('reprocessDocument 404 when missing', async () => {

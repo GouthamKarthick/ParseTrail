@@ -16,6 +16,7 @@ import { config } from '../config.js';
 import { logger } from '../config/logger.js';
 import { extract, extractFromText, recordAttempts } from '../services/extraction.service.js';
 import { createContentFingerprint } from '../services/dedup.service.js';
+import { withCorrectionsReapplied } from '../services/corrections.js';
 import { needsRefinement } from '../services/confidence.service.js';
 import { parseJsonColumn } from '../utils/json.js';
 
@@ -215,6 +216,7 @@ async function processInitialExtraction(
   let r: Awaited<ReturnType<typeof extract>>;
   try {
     r = await extract(doc.path, { allowCloud: false });
+    r.data = await withCorrectionsReapplied(job.document_id, r.data as Record<string, unknown>);
   } catch (error) {
     const message = (error as Error).message;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

@@ -16,10 +16,14 @@ vi.mock('../services/extraction.service.js', () => ({
   extractFromText: vi.fn(),
   recordAttempts: vi.fn(),
 }));
+vi.mock('../services/corrections.js', () => ({
+  withCorrectionsReapplied: vi.fn(),
+}));
 
 import { pool } from '../db/pool.js';
 import fs from 'fs/promises';
 import { extract, extractFromText } from '../services/extraction.service.js';
+import { withCorrectionsReapplied } from '../services/corrections.js';
 import {
   processOneRefineJob,
   enqueueRefineJob,
@@ -58,6 +62,9 @@ describe('jobs/refine — worker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stopRefineWorker();
+    vi.mocked(withCorrectionsReapplied).mockImplementation(
+      async (_docId: string, data: Record<string, unknown>) => data
+    );
   });
 
   it('idle when no due jobs', async () => {
@@ -173,6 +180,48 @@ describe('jobs/refine — worker', () => {
     expect(String(doneCall![0])).toContain('content_fingerprint');
     const quotaCall = mockQuery().mock.calls.find(c => String(c[0]).includes('refine_quota'));
     expect(quotaCall).toBeUndefined();
+  });
+
+  it('pending doc re-applies user corrections before storing', async () => {
+    baseSqlMock({
+      job: { id: 'j1', document_id: 'd1', user_id: 'u1', attempts: 0 },
+      doc: {
+        id: 'd1',
+        path: '/tmp/x.pdf',
+        status: 'pending',
+        data: null,
+        extracted_text: null,
+      },
+    });
+    vi.mocked(fs.access).mockResolvedValueOnce(undefined);
+    vi.mocked(extract).mockResolvedValue({
+      data: { vendor: 'V', totalAmount: 10 },
+      confidence: 0.9,
+      method: 'regex',
+      documentType: 'invoice',
+      documentTypeConfidence: 0.9,
+      documentCategory: 'financial',
+      attempts: [],
+      extractedText: 'Invoice total 10',
+      typeVotes: ['invoice'],
+    } as any);
+    vi.mocked(withCorrectionsReapplied).mockResolvedValue({
+      vendor: 'V',
+      totalAmount: 999,
+      currency: 'USD',
+    });
+
+    expect(await processOneRefineJob()).toBe('done');
+    expect(extract).toHaveBeenCalledWith('/tmp/x.pdf', { allowCloud: false });
+    expect(withCorrectionsReapplied).toHaveBeenCalledWith('d1', {
+      vendor: 'V',
+      totalAmount: 10,
+    });
+    const doneCall = mockQuery().mock.calls.find(c =>
+      String(c[0]).includes("UPDATE documents SET status='done'")
+    );
+    expect(doneCall).toBeDefined();
+    expect(String(doneCall![1])).toContain('999');
   });
 
   it('pending doc with missing source file is dead with source_unavailable', async () => {
