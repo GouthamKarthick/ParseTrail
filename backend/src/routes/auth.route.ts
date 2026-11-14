@@ -7,7 +7,7 @@ import { createHash, randomInt, randomUUID } from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { pool } from '../db/pool.js';
+import { pool, withTransaction } from '../db/pool.js';
 import { config } from '../config.js';
 import { sendVerificationEmail, sendResetEmail } from '../services/email.service.js';
 import { authenticate } from '../middleware/auth.js';
@@ -559,13 +559,6 @@ router.post('/forgot-password', async (req, res) => {
 
 router.post('/reset-password', async (req, res) => {
   const { token, password } = req.body as { token?: string; password?: string };
-  if (isSuspicious(token)) {
-    res.status(400).json({
-      error: 'Suspicious input detected — not saved',
-      code: 'SUSPICIOUS_INPUT',
-    });
-    return;
-  }
   const parsed = resetPasswordSchema.safeParse({ token, password });
   if (!parsed.success) {
     const msg = parsed.error.issues.map(i => i.message).join('; ');
@@ -574,18 +567,46 @@ router.post('/reset-password', async (req, res) => {
   }
   const { token: validToken, password: validPassword } = parsed.data;
   const tokenHash = hashResetToken(validToken);
-  const [rows] = await pool.query(
-    'SELECT user_id FROM password_reset_tokens WHERE token=? AND expires_at > NOW() AND used=FALSE',
-    [tokenHash]
-  );
-  const row = (rows as Array<{ user_id: string }>)[0];
-  if (!row) {
-    res.status(400).json({ error: 'Invalid or expired token' });
-    return;
+
+  try {
+    await withTransaction(async conn => {
+      // Atomic single-use claim: only one request can flip used=FALSE→TRUE.
+      const [claim] = await conn.query(
+        'UPDATE password_reset_tokens SET used=TRUE WHERE token=? AND used=FALSE AND expires_at > NOW()',
+        [tokenHash]
+      );
+      if ((claim as { affectedRows?: number }).affectedRows !== 1) {
+        const err = new Error('Invalid or expired token');
+        (err as { status?: number }).status = 400;
+        throw err;
+      }
+      const [rows] = await conn.query('SELECT user_id FROM password_reset_tokens WHERE token=?', [
+        tokenHash,
+      ]);
+      const row = (rows as Array<{ user_id: string }>)[0];
+      if (!row) {
+        const err = new Error('Invalid or expired token');
+        (err as { status?: number }).status = 400;
+        throw err;
+      }
+      // Invalidate every other unused reset token for this user.
+      await conn.query(
+        'UPDATE password_reset_tokens SET used=TRUE WHERE user_id=? AND token<>? AND used=FALSE',
+        [row.user_id, tokenHash]
+      );
+      const hash = await bcrypt.hash(validPassword, 12);
+      await conn.query('UPDATE users SET password_hash=?, password_changed_at=NOW() WHERE id=?', [
+        hash,
+        row.user_id,
+      ]);
+    });
+  } catch (error) {
+    if ((error as { status?: number }).status === 400) {
+      res.status(400).json({ error: (error as Error).message || 'Invalid or expired token' });
+      return;
+    }
+    throw error;
   }
-  const hash = await bcrypt.hash(validPassword, 10);
-  await pool.query('UPDATE users SET password_hash=? WHERE id=?', [hash, row.user_id]);
-  await pool.query('UPDATE password_reset_tokens SET used=TRUE WHERE token=?', [tokenHash]);
   res.json({ ok: true });
 });
 

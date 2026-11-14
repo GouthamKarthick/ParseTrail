@@ -92,6 +92,7 @@ export function createApp() {
   app.use('/api/auth/forgot-password', ipRateLimit, emailRateLimit);
   app.use('/api/auth/resend-verification', ipRateLimit, emailRateLimit);
   app.use('/api/auth/verify-email', ipRateLimit, emailRateLimit);
+  app.use('/api/auth/reset-password', ipRateLimit, emailRateLimit);
   app.use(
     '/api/documents/upload',
     rateLimit({

@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { createApp } from '../app.js';
 import { config } from '../config.js';
+import { pool } from '../db/pool.js';
+
+vi.mock('../db/pool.js', () => ({
+  pool: { query: vi.fn() },
+}));
 
 function authHeader() {
   const token = jwt.sign(
@@ -16,6 +21,21 @@ function authHeader() {
   );
   return { Authorization: `Bearer ${token}` };
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // authenticate() looks up the user; return a valid user row.
+  (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+    if (String(sql).includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+      return [[{ id: 'test-user', password_changed_at: null }]];
+    }
+    return [[]];
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('routes — documents', () => {
   it('GET /health → 200 ok', async () => {
