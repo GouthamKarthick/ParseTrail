@@ -5,7 +5,7 @@ Updated together with each item's commit. Evidence = test names + check results 
 
 | ID | Title | Status | Evidence | Commit |
 |----|-------|--------|----------|--------|
-| F00 | Transaction helper `withTransaction` | TODO | | |
+| F00 | Transaction helper `withTransaction` | DONE | pool.spec.ts: withTransaction commit/rollback/release tests (3 tests); backend vitest 177 passed, tsc/eslint/prettier clean | 7a156f5 |
 | F01 | Frontend `npm ci` clean-copy install | TODO | | |
 | F02 | Frontend lint errors + warning | TODO | | |
 | F03 | react-router advisories | TODO | | |

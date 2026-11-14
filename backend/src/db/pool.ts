@@ -5,6 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import mysql from 'mysql2/promise';
+import type { PoolConnection } from 'mysql2/promise';
 import { config } from '../config.js';
 
 /**
@@ -54,3 +55,32 @@ export const pool = mysql.createPool({
   dateStrings: true,
   ...(ssl ? { ssl } : {}),
 });
+
+/**
+ * Runs a function inside a single MySQL transaction.
+ *
+ * Acquires a connection from the pool, begins a transaction, calls `fn(conn)`,
+ * commits on success, rolls back on error (rethrowing the original error), and
+ * always releases the connection back to the pool.
+ *
+ * mysql2 has no `pool.begin()`, so this wraps `getConnection()` /
+ * `beginTransaction()` / `commit()` / `rollback()` / `release()`.
+ *
+ * @param fn - Callback receiving the transactional connection
+ * @returns Whatever `fn` returns
+ * @throws Re-throws whatever `fn` throws (after rollback)
+ */
+export async function withTransaction<T>(fn: (conn: PoolConnection) => Promise<T>): Promise<T> {
+  const conn = await pool.getConnection();
+  await conn.beginTransaction();
+  try {
+    const result = await fn(conn);
+    await conn.commit();
+    return result;
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
