@@ -6,7 +6,7 @@ Updated together with each item's commit. Evidence = test names + check results 
 | ID | Title | Status | Evidence | Commit |
 |----|-------|--------|----------|--------|
 | F00 | Transaction helper `withTransaction` | DONE | pool.spec.ts: withTransaction commit/rollback/release tests (3 tests); backend vitest 177 passed, tsc/eslint/prettier clean | 7a156f5 |
-| F01 | Frontend `npm ci` clean-copy install | TODO | | |
+| F01 | Frontend `npm ci` clean-copy install | N/A | Premise does not hold: package.json has vite ^5.3.0 + vitest ^4.1.12; lockfile vitest peerDeps allow vite ^4.2.0||^5.0.0||^6.0.0||^7.0.0. Clean copy at /tmp/opencode/ft-ci: npm ci exit 0, tsc exit 0, vitest 22 passed, build exit 0. No change needed. | |
 | F02 | Frontend lint errors + warning | TODO | | |
 | F03 | react-router advisories | TODO | | |
 | F04 | Config hardening + `process.env` removal | TODO | | |
