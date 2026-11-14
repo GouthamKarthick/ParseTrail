@@ -334,3 +334,52 @@ describe('verify-email — body-only + hashed token', () => {
     expect(res.body.error).toBe('Invalid or expired code');
   });
 });
+
+describe('password policy — 72 byte limit', () => {
+  const over72 = 'A'.repeat(80); // 80 bytes > bcrypt 72-byte limit
+  const exactly72 = 'A' + '1' + '!' + 'B'.repeat(69); // 72 bytes, valid complexity
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('rejects registration with a password over 72 bytes', async () => {
+    mockQuery.mockResolvedValue([[], []]);
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app)
+      .post('/register')
+      .send({ first_name: 'A', last_name: 'B', email: 'over72@example.com', password: over72 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('72 bytes');
+  });
+
+  it('accepts registration with a password of exactly 72 bytes', async () => {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      if (String(sql).startsWith('INSERT INTO users')) return [{ affectedRows: 1 }, []];
+      return [[], []];
+    });
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app).post('/register').send({
+      first_name: 'A',
+      last_name: 'B',
+      email: 'exactly72@example.com',
+      password: exactly72,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.email).toBe('exactly72@example.com');
+  });
+
+  it('rejects password reset with a password over 72 bytes', async () => {
+    mockQuery.mockResolvedValue([{ affectedRows: 1 }]); // token claim succeeds
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app)
+      .post('/reset-password')
+      .send({ token: 'reset-token-1', password: over72 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('72 bytes');
+  });
+});

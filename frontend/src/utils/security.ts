@@ -43,6 +43,8 @@ export function validateUploadFile(file: File): string | null {
  */
 export function getPasswordError(pwd: string): string | null {
   if (pwd.length < 8) return 'Password must be at least 8 characters';
+  if (new TextEncoder().encode(pwd).length > 72)
+    return 'Password must be at most 72 bytes (bcrypt limit)';
   if (!/[A-Z]/.test(pwd)) return 'Password must contain 1 uppercase letter';
   if (!/\d/.test(pwd)) return 'Password must contain 1 number';
   if (!/[^A-Za-z0-9]/.test(pwd)) return 'Password must contain 1 special character';

@@ -8,7 +8,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { isSuspiciousFrontend, validateUploadFile } from './utils/security.ts';
+import { isSuspiciousFrontend, validateUploadFile, getPasswordError } from './utils/security.ts';
 import { isRefining } from './hooks/usePolling.ts';
 import { statusBadges } from './utils/badges.ts';
 import Login from './pages/Login.tsx';
@@ -429,5 +429,27 @@ describe('Login page', () => {
       // getByText throws if the element is absent, so this asserts presence.
       expect(screen.getByText(/invalid credentials/i)).toBeTruthy()
     );
+  });
+});
+
+describe('utils — password policy (72 byte bcrypt limit)', () => {
+  const over72 = 'A'.repeat(80); // 80 bytes > bcrypt 72-byte limit
+  const exactly72 = 'A' + '1' + '!' + 'B'.repeat(69); // 72 bytes, valid complexity
+  const over72valid = 'A' + '1' + '!' + 'B'.repeat(70); // 73 bytes, valid complexity
+
+  it('rejects a password over 72 bytes', () => {
+    expect(getPasswordError(over72)).toContain('72 bytes');
+    expect(getPasswordError(over72valid)).toContain('72 bytes');
+  });
+
+  it('accepts a password of exactly 72 bytes with valid complexity', () => {
+    expect(getPasswordError(exactly72)).toBeNull();
+  });
+
+  it('still enforces complexity on long-enough passwords', () => {
+    expect(getPasswordError('weakpassword')).toContain('uppercase');
+    expect(getPasswordError('NoNumbers!')).toContain('number');
+    expect(getPasswordError('NoSpecial1')).toContain('special');
+    expect(getPasswordError('short1!')).toContain('at least 8 characters');
   });
 });
