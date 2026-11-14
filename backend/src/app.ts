@@ -22,7 +22,7 @@ import rateLimit from 'express-rate-limit';
  */
 export function createApp() {
   const app = express();
-  app.set('trust proxy', 1);
+  app.set('trust proxy', config.trustProxy);
   app.use(helmet());
   app.use(
     cors({
@@ -34,6 +34,28 @@ export function createApp() {
   );
   app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser());
+
+  // CSRF origin guard: mutating API requests that authenticate via cookie
+  // (no Bearer token) must send an Origin listed in config.corsOrigins.
+  // GET/HEAD/OPTIONS and Bearer-token requests are unaffected.
+  app.use((req, res, next) => {
+    const method = req.method;
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+      return next();
+    }
+    if (!req.path.startsWith('/api')) {
+      return next();
+    }
+    if (req.headers.authorization?.startsWith('Bearer ')) {
+      return next();
+    }
+    const origin = req.headers.origin;
+    if (!origin || !config.corsOrigins.includes(origin)) {
+      res.status(403).json({ error: 'CSRF origin check failed', code: 'CSRF_ORIGIN' });
+      return;
+    }
+    next();
+  });
 
   app.use((req, _res, next) => {
     logger.info(`${req.method} ${req.path}`, {

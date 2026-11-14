@@ -49,16 +49,17 @@ function isCookieSameSite(value: string): value is 'lax' | 'strict' | 'none' {
   return value === 'lax' || value === 'strict' || value === 'none';
 }
 
-const cookieSameSiteValue =
-  cleanVal(process.env.COOKIE_SAME_SITE) ||
-  (process.env.NODE_ENV === 'production' ? 'none' : 'lax');
+const cookieSameSiteValue = cleanVal(process.env.COOKIE_SAME_SITE) || 'lax';
 if (!isCookieSameSite(cookieSameSiteValue)) {
   throw new Error('COOKIE_SAME_SITE must be lax, strict, or none');
 }
 
+const trustProxy = parsePositiveInt(process.env.TRUST_PROXY, 1);
+
 export const config = {
   isProduction: process.env.NODE_ENV === 'production',
   port: Number(process.env.PORT) || 4000,
+  trustProxy,
   uploadDir: process.env.UPLOAD_DIR || './uploads',
   maxFileSize: Number(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024,
   db: {
