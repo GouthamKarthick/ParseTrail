@@ -59,7 +59,7 @@ Document text is sent to the configured third-party AI providers (Gemini by defa
 - **Frontend:** React, TypeScript, Vite
 - **Database and jobs:** MySQL 8, `mysql2`, in-process polling worker
 - **Schema and files:** backend creates/updates MySQL tables at startup; uploaded files stay under `backend/uploads`
-- **Extraction:** `pdf-parse`, `pdftotext` fallback, Tesseract.js OCR, regex rules, Transformers.js with `Xenova/LaMini-Flan-T5-77M`
+- **Extraction:** `pdfjs-dist` (legacy Node build), `pdftotext` fallback, Tesseract.js OCR, regex rules, Transformers.js with `Xenova/LaMini-Flan-T5-77M`
 - **Cloud refinement:** Google Gemini by default; provider is configurable
 - **Local database:** MySQL database `parsetrail`
 

@@ -1,6 +1,6 @@
 # ParseTrail — Technical Specification
 
-> Derived from `ParseTrail-PRD.md`. Covers API contract (Phase1 vs Phase2), DDL, folder structure, AWS resources, and phased checklist. Stack: `Node 20 + Express + TypeScript (ESM)` + `React + TypeScript + Vite SPA` + `MySQL (mysql2, no ORM)` + `pdf-parse` (Phase1, swappable) per PRD §8. Deploy deferred.
+> Derived from `ParseTrail-PRD.md`. Covers API contract (Phase1 vs Phase2), DDL, folder structure, AWS resources, and phased checklist. Stack: `Node 20 + Express + TypeScript (ESM)` + `React + TypeScript + Vite SPA` + `MySQL (mysql2, no ORM)` + `pdfjs-dist` (legacy Node build) per PRD §8. Deploy deferred.
 > **Update 2026-09-14 — Freelancing Finish:** `S3/SQS/Lambda` dropped (code in `backend/src/lambda/` `backend/infra/` deleted per user trade-off), any MySQL-compatible database (TiDB Cloud Starter recommended) used for online deploy, `Render` ephemeral `UPLOAD_DIR=/tmp/uploads` accepted. See §10 Reasoning.
 
 ---
@@ -277,7 +277,7 @@ ParseTrail/
 │   └── TEST_PLAN.md
 ├── docker-compose.yml       # mysql:8 for local dev
 ├── backend/
-│   ├── package.json         # type: module, ESM — pdf-parse, tesseract.js, sharp, @huggingface/transformers, mysql2; NO @aws-sdk/*
+│   ├── package.json         # type: module, ESM — pdfjs-dist, tesseract.js, sharp, @huggingface/transformers, mysql2; NO @aws-sdk/*
 │   ├── tsconfig.json        # module NodeNext
 │   ├── .env.example
 │   ├── src/
@@ -344,7 +344,7 @@ export interface ExtractionResult {
 }
 export async function extract(filePathOrBuffer: string | Buffer): Promise<ExtractionResult>;
 ```
-Impl: `pdf-parse` → text (→ `pdftotext` fallback) → deterministic rules; images/scanned PDFs → `tesseract.js`+`sharp` OCR; then one lazy-loaded quantized local LaMini-Flan-T5-77M fill (`LOCAL_LLM_MODEL` override), cloud Gemini arbitration, and FX enrichment. Models are not pre-baked into Docker builds. (The `pdfjs-dist` swap note from early drafts is stale — that package is not installed.)
+Impl: `pdfjs-dist` → text (→ `pdftotext` fallback) → deterministic rules; images/scanned PDFs → `tesseract.js`+`sharp` OCR; then one lazy-loaded quantized local LaMini-Flan-T5-77M fill (`LOCAL_LLM_MODEL` override), cloud Gemini arbitration, and FX enrichment. Models are not pre-baked into Docker builds.
 
 - **services/jobs/refine.ts (replaces the two deleted adapters below):** `enqueueRefineJob` + `startRefineWorker()` poll `refine_jobs`; no S3/SQS involved.
 
@@ -424,7 +424,7 @@ Flagged per PRD §12 instruction — no scope added without flag:
 
 ## 8. Open Questions (Resolved)
 
-- PDF text: `pdf-parse` now, `pdftotext` (poppler) fallback. (`pdfjs-dist` was considered 2026-09-08 but never installed — its raster path in `ocr.service.ts` is inactive.)
+- PDF text: `pdfjs-dist` (legacy Node build) now, `pdftotext` (poppler) fallback. (`pdf-parse` was replaced 2026-09-27.)
 - Module: ESM (confirmed 2026-09-08).
 - Deploy: Render backend + any MySQL-compatible DB (TiDB Cloud Starter recommended) + Vercel frontend (§5); `docker-compose` local MySQL is source of truth for dev.
 

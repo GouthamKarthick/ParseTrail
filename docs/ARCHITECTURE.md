@@ -26,7 +26,7 @@ flowchart TD
 
 1. User uploads a PDF/PNG/JPG via the web frontend.
 2. Backend saves the file, creates a `documents` row with status `pending`.
-3. Text is extracted (pdf-parse → pdftotext → tesseract.js OCR as fallback).
+3. Text is extracted (pdfjs-dist → pdftotext → tesseract.js OCR as fallback).
 4. Heuristic detection votes on document type (invoice/receipt/payment/bill/payslip/settlement_slip).
 5. Deterministic regex rules extract vendor, date, total, currency; confidence = filled/5 × 0.85.
 6. If rules pass, result is saved and returned inline (≈36% of docs skip the model).
