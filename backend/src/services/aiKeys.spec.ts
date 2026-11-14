@@ -43,6 +43,14 @@ describe('aiKeys — loadAiProviders', () => {
     expect(loadAiProviders()).toBeNull();
   });
 
+  it('throws when AI_KEYS_FILE points to a missing file', async () => {
+    process.env.AI_KEYS_FILE = '/tmp/nonexistent-ai-keys-12345.json';
+    const { loadAiProviders } = await importAiKeys();
+    expect(() => loadAiProviders()).toThrow(
+      /AI_KEYS_FILE points to a missing file: \/tmp\/nonexistent-ai-keys-12345\.json/
+    );
+  });
+
   it('loads providers from env AI_KEYS_FILE', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-keys-'));
     const file = path.join(dir, 'ai-keys.json');

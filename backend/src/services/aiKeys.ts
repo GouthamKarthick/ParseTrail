@@ -39,7 +39,7 @@ function findKeysFile(): string | null {
   const envFile = process.env.AI_KEYS_FILE;
   if (envFile) {
     if (fs.existsSync(envFile)) return envFile;
-    return null;
+    throw new Error(`AI_KEYS_FILE points to a missing file: ${envFile}`);
   }
   const renderSecret = '/etc/secrets/ai-keys.json';
   if (fs.existsSync(renderSecret)) return renderSecret;

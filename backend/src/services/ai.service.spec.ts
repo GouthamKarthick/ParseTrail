@@ -36,6 +36,7 @@ describe('ai.service — extractWithAI / tryAI', () => {
   });
   afterEach(() => {
     global.fetch = globalFetch;
+    vi.useRealTimers();
   });
 
   it('extractWithAI calls Gemini and strips ```json fence, normalizes INR and date', async () => {
@@ -180,7 +181,12 @@ describe('ai.service — extractWithAI / tryAI', () => {
     expect(result.tokenUsage).toEqual({ inputTokens: 10, outputTokens: 5 });
   });
 
-  it('retries a throttled provider once before accepting its response', async () => {
+  it('provider 1 returns 503 -> provider 2 used and result returned', async () => {
+    mockAiConfig.providers = ['gemini', 'groq'];
+    mockAiConfig.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+      groq: { apiKey: 'groq-key', model: 'llama-3.3-70b-versatile' },
+    };
     vi.mocked(fetch)
       .mockResolvedValueOnce({
         ok: false,
@@ -190,28 +196,267 @@ describe('ai.service — extractWithAI / tryAI', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          candidates: [
+          choices: [
             {
-              content: {
-                parts: [
-                  {
-                    text: JSON.stringify({
-                      vendor: 'Example Co',
-                      confidence: 0.8,
-                      documentType: 'invoice',
-                    }),
-                  },
-                ],
+              message: {
+                content: JSON.stringify({
+                  vendor: 'Example Co',
+                  confidence: 0.8,
+                  documentType: 'invoice',
+                }),
               },
             },
           ],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
         }),
       } as any);
 
     const { extractWithAI } = await import('./ai.service.js');
     const result = await extractWithAI('invoice text');
     expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://api.groq.com/openai/v1/chat/completions',
+      expect.any(Object)
+    );
     expect(result.data.vendor).toBe('Example Co');
+  });
+
+  it('401 from provider 1 skips it for 10 minutes, then retries after cooldown', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+
+    mockAiConfig.providers = ['gemini', 'groq'];
+    mockAiConfig.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+      groq: { apiKey: 'groq-key', model: 'llama-3.3-70b-versatile' },
+    };
+
+    // Call 1: gemini 401 -> skipped, groq succeeds
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'invalid key' } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  vendor: 'Groq Co',
+                  confidence: 0.8,
+                  documentType: 'invoice',
+                }),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+      } as any);
+
+    const { extractWithAI } = await import('./ai.service.js');
+    let r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Call 2 immediately: gemini skipped (auth cooldown), groq again
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                vendor: 'Groq Co 2',
+                confidence: 0.8,
+                documentType: 'invoice',
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+    } as any);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co 2');
+    expect(fetch).toHaveBeenCalledTimes(3); // call1: 2 fetches, call2: 1 fetch
+
+    // Advance past 10-minute cooldown -> gemini tried again
+    vi.setSystemTime(now + 10 * 60 * 1000 + 1000);
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    vendor: 'Gemini Back',
+                    confidence: 0.9,
+                    documentType: 'invoice',
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    } as any);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Gemini Back');
+
+    vi.useRealTimers();
+  });
+
+  it('three consecutive 429s trigger 2-minute cooldown, success resets counter', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+
+    mockAiConfig.providers = ['gemini', 'groq'];
+    mockAiConfig.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+      groq: { apiKey: 'groq-key', model: 'llama-3.3-70b-versatile' },
+    };
+
+    const gemini429 = {
+      ok: false,
+      status: 429,
+      body: { cancel: vi.fn().mockResolvedValue(undefined) },
+    } as any;
+    const groqOk = {
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                vendor: 'Groq Co',
+                confidence: 0.8,
+                documentType: 'invoice',
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+    } as any;
+
+    // Call 1: gemini 429 (count=1), groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(gemini429).mockResolvedValueOnce(groqOk);
+    const { extractWithAI } = await import('./ai.service.js');
+    let r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Call 2: gemini 429 (count=2), groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(gemini429).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Call 3: gemini 429 (count=3 -> cooldown 2 min), groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(gemini429).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Call 4 immediately: gemini in cooldown, skipped, groq succeeds
+    vi.mocked(fetch).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Advance past 2-minute cooldown -> gemini retried; success resets counter
+    vi.setSystemTime(now + 2 * 60 * 1000 + 1000);
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    vendor: 'Gemini Back',
+                    confidence: 0.9,
+                    documentType: 'invoice',
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    } as any);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Gemini Back');
+
+    // Counter reset: next gemini 429 starts count at 1 again (not cooldown)
+    vi.mocked(fetch).mockResolvedValueOnce(gemini429).mockResolvedValueOnce(groqOk);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+    expect(fetch).toHaveBeenCalledTimes(10);
+
+    vi.useRealTimers();
+  });
+
+  it('all providers fail -> throws the existing cloud-failed error', async () => {
+    mockAiConfig.providers = ['gemini', 'groq'];
+    mockAiConfig.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+      groq: { apiKey: 'groq-key', model: 'llama-3.3-70b-versatile' },
+    };
+    vi.mocked(fetch)
+      .mockResolvedValue({
+        ok: false,
+        status: 503,
+        body: { cancel: vi.fn().mockResolvedValue(undefined) },
+      } as any)
+      .mockResolvedValue({
+        ok: false,
+        status: 503,
+        body: { cancel: vi.fn().mockResolvedValue(undefined) },
+      } as any);
+
+    const { extractWithAI } = await import('./ai.service.js');
+    await expect(extractWithAI('invoice text')).rejects.toThrow(
+      /No configured AI provider completed extraction|503/
+    );
+  });
+
+  it('no log call contains the api key string', async () => {
+    const loggerMod = (await import('../config/logger.js')).logger;
+    const warnSpy = vi.spyOn(loggerMod, 'warn');
+    const infoSpy = vi.spyOn(loggerMod, 'info');
+
+    mockAiConfig.providers = ['gemini'];
+    mockAiConfig.providerKeys = {
+      gemini: { apiKey: 'super-secret-key-12345', model: 'gemini-flash-latest' },
+    };
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    vendor: 'Acme',
+                    confidence: 0.9,
+                    documentType: 'invoice',
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    } as any);
+
+    const { extractWithAI } = await import('./ai.service.js');
+    await extractWithAI('invoice text');
+
+    const allCalls = [...warnSpy.mock.calls, ...infoSpy.mock.calls].flat();
+    const allLogText = allCalls.map(c => JSON.stringify(c)).join(' ');
+    expect(allLogText).not.toContain('super-secret-key-12345');
   });
 
   it('validateAndNormalize allows only safe keys, skips __proto__/constructor/prototype, caps at 20 keys', async () => {

@@ -60,33 +60,42 @@ function getImageMime(buffer: Buffer): string {
 const MAX_PDF_PAGES = 50;
 const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10 MB
 
-export async function parsePdf(buffer: Buffer): Promise<string> {
+export async function parsePdfWithPdfjs(buffer: Buffer): Promise<string> {
   if (buffer.length > MAX_PDF_SIZE) {
     logger.warn('PDF too large for text extraction', { size: buffer.length });
     return '';
   }
-  let text = '';
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    isEvalSupported: false,
+  });
+  const pdf = await loadingTask.promise;
+  const numPages = Math.min(pdf.numPages, MAX_PDF_PAGES);
+  const pageTexts: string[] = [];
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const items = content.items as { str?: string }[];
+    const pageText = items
+      .filter(item => item.str != null)
+      .map(item => item.str!)
+      .join(' ');
+    pageTexts.push(pageText);
+  }
+  const text = pageTexts.join('\n').trim();
+  if (text.length === 0) throw new Error('pdfjs-dist returned no text');
+  return text;
+}
+
+/**
+ * Parses PDF text via pdfjs-dist (legacy Node build) then pdftotext fallback.
+ * @param buffer PDF buffer
+ * @returns Extracted text
+ */
+export async function parsePdf(buffer: Buffer): Promise<string> {
   try {
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.js');
-    const loadingTask = pdfjs.getDocument({
-      data: buffer,
-      isEvalSupported: false,
-    });
-    const pdf = await loadingTask.promise;
-    const numPages = Math.min(pdf.numPages, MAX_PDF_PAGES);
-    const pageTexts: string[] = [];
-    for (let i = 1; i <= numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const items = content.items as { str?: string }[];
-      const pageText = items
-        .filter(item => item.str != null)
-        .map(item => item.str!)
-        .join(' ');
-      pageTexts.push(pageText);
-    }
-    text = pageTexts.join('\n').trim();
-    if (text.length > 0) return text;
+    return await parsePdfWithPdfjs(buffer);
   } catch (e) {
     logger.warn('pdfjs-dist failed, trying pdftotext', {
       error: (e as Error).message,
@@ -101,15 +110,15 @@ export async function parsePdf(buffer: Buffer): Promise<string> {
         timeout: 15_000,
         maxBuffer: 16 * 1024 * 1024,
       });
-      text = stdout || '';
+      const text = stdout || '';
+      if (text.trim().length > 5) return text;
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
-    if (text.trim().length > 5) return text;
   } catch (e) {
     logger.warn('pdftotext fallback failed', { error: (e as Error).message });
   }
-  return text;
+  return '';
 }
 
 /**
