@@ -44,7 +44,7 @@ function ocrText(t: string, c = 95, p = 1) {
 }
 describe('extraction.service — Flan local -> Gemini', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     (config as any).ai = { ...initialAiConfig, apiKey: '' };
     mockLocal.mockResolvedValue({
       data: {},
@@ -72,7 +72,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(mockTryAI).not.toHaveBeenCalled();
   });
   it('empty short -> unknown', async () => {
-    (config as any).ai.apiKey = '';
+    (config as any).ai.providerKeys = {};
     mockOcr.mockResolvedValue(ocrText('hi'));
     const r = await extract(pngBuffer);
     expect(r.documentType).toBe('unknown');
@@ -102,7 +102,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(r.data.invoiceNumber).toBe('SCAN-1');
   });
   it('gate high local confidence skips AI even with key', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(
       ocrText('Invoice Number: INV-999 2024-02-01 Total 500 Vendor TestCo')
     );
@@ -127,8 +129,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
     (config as any).ai = {
       ...initialAiConfig,
       providers: ['groq'],
-      apiKey: '',
-      groqApiKey: 'groq-key',
+      providerKeys: { groq: { apiKey: 'groq-key', model: 'llama-3.3-70b-versatile' } },
     };
     mockOcr.mockResolvedValue(ocrText('Invoice from Example Co with a total amount of 55'));
     mockLocal.mockResolvedValue({
@@ -150,7 +151,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(mockTryAI.mock.calls[0]?.[2]).toBe('image/png');
   });
   it('low local confidence calls AI and prefers AI', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(
       ocrText(
         'hello world invoice test with many words to ensure Type detection passes for invoice and total amount'
@@ -174,7 +177,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(r.method).toBe('llm');
   });
   it('merges Flan+AI when Flan partial', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(ocrText('Acme Corp'));
     mockLocal.mockResolvedValue({
       data: { vendor: 'Acme Corp' },
@@ -236,7 +241,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect((r.attempts[1] as { fallbackReason?: string }).fallbackReason).toBeUndefined();
   });
   it('records failed local attempt with fallback reason on escalation', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(
       ocrText(
         'hello world invoice test with many words to ensure Type detection passes for invoice and total amount'
@@ -262,7 +269,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     );
   });
   it('rules-first short-circuits complete docs without cloud', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(ocrText('Acme Corp\nInvoice No: R-1\nDate: 2024-02-01\nTotal: $500'));
     const r = await extract(pngBuffer, { order: 'rules-first' });
     expect(r.method).toBe('rule-based');
@@ -274,7 +283,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     ]);
   });
   it('cloud-only extraction bypasses local short-circuits for refinement', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(ocrText('Acme Corp\nInvoice No: R-1\nTotal: $500'));
     mockLocal.mockResolvedValue({
       data: { vendor: 'Acme Corp', invoiceNumber: 'R-1', totalAmount: 500 },
@@ -303,7 +314,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(result.attempts.map(attempt => attempt.method)).toEqual(['heuristic-detect', 'llm']);
   });
   it('rules/model date conflict forces cloud escalation', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(
       ocrText('Tata Power\nBill No: B-1\nBill Date: 18/07/2015\nTotal: Rs 2028.97')
     );
@@ -338,7 +351,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(r.data.invoiceDate).toBe('2015-07-18');
   });
   it('uses the cloud value when it differs on a locally conflicting field', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(
       ocrText('Tata Power\nBill No: B-1\nBill Date: 18/07/2015\nTotal: Rs 2028.97')
     );
@@ -371,7 +386,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(result.attempts[1]?.conflicts).toEqual(['invoiceDate']);
   });
   it('keeps local values when no local strategy conflict was flagged', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(
       ocrText('Tata Power\nBill No: B-1\nBill Date: 18/07/2015\nTotal: Rs 2028.97')
     );
@@ -403,7 +420,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(result.attempts[1]?.conflicts).toEqual([]);
   });
   it('conflict keeps rules value and still returns local without cloud', async () => {
-    (config as any).ai.apiKey = '';
+    (config as any).ai.providerKeys = {};
     mockOcr.mockResolvedValue(
       ocrText('Tata Power\nBill No: B-1\nBill Date: 18/07/2015\nTotal: Rs 2028.97')
     );
@@ -423,7 +440,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
     expect(r.method).toBe('local-llm');
   });
   it('rules-first escalates sparse docs to cloud', async () => {
-    (config as any).ai.apiKey = 'fake-key';
+    (config as any).ai.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
     mockOcr.mockResolvedValue(
       ocrText(
         'hello world invoice test with many words to ensure Type detection passes for invoice and total amount'

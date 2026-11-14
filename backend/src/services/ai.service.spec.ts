@@ -1,13 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockAiConfig = vi.hoisted(() => ({
-  providers: ['gemini'],
-  model: 'gemini-flash-latest',
-  apiKey: 'fake-key',
-  groqApiKey: '',
-  openRouterApiKey: '',
+  providers: ['gemini'] as Array<'gemini' | 'groq' | 'openrouter' | 'anthropic'>,
+  providerKeys: {
+    gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+  } as Record<string, { apiKey: string; model: string }>,
   timeoutMs: 20000,
-  threshold: 0.5,
 }));
 
 vi.mock('../config.js', async importOriginal => {
@@ -29,10 +27,12 @@ describe('ai.service — extractWithAI / tryAI', () => {
     vi.restoreAllMocks();
     global.fetch = vi.fn() as any;
     mockAiConfig.providers = ['gemini'];
-    mockAiConfig.model = 'gemini-flash-latest';
-    mockAiConfig.apiKey = 'fake-key';
-    mockAiConfig.groqApiKey = '';
-    mockAiConfig.openRouterApiKey = '';
+    mockAiConfig.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+    };
+    mockAiConfig.timeoutMs = 20000;
+    // Clear module cache so ai.service module (with its in-memory Maps) is re-created
+    vi.resetModules();
   });
   afterEach(() => {
     global.fetch = globalFetch;
@@ -148,8 +148,9 @@ describe('ai.service — extractWithAI / tryAI', () => {
 
   it('uses configured secondary providers when the Gemini key is absent', async () => {
     mockAiConfig.providers = ['gemini', 'groq'];
-    mockAiConfig.apiKey = '';
-    mockAiConfig.groqApiKey = 'groq-key';
+    mockAiConfig.providerKeys = {
+      groq: { apiKey: 'groq-key', model: 'llama-3.3-70b-versatile' },
+    };
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       json: async () => ({

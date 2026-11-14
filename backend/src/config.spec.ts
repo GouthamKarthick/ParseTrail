@@ -40,6 +40,9 @@ describe('config', () => {
     process.env.FRONTEND_URL = 'https://app.example.com';
     process.env.SMTP_HOST = 'smtp.example.com';
     process.env.COOKIE_SAME_SITE = 'lax';
+    process.env.AI_API_KEY = 'gemini-test-key';
+    process.env.GROQ_API_KEY = 'groq-test-key';
+    process.env.OPENROUTER_API_KEY = 'openrouter-test-key';
 
     const mod = await importConfig({});
 
@@ -52,8 +55,11 @@ describe('config', () => {
     expect(mod.config.frontendUrl).toBe('https://app.example.com');
     expect(mod.config.cookieSameSite).toBe('lax');
     expect(mod.config.localLlmModel).toBe('Xenova/LaMini-Flan-T5-77M');
-    expect(mod.config.ai.groqModel).toBe('llama-3.3-70b-versatile');
-    expect(mod.config.ai.openRouterModel).toBe('meta-llama/llama-3.3-70b-instruct:free');
+    expect(mod.config.ai.providerKeys.gemini?.model).toBe('gemini-flash-latest');
+    expect(mod.config.ai.providerKeys.groq?.model).toBe('llama-3.3-70b-versatile');
+    expect(mod.config.ai.providerKeys.openrouter?.model).toBe(
+      'meta-llama/llama-3.3-70b-instruct:free'
+    );
   });
 
   it('isProduction is false outside production', async () => {

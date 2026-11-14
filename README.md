@@ -53,6 +53,27 @@ Uploads run the local stages synchronously. A MySQL-backed worker performs a clo
 
 Document text is sent to the configured third-party AI providers (Gemini by default; provider is configurable via `AI_PROVIDERS`). If a provider fails or its result is incomplete, the pipeline may fall through to the next configured provider. OpenRouter free models may log prompts — do not upload documents containing sensitive personal data unless you are comfortable with that.
 
+## AI provider keys file (secrets)
+
+AI provider keys and order can be loaded from a secrets JSON file instead of environment variables. Resolution order:
+
+1. `AI_KEYS_FILE` env var (absolute path to the JSON file)
+2. `/etc/secrets/ai-keys.json` (Render Secret File mount — create a secret file named `ai-keys.json` and mount it at `/etc/secrets/`)
+3. `backend/secrets/ai-keys.json` (local dev, gitignored)
+
+File format:
+
+```json
+{
+  "providers": [
+    { "name": "gemini", "apiKey": "...", "model": "gemini-flash-latest" },
+    { "name": "groq", "apiKey": "...", "model": "llama-3.3-70b-versatile" }
+  ]
+}
+```
+
+Max 5 providers, no duplicate names. If a secrets file is found it takes precedence over `AI_PROVIDERS` env vars. Invalid files throw at startup without logging key values.
+
 ## Tech stack
 
 - **Backend:** Node.js, Express, TypeScript

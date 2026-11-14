@@ -263,9 +263,7 @@ type FinalResult = ExtractionResult & {
 
 function hasConfiguredCloudProviderKey(): boolean {
   return config.ai.providers.some(provider => {
-    if (provider === 'groq') return Boolean(config.ai.groqApiKey);
-    if (provider === 'openrouter') return Boolean(config.ai.openRouterApiKey);
-    return Boolean(config.ai.apiKey);
+    return Boolean(config.ai.providerKeys[provider]?.apiKey);
   });
 }
 
