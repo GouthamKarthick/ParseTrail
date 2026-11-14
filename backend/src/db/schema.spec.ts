@@ -12,6 +12,13 @@ describe('db/schema — ensureSchema', () => {
 
   it('creates documents table and runs migrations', async () => {
     const mockQuery = vi.mocked(pool.query);
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      if (String(sql).includes('SELECT version FROM schema_migrations')) return [[], []] as any;
+      if (String(sql).includes('COUNT(*) as cnt') && String(sql).includes('IS NULL'))
+        return [[{ cnt: 0 }], []] as any;
+      if (String(sql).includes('IS_NULLABLE')) return [[{ cnt: 1 }], []] as any;
+      return [[{ cnt: 1 }], []] as any;
+    });
     await ensureSchema();
     expect(mockQuery).toHaveBeenCalled();
     const allCalls = mockQuery.mock.calls.map(c => String(c[0]));
@@ -27,6 +34,15 @@ describe('db/schema — ensureSchema', () => {
       'INSERT IGNORE INTO schema_migrations (version, name) VALUES (3,'
     );
     expect(allCalls.join(' ')).toContain(
+      'INSERT IGNORE INTO schema_migrations (version, name) VALUES (4,'
+    );
+    expect(allCalls.join(' ')).toContain(
+      'INSERT IGNORE INTO schema_migrations (version, name) VALUES (5,'
+    );
+    expect(allCalls.join(' ')).toContain(
+      'INSERT IGNORE INTO schema_migrations (version, name) VALUES (6,'
+    );
+    expect(allCalls.join(' ')).toContain(
       "REFERENCED_TABLE_NAME='users' AND REFERENCED_COLUMN_NAME='id'"
     );
     expect(allCalls.join(' ')).not.toContain('ADD CONSTRAINT fk_doc_user');
@@ -37,7 +53,14 @@ describe('db/schema — ensureSchema', () => {
     mockQuery.mockImplementation(async (sql: unknown) => {
       if (String(sql).includes('SELECT version FROM schema_migrations'))
         return [
-          [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }, { version: 5 }],
+          [
+            { version: 1 },
+            { version: 2 },
+            { version: 3 },
+            { version: 4 },
+            { version: 5 },
+            { version: 6 },
+          ],
           [],
         ] as any;
       return [[{ cnt: 1 }], []] as any;
