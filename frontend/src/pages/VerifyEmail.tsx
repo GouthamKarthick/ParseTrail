@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
-import { resendVerification } from '../api/client';
+import { resendVerification, verifyEmailLink, verifyEmailCode } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import authStyles from './Auth.module.scss';
 
@@ -35,29 +35,17 @@ export default function VerifyEmail() {
 
   useEffect(() => {
     if (!token) return;
-    fetch(
-      `${import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || ''}/api/auth/verify-email`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, email: presetEmail }),
-      }
-    )
-      .then(async r => {
-        const b = (await r.json().catch(() => ({}))) as { error?: string };
-        if (r.ok) {
-          setStatus('success');
-          setMsg('Email verified! Continue to setup your profile.');
-          refresh().catch(() => {});
-        } else {
-          setStatus('error');
-          setMsg(b.error || 'Invalid or expired token');
-        }
-      })
-      .catch(e => {
+    void verifyEmailLink(token, presetEmail).then(
+      () => {
+        setStatus('success');
+        setMsg('Email verified! Continue to setup your profile.');
+        refresh().catch(() => {});
+      },
+      e => {
         setStatus('error');
-        setMsg((e as Error).message);
-      });
+        setMsg((e as Error).message || 'Invalid or expired token');
+      }
+    );
   }, [token, presetEmail, refresh]);
 
   /**
@@ -82,30 +70,13 @@ export default function VerifyEmail() {
     setCodeStatus('loading');
     setCodeMsg('');
     try {
-      const body = { email: email.trim(), code: code.trim() };
-
-      const r = await fetch(
-        `${import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || ''}/api/auth/verify-email`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        }
-      );
-
-      const b = (await r.json().catch(() => ({}))) as { error?: string };
-
-      if (r.ok) {
-        setCodeStatus('success');
-        setCodeMsg('Email verified! Continue to setup your profile.');
-        refresh().catch(() => {});
-      } else {
-        setCodeStatus('error');
-        setCodeMsg(b.error || 'Invalid or expired code');
-      }
+      await verifyEmailCode(email.trim(), code.trim());
+      setCodeStatus('success');
+      setCodeMsg('Email verified! Continue to setup your profile.');
+      refresh().catch(() => {});
     } catch (e) {
       setCodeStatus('error');
-      setCodeMsg((e as Error).message);
+      setCodeMsg((e as Error).message || 'Invalid or expired code');
     }
   }
 
