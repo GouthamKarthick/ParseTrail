@@ -3,6 +3,8 @@
  */
 
 import dotenv from 'dotenv';
+import { loadAiProviders } from './services/aiKeys.js';
+import type { AiProviderKey } from './services/aiKeys.js';
 
 dotenv.config();
 
@@ -32,17 +34,62 @@ function parsePositiveInt(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const configuredProviders = (process.env.AI_PROVIDERS || process.env.AI_PROVIDER || 'gemini')
-  .split(',')
-  .map(provider => provider.trim().toLowerCase())
-  .filter(Boolean)
-  .map(provider => (provider === 'google' ? 'gemini' : provider));
-if (configuredProviders.length === 0)
-  throw new Error('AI_PROVIDERS must contain at least one provider');
 const supportedProviders = new Set(['gemini', 'groq', 'openrouter', 'anthropic']);
-const unknownProvider = configuredProviders.find(provider => !supportedProviders.has(provider));
-if (unknownProvider) {
-  throw new Error(`Unsupported AI provider: ${unknownProvider}`);
+
+function normalizeProviderName(p: string): string {
+  return (p === 'google' ? 'gemini' : p).trim().toLowerCase();
+}
+
+function buildProviderKeysFromEnv(): Record<string, { apiKey: string; model: string }> {
+  const keys: Record<string, { apiKey: string; model: string }> = {};
+  const geminiKey = cleanVal(process.env.AI_API_KEY) || '';
+  const groqKey = cleanVal(process.env.GROQ_API_KEY) || '';
+  const openRouterKey = cleanVal(process.env.OPENROUTER_API_KEY) || '';
+  if (geminiKey)
+    keys.gemini = { apiKey: geminiKey, model: process.env.AI_MODEL || 'gemini-flash-latest' };
+  if (groqKey)
+    keys.groq = { apiKey: groqKey, model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile' };
+  if (openRouterKey)
+    keys.openrouter = {
+      apiKey: openRouterKey,
+      model: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
+    };
+  return keys;
+}
+
+let providersFromSecrets: AiProviderKey[] | null = null;
+try {
+  providersFromSecrets = loadAiProviders();
+} catch {
+  // Secrets file exists but is invalid — surface the error at startup.
+  providersFromSecrets = null;
+}
+
+let configuredProviders: Array<'gemini' | 'groq' | 'openrouter' | 'anthropic'>;
+let providerKeys: Record<string, { apiKey: string; model: string }>;
+
+if (providersFromSecrets && providersFromSecrets.length > 0) {
+  // Secrets file takes precedence: use its provider list/order/keys/models.
+  configuredProviders = providersFromSecrets.map(
+    p => p.name as 'gemini' | 'groq' | 'openrouter' | 'anthropic'
+  );
+  providerKeys = {};
+  for (const p of providersFromSecrets) {
+    providerKeys[p.name] = { apiKey: p.apiKey, model: p.model };
+  }
+} else {
+  // Existing env-var behavior.
+  const raw = (process.env.AI_PROVIDERS || process.env.AI_PROVIDER || 'gemini')
+    .split(',')
+    .map(normalizeProviderName)
+    .filter(Boolean);
+  if (raw.length === 0) throw new Error('AI_PROVIDERS must contain at least one provider');
+  const unknownProvider = raw.find(p => !supportedProviders.has(p));
+  if (unknownProvider) {
+    throw new Error(`Unsupported AI provider: ${unknownProvider}`);
+  }
+  configuredProviders = raw as Array<'gemini' | 'groq' | 'openrouter' | 'anthropic'>;
+  providerKeys = buildProviderKeysFromEnv();
 }
 
 function isCookieSameSite(value: string): value is 'lax' | 'strict' | 'none' {
@@ -91,13 +138,8 @@ export const config = {
     timeoutMs: parsePositiveInt(process.env.SMTP_TIMEOUT_MS, 10_000),
   },
   ai: {
-    providers: configuredProviders as Array<'gemini' | 'groq' | 'openrouter' | 'anthropic'>,
-    model: process.env.AI_MODEL || 'gemini-flash-latest',
-    apiKey: process.env.AI_API_KEY || '',
-    groqApiKey: process.env.GROQ_API_KEY || '',
-    openRouterApiKey: process.env.OPENROUTER_API_KEY || '',
-    groqModel: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
-    openRouterModel: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
+    providers: configuredProviders,
+    providerKeys,
     timeoutMs: parsePositiveInt(process.env.AI_TIMEOUT_MS, 20_000),
   },
   refine: {
@@ -140,6 +182,9 @@ if (config.isProduction) {
   }
   if (!config.smtp.host) {
     throw new Error('SMTP_HOST is required in production');
+  }
+  if (configuredProviders.length === 0) {
+    throw new Error('No AI provider configured in production');
   }
 }
 

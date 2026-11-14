@@ -25,6 +25,70 @@ const ALLOWED_DOCTYPES = new Set([
 ]);
 
 /**
+ * Provider-level error carrying an HTTP status code when available.
+ */
+class ProviderError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+    this.name = 'ProviderError';
+  }
+}
+
+/**
+ * In-memory provider skip state (never persisted to DB).
+ * 401/403 skips a provider for 10 minutes.
+ */
+const providerSkipUntil = new Map<string, number>();
+
+/**
+ * Tracks consecutive 429 responses per provider.
+ * 3 consecutive 429s triggers a 2-minute cooldown.
+ */
+const provider429Count = new Map<string, number>();
+const provider429CooldownUntil = new Map<string, number>();
+
+const SKIP_401_MS = 10 * 60 * 1000;
+const COOLDOWN_429_MS = 2 * 60 * 1000;
+const CONSECUTIVE_429_THRESHOLD = 3;
+
+function isProviderSkipped(name: string): boolean {
+  const until = providerSkipUntil.get(name);
+  return Boolean(until && Date.now() < until);
+}
+
+function skipProvider(name: string, ms: number): void {
+  providerSkipUntil.set(name, Date.now() + ms);
+}
+
+function isProvider429Cooldown(name: string): boolean {
+  const until = provider429CooldownUntil.get(name);
+  return Boolean(until && Date.now() < until);
+}
+
+function record429(name: string): void {
+  const count = (provider429Count.get(name) || 0) + 1;
+  provider429Count.set(name, count);
+  if (count >= CONSECUTIVE_429_THRESHOLD) {
+    provider429CooldownUntil.set(name, Date.now() + COOLDOWN_429_MS);
+  }
+}
+
+function reset429(name: string): void {
+  provider429Count.delete(name);
+  provider429CooldownUntil.delete(name);
+}
+
+function providerApiKey(name: string): string | undefined {
+  return config.ai.providerKeys[name]?.apiKey;
+}
+
+function providerModel(name: string): string | undefined {
+  return config.ai.providerKeys[name]?.model;
+}
+
+/**
  * Normalizes document type to allowed set.
  * @param v Raw type value
  * @returns Normalized type
@@ -119,18 +183,29 @@ async function fetchWithRetry(provider: string, url: string, init: RequestInit):
       signal: AbortSignal.timeout(config.ai.timeoutMs),
     });
     if (response.ok) return response;
-    if (![429, 503].includes(response.status) || attempt === 1) {
-      throw new Error(`${provider} request failed with status ${response.status}`);
+    // 429: fail over immediately (no internal retry), outer loop tracks cooldown
+    if (response.status === 429) {
+      await response.body?.cancel();
+      throw new ProviderError(`${provider} request failed with status ${response.status}`, 429);
     }
-    logger.warn(`${provider} request throttled; retrying`, {
-      status: response.status,
-      attempt: attempt + 1,
-    });
+    // 5xx: retry once, then fail over
+    if (response.status >= 500 && attempt === 0) {
+      logger.warn(`${provider} request throttled; retrying`, {
+        status: response.status,
+        attempt: attempt + 1,
+      });
+      await response.body?.cancel();
+      const delay = 250 + Math.floor(Math.random() * 250);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      continue;
+    }
     await response.body?.cancel();
-    const delay = 250 * 2 ** attempt + Math.floor(Math.random() * 250);
-    await new Promise(resolve => setTimeout(resolve, delay));
+    throw new ProviderError(
+      `${provider} request failed with status ${response.status}`,
+      response.status
+    );
   }
-  throw new Error(`${provider} retry exhausted`);
+  throw new ProviderError(`${provider} retry exhausted`);
 }
 
 async function callGemini(
@@ -139,9 +214,9 @@ async function callGemini(
   mimeType?: string,
   customPrompt?: string
 ): Promise<ProviderResult> {
-  const key = config.ai.apiKey;
+  const key = providerApiKey('gemini');
   if (!key) throw new Error('Gemini API key is not configured');
-  const model = config.ai.model || 'gemini-flash-latest';
+  const model = providerModel('gemini') || 'gemini-flash-latest';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const parts: Array<Record<string, unknown>> = [
     { text: customPrompt || DOCUMENT_EXTRACTION_PROMPT },
@@ -194,12 +269,14 @@ async function callAnthropic(
   mimeType?: string,
   customPrompt?: string
 ): Promise<ProviderResult> {
-  const key = config.ai.apiKey;
+  const key = providerApiKey('anthropic');
   if (!key) throw new Error('Anthropic API key is not configured');
   if (imageBase64 && mimeType === 'application/pdf') {
     throw new Error('Anthropic PDF input is unsupported; provide extracted text');
   }
-  const model = config.ai.model.includes('claude') ? config.ai.model : 'claude-3-haiku-20240307';
+  const model = providerModel('anthropic')?.includes('claude')
+    ? providerModel('anthropic')
+    : 'claude-3-haiku-20240307';
   const content: Array<Record<string, unknown>> = [{ type: 'text', text: text.slice(0, 12000) }];
   if (imageBase64)
     content.unshift({
@@ -247,12 +324,12 @@ async function callCompatibleProvider(
   text: string,
   customPrompt?: string
 ): Promise<ProviderResult> {
-  const key = provider === 'groq' ? config.ai.groqApiKey : config.ai.openRouterApiKey;
+  const key = providerApiKey(provider);
   if (!key) throw new Error(`${provider} API key is not configured`);
   const model =
     provider === 'groq'
-      ? config.ai.groqModel || 'llama-3.3-70b-versatile'
-      : config.ai.openRouterModel || 'meta-llama/llama-3.3-70b-instruct:free';
+      ? providerModel('groq') || 'llama-3.3-70b-versatile'
+      : providerModel('openrouter') || 'meta-llama/llama-3.3-70b-instruct:free';
   const url =
     provider === 'groq'
       ? 'https://api.groq.com/openai/v1/chat/completions'
@@ -315,11 +392,17 @@ export async function extractWithAI(
   const errors: string[] = [];
   logger.debug('AI request', {
     providers: config.ai.providers,
-    model: config.ai.model,
     textLength: text.length,
-    promptLen: opts?.prompt?.length,
   });
   for (const candidate of config.ai.providers) {
+    if (isProviderSkipped(candidate)) {
+      errors.push(`${candidate} skipped (auth cooldown)`);
+      continue;
+    }
+    if (isProvider429Cooldown(candidate)) {
+      errors.push(`${candidate} skipped (429 cooldown)`);
+      continue;
+    }
     try {
       provider = candidate;
       response =
@@ -328,13 +411,28 @@ export async function extractWithAI(
           : candidate === 'anthropic'
             ? await callAnthropic(text, opts?.imageBase64, opts?.mimeType, opts?.prompt)
             : await callCompatibleProvider(candidate, text, opts?.prompt);
+      reset429(candidate);
       break;
     } catch (error) {
+      if (error instanceof ProviderError) {
+        const status = error.status;
+        if (status === 401 || status === 403) {
+          skipProvider(candidate, SKIP_401_MS);
+          errors.push(`${candidate} auth failed (status ${status})`);
+          continue;
+        }
+        if (status === 429) {
+          record429(candidate);
+          errors.push(`${candidate} rate limited (status 429)`);
+          continue;
+        }
+        // 5xx or other HTTP error: try next provider
+        errors.push(error.message);
+        continue;
+      }
+      // Network error, timeout, or unexpected: try next provider
       errors.push(error instanceof Error ? error.message : `${candidate} request failed`);
-      logger.warn('AI provider failed; trying the next configured provider', {
-        provider: candidate,
-        errorType: error instanceof Error ? error.name : 'UnknownError',
-      });
+      continue;
     }
   }
   if (!response)
