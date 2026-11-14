@@ -192,6 +192,12 @@ export async function ensureSchema(): Promise<void> {
       "INSERT IGNORE INTO schema_migrations (version, name) VALUES (4, 'document-content-fingerprints')"
     );
   }
+  if (!applied.has(5)) {
+    await migratePasswordChangedAt();
+    await pool.query(
+      "INSERT IGNORE INTO schema_migrations (version, name) VALUES (5, 'users-password-changed-at')"
+    );
+  }
 }
 
 /**
@@ -389,4 +395,18 @@ async function migrateUsers(): Promise<void> {
   );
   if ((codeIdx as Array<{ cnt: number }>)[0]?.cnt === 0)
     await runDdl('ALTER TABLE users ADD INDEX idx_verification_code (verification_code)');
+}
+
+/**
+ * Adds users.password_changed_at column (nullable) used to invalidate JWTs
+ * issued before a password reset.
+ * @returns void
+ */
+async function migratePasswordChangedAt(): Promise<void> {
+  const [rows] = await pool.query(
+    "SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='password_changed_at'"
+  );
+  if ((rows as Array<{ cnt: number }>)[0]?.cnt === 0) {
+    await runDdl('ALTER TABLE users ADD COLUMN password_changed_at DATETIME NULL AFTER updated_at');
+  }
 }
