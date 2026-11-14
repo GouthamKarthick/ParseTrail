@@ -177,35 +177,16 @@ interface ProviderResult {
 }
 
 async function fetchWithRetry(provider: string, url: string, init: RequestInit): Promise<Response> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await fetch(url, {
-      ...init,
-      signal: AbortSignal.timeout(config.ai.timeoutMs),
-    });
-    if (response.ok) return response;
-    // 429: fail over immediately (no internal retry), outer loop tracks cooldown
-    if (response.status === 429) {
-      await response.body?.cancel();
-      throw new ProviderError(`${provider} request failed with status ${response.status}`, 429);
-    }
-    // 5xx: retry once, then fail over
-    if (response.status >= 500 && attempt === 0) {
-      logger.warn(`${provider} request throttled; retrying`, {
-        status: response.status,
-        attempt: attempt + 1,
-      });
-      await response.body?.cancel();
-      const delay = 250 + Math.floor(Math.random() * 250);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      continue;
-    }
-    await response.body?.cancel();
-    throw new ProviderError(
-      `${provider} request failed with status ${response.status}`,
-      response.status
-    );
-  }
-  throw new ProviderError(`${provider} retry exhausted`);
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(config.ai.timeoutMs),
+  });
+  if (response.ok) return response;
+  await response.body?.cancel();
+  throw new ProviderError(
+    `${provider} request failed with status ${response.status}`,
+    response.status
+  );
 }
 
 async function callGemini(
