@@ -589,7 +589,7 @@ describe('controller — listDocuments / getDocument', () => {
   });
 
   it('correctField 404 when missing', async () => {
-    vi.mocked(pool.query).mockResolvedValue([[]] as any);
+    vi.mocked(pool.query).mockResolvedValueOnce([[]] as any);
     const res = mockRes();
     await correctField(
       {
@@ -604,16 +604,17 @@ describe('controller — listDocuments / getDocument', () => {
   });
 
   it('correctField 200 updates field and logs history', async () => {
-    const mockQuery = vi.mocked(pool.query);
-    mockQuery
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 'd1',
-            data: JSON.stringify({ vendor: 'V', totalAmount: 1850 }),
-          },
-        ],
-      ] as any)
+    vi.mocked(pool.query).mockResolvedValueOnce([
+      [
+        {
+          id: 'd1',
+          data: JSON.stringify({ vendor: 'V', totalAmount: 1850 }),
+        },
+      ],
+    ] as any);
+    const conn = await pool.getConnection();
+    const mockConnQuery = vi.mocked(conn.query);
+    mockConnQuery
       .mockResolvedValueOnce([[]] as any)
       .mockResolvedValueOnce([[{ method: 'local-llm', confidence: 0.7 }]] as any)
       .mockResolvedValueOnce([[]] as any);
@@ -635,11 +636,11 @@ describe('controller — listDocuments / getDocument', () => {
         changed: true,
       })
     );
-    const updateCall = mockQuery.mock.calls.find(c =>
+    const updateCall = mockConnQuery.mock.calls.find(c =>
       String(c[0]).includes('UPDATE documents SET data=')
     );
     expect(JSON.stringify(updateCall![1])).toContain('1580');
-    const insertCall = mockQuery.mock.calls.find(c =>
+    const insertCall = mockConnQuery.mock.calls.find(c =>
       String(c[0]).includes('INSERT INTO corrections')
     );
     expect(insertCall).toBeDefined();
@@ -660,6 +661,57 @@ describe('controller — listDocuments / getDocument', () => {
       vi.fn()
     );
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ changed: false }));
+  });
+
+  it('correctField 400 when body missing field', async () => {
+    vi.mocked(pool.query).mockResolvedValueOnce([
+      [{ id: 'd1', data: JSON.stringify({ vendor: 'V' }) }],
+    ] as any);
+    const res = mockRes();
+    await correctField(
+      {
+        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        user: { id: 'u1', email: 't@e.com' },
+        body: { value: 100 },
+      } as any,
+      res,
+      vi.fn()
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('correctField 400 when body missing value', async () => {
+    vi.mocked(pool.query).mockResolvedValueOnce([
+      [{ id: 'd1', data: JSON.stringify({ vendor: 'V' }) }],
+    ] as any);
+    const res = mockRes();
+    await correctField(
+      {
+        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        user: { id: 'u1', email: 't@e.com' },
+        body: { field: 'totalAmount' },
+      } as any,
+      res,
+      vi.fn()
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('correctField 400 when body is not an object', async () => {
+    const res = mockRes();
+    await correctField(
+      {
+        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        user: { id: 'u1', email: 't@e.com' },
+        body: 'not-an-object',
+      } as any,
+      res,
+      vi.fn()
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(pool.query).not.toHaveBeenCalled();
   });
 
   it('listCorrections 200 returns history', async () => {

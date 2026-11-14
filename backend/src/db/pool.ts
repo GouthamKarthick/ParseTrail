@@ -7,6 +7,7 @@ import path from 'path';
 import mysql from 'mysql2/promise';
 import type { PoolConnection } from 'mysql2/promise';
 import { config } from '../config.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Resolves SSL config from env cert or filesystem.
@@ -31,7 +32,12 @@ function getSslConfig():
         const ca = fs.readFileSync(p, 'utf-8');
         if (ca.includes('BEGIN CERTIFICATE')) return { ca, rejectUnauthorized: true };
       }
-    } catch {}
+    } catch (error) {
+      logger.warn('SSL CA file could not be read; skipping certificate', {
+        path: p,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   return { rejectUnauthorized: true };
 }
