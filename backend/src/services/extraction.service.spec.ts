@@ -27,10 +27,11 @@ vi.mock('../config/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 import fs from 'fs/promises';
+import fsCallback from 'fs';
 import { ocrBuffer } from './ocr.service.js';
 import { tryAI } from './ai.service.js';
 import { runLocalLLMExtraction } from './transformers.service.js';
-import { extract } from './extraction.service.js';
+import { extract, parsePdf } from './extraction.service.js';
 import { config } from '../config.js';
 const initialAiConfig = { ...config.ai };
 const mockReadFile = vi.mocked(fs.readFile);
@@ -514,5 +515,12 @@ describe('extraction.service — Flan local -> Gemini', () => {
     );
     const r = await extract(pngBuffer);
     expect(r.documentType).toBe('settlement_slip');
+  });
+  it('parsePdf extracts text from a PDF via pdfjs-dist', async () => {
+    const pdfBuffer = fsCallback.readFileSync(
+      new URL('./fixtures/test-document.pdf', import.meta.url)
+    );
+    const text = await parsePdf(pdfBuffer);
+    expect(text).toContain('Hello World Test Document');
   });
 });
