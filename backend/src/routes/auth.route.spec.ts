@@ -69,6 +69,119 @@ describe('email verification', () => {
   });
 });
 
+describe('register — no email enumeration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockState.attempts = 0;
+    mockState.calls = [];
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('existing verified email returns 201 (not 409)', async () => {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      if (String(sql).startsWith('INSERT INTO users')) {
+        throw { code: 'ER_DUP_ENTRY' };
+      }
+      if (
+        String(sql).startsWith(
+          'SELECT id, email, first_name, last_name, email_verified FROM users WHERE email=?'
+        )
+      ) {
+        return [
+          [
+            {
+              id: 'existing-1',
+              email: 'existing@example.com',
+              first_name: 'Existing',
+              last_name: 'User',
+              email_verified: 1,
+            },
+          ],
+          [],
+        ];
+      }
+      return [[], []];
+    });
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app).post('/register').send({
+      first_name: 'Existing',
+      last_name: 'User',
+      email: 'existing@example.com',
+      password: 'Password1!',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      id: 'existing-1',
+      email: 'existing@example.com',
+      first_name: 'Existing',
+      last_name: 'User',
+      email_verified: true,
+      verification_email_sent: false,
+    });
+  });
+
+  it('existing unverified email returns 201 and re-issues code', async () => {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      if (String(sql).startsWith('INSERT INTO users')) {
+        throw { code: 'ER_DUP_ENTRY' };
+      }
+      if (
+        String(sql).startsWith(
+          'SELECT id, email, first_name, last_name, email_verified FROM users WHERE email=?'
+        )
+      ) {
+        return [
+          [
+            {
+              id: 'existing-2',
+              email: 'unverified@example.com',
+              first_name: 'Unverified',
+              last_name: 'User',
+              email_verified: 0,
+            },
+          ],
+        ];
+      }
+      if (String(sql).startsWith('UPDATE users SET verification_token=')) {
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app).post('/register').send({
+      first_name: 'Unverified',
+      last_name: 'User',
+      email: 'unverified@example.com',
+      password: 'Password1!',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.email_verified).toBe(false);
+    expect(res.body.verification_email_sent).toBe(true);
+  });
+
+  it('new email still returns 201', async () => {
+    mockQuery.mockResolvedValue([{ affectedRows: 1 }]);
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app).post('/register').send({
+      first_name: 'New',
+      last_name: 'User',
+      email: 'new@example.com',
+      password: 'Password1!',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.email).toBe('new@example.com');
+  });
+});
+
 describe('auth route — login timing', () => {
   let compareSpy: ReturnType<typeof vi.spyOn>;
 

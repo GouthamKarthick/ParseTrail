@@ -126,7 +126,76 @@ router.post('/register', async (req, res) => {
   } catch (e: unknown) {
     const code = (e as { code?: string })?.code;
     if (code === 'ER_DUP_ENTRY') {
-      res.status(409).json({ error: 'Email already registered' });
+      // Email already registered: do not reveal whether it exists. Look up the
+      // existing account and respond with the same 201 shape as a new signup.
+      const [existing] = await pool.query(
+        'SELECT id, email, first_name, last_name, email_verified FROM users WHERE email=?',
+        [email]
+      );
+      const user = (
+        existing as Array<{
+          id: string;
+          email: string;
+          first_name: string;
+          last_name: string;
+          email_verified: number;
+        }>
+      )[0];
+      if (!user) {
+        // Should not happen; fall back to generic success to avoid leaking.
+        res.status(201).json({
+          id,
+          email,
+          first_name: first_name.trim(),
+          last_name: last_name.trim(),
+          email_verified: false,
+          verification_email_sent: true,
+        });
+        return;
+      }
+      const alreadyVerified = Boolean(user.email_verified);
+      if (!alreadyVerified && config.smtp.host) {
+        // Re-issue verification code for an unverified existing account.
+        const verificationToken = randomUUID();
+        const verificationCode = randomInt(0, 1_000_000).toString().padStart(6, '0');
+        const verificationExpires = new Date(Date.now() + 15 * 60 * 1000);
+        await pool.query(
+          'UPDATE users SET verification_token=?, verification_code=?, verification_expires=? WHERE id=?',
+          [verificationToken, verificationCode, verificationExpires, user.id]
+        );
+        try {
+          await sendVerificationEmail(user.email, verificationToken, verificationCode);
+          res.status(201).json({
+            id: user.id,
+            email: user.email,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            email_verified: false,
+            verification_email_sent: true,
+          });
+          return;
+        } catch (error) {
+          logger.error('Verification email re-send after registration failed', {
+            userId: user.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          if (config.isProduction) {
+            res.status(503).json({
+              error: 'Verification email could not be sent; request a new code later',
+              code: 'EMAIL_DELIVERY_FAILED',
+            });
+            return;
+          }
+        }
+      }
+      res.status(201).json({
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        email_verified: alreadyVerified,
+        verification_email_sent: false,
+      });
       return;
     }
     throw e;
