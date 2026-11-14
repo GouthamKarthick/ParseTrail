@@ -34,13 +34,7 @@ async function initializeDatabase(): Promise<void> {
         );
     }
   }
-
-  if (!shuttingDown) {
-    retryTimer = setTimeout(() => {
-      retryTimer = null;
-      void initializeDatabase();
-    }, 30_000);
-  }
+  throw new Error('Database initialization failed after 5 attempts');
 }
 
 async function initializeBackgroundJobs(): Promise<void> {
@@ -141,5 +135,9 @@ server = app.listen(config.port, () => {
   });
 });
 
-void initializeDatabase();
-void initializeBackgroundJobs();
+async function main(): Promise<void> {
+  await initializeDatabase();
+  initializeBackgroundJobs();
+}
+
+void main();

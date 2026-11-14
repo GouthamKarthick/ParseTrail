@@ -1,8 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { createApp } from './app.js';
+import { pool } from './db/pool.js';
+
+vi.mock('./db/pool.js', () => ({
+  pool: { query: vi.fn() },
+}));
 
 describe('application security middleware', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   it('does not grant CORS access to an unlisted origin', async () => {
     const response = await request(createApp())
       .get('/health')
@@ -57,6 +69,23 @@ describe('application security middleware', () => {
         .set('Origin', 'https://evil.example');
       expect(response.status).toBe(401);
       expect((response.body as { code?: string }).code).not.toBe('CSRF_ORIGIN');
+    });
+  });
+
+  describe('GET /health/ready', () => {
+    it('returns 200 when DB is reachable', async () => {
+      vi.mocked(pool.query).mockResolvedValue([[], []]);
+      const response = await request(createApp()).get('/health/ready');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ status: 'ready' });
+    });
+
+    it('returns 503 when DB is unreachable', async () => {
+      vi.mocked(pool.query).mockRejectedValue(new Error('DB connection failed'));
+      const response = await request(createApp()).get('/health/ready');
+      expect(response.status).toBe(503);
+      expect(response.body.status).toBe('not ready');
+      expect(response.body.error).toBeUndefined();
     });
   });
 });
