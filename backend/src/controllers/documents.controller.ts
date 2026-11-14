@@ -5,6 +5,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs/promises';
+import { z } from 'zod';
 import { pool, withTransaction } from '../db/pool.js';
 import { logger } from '../config/logger.js';
 import { isSuspicious } from '../utils/security.js';
@@ -614,6 +615,15 @@ const CORRECTABLE_FIELDS = [
 ] as const;
 
 /**
+ * Validates a correction request body: field must be one of the correctable
+ * fields, value is required.
+ */
+const correctionSchema = z.object({
+  field: z.enum(CORRECTABLE_FIELDS),
+  value: z.unknown(),
+});
+
+/**
  * Validates and normalizes a user-supplied correction value.
  * @param field Field name
  * @param value Raw value
@@ -655,14 +665,16 @@ export async function correctField(req: Request, res: Response, next: NextFuncti
       res.status(400).json({ error: 'Invalid document id' });
       return;
     }
-    const field = String((req.body as { field?: unknown }).field ?? '');
-    if (!(CORRECTABLE_FIELDS as readonly string[]).includes(field)) {
+    const parsedBody = correctionSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+      const issue = parsedBody.error.issues[0];
       res.status(400).json({
-        error: `Field must be one of: ${CORRECTABLE_FIELDS.join(', ')}`,
+        error: `Invalid ${String(issue?.path?.[0] ?? 'body')}: ${issue?.message ?? 'invalid'}`,
       });
       return;
     }
-    const value = normalizeCorrection(field, (req.body as { value?: unknown }).value);
+    const { field, value: rawValue } = parsedBody.data;
+    const value = normalizeCorrection(field, rawValue);
     if (value == null) {
       res.status(400).json({ error: `Invalid value for ${field}` });
       return;
@@ -702,36 +714,47 @@ export async function correctField(req: Request, res: Response, next: NextFuncti
         });
       }
     }
-    await pool.query('UPDATE documents SET data=?, updated_at=NOW() WHERE id=?', [
-      JSON.stringify(data),
-      parsed.data,
-    ]);
+
+    // UPDATE documents.data and INSERT corrections atomically so a crash
+    // cannot leave corrected data without a correction history record.
     let method: string | null = null;
     let confidence: number | null = null;
-    try {
-      const [arows] = await pool.query(
-        'SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
-        [parsed.data]
-      );
+    await withTransaction(async conn => {
+      await conn.query('UPDATE documents SET data=?, updated_at=NOW() WHERE id=?', [
+        JSON.stringify(data),
+        parsed.data,
+      ]);
+      const [arows] = await conn
+        .query(
+          'SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
+          [parsed.data]
+        )
+        .catch(error => {
+          logger.warn('Correction extraction-method lookup failed', {
+            docId: parsed.data,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return [[], []];
+        });
       const last = (arows as Array<{ method: string; confidence: number }>)[0];
       if (last) {
         method = last.method;
         confidence = Number(last.confidence);
       }
-    } catch {}
-    await pool.query(
-      'INSERT INTO corrections (id, document_id, user_id, field, original_value, corrected_value, extraction_method, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [
-        randomUUID(),
-        parsed.data,
-        user.id,
-        field,
-        original == null ? null : String(original),
-        String(value),
-        method,
-        confidence,
-      ]
-    );
+      await conn.query(
+        'INSERT INTO corrections (id, document_id, user_id, field, original_value, corrected_value, extraction_method, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          randomUUID(),
+          parsed.data,
+          user.id,
+          field,
+          original == null ? null : String(original),
+          String(value),
+          method,
+          confidence,
+        ]
+      );
+    });
     res.json({
       id: parsed.data,
       field,
