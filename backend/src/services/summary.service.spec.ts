@@ -1,58 +1,108 @@
 /**
  * services/summary.service.spec.ts — aggregation with mocked pool (no DB).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock("../db/pool.js", () => ({ pool: { query: vi.fn() } }));
+vi.mock('../db/pool.js', () => ({ pool: { query: vi.fn() } }));
 
-import { pool } from "../db/pool.js";
-import { getSummary } from "./summary.service.js";
+import { pool } from '../db/pool.js';
+import { getSummary } from './summary.service.js';
 
-describe("services/summary", () => {
+describe('services/summary', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  function mockAll(avgConf: number | string) {
-    vi.mocked(pool.query)
-      .mockResolvedValueOnce([[{ cnt: 2, sum: "300" }]] as any)
-      .mockResolvedValueOnce([
-        [{ document_type: "invoice", cnt: 2, sum: "300" }],
-      ] as any)
-      .mockResolvedValueOnce([[{ date: "2026-10-14", cnt: 1, sum: "100" }]] as any)
-      .mockResolvedValueOnce([
-        [{ vendor: "V", cnt: 2, sum: "300" }],
-      ] as any)
-      .mockResolvedValueOnce([[{ avgConf }]] as any);
-  }
+  it('maps totals and keeps the existing dashboard response shape', async () => {
+    vi.mocked(pool.query).mockResolvedValue([
+      [
+        {
+          kind: 'total',
+          group_key: null,
+          cnt: 2,
+          sum_total: '300',
+          amount_count: 2,
+          avg_confidence: '0.75',
+        },
+        {
+          kind: 'type',
+          group_key: 'invoice',
+          cnt: 2,
+          sum_total: '300',
+        },
+        {
+          kind: 'trend',
+          group_key: '2026-10-14',
+          cnt: 1,
+          sum_total: '100',
+        },
+        {
+          kind: 'vendor',
+          group_key: 'V',
+          cnt: 2,
+          sum_total: '300',
+        },
+      ],
+    ] as any);
 
-  it("maps totals and reads avgConfidence from SQL", async () => {
-    mockAll(0.75);
-    const s = await getSummary("u1", 30);
-    expect(s.totalDocs).toBe(2);
-    expect(s.sumTotal).toBe(300);
-    expect(s.avgUsage).toBe(150);
-    expect(s.avgConfidence).toBe(0.75);
-    expect(s.byType).toEqual([
-      { document_type: "invoice", cnt: 2, sum: 300 },
+    const summary = await getSummary('u1', 30);
+    expect(summary).toEqual({
+      totalDocs: 2,
+      sumTotal: 300,
+      avgUsage: 150,
+      avgConfidence: 0.75,
+      byType: [{ document_type: 'invoice', cnt: 2, sum: 300 }],
+      trend: [{ date: '2026-10-14', cnt: 1, sum: 100 }],
+      topVendors: [{ vendor: 'V', cnt: 2, sum: 300 }],
+    });
+  });
+
+  it('averages only target-currency documents in a mixed-currency window', async () => {
+    vi.mocked(pool.query).mockResolvedValue([
+      [
+        {
+          kind: 'total',
+          group_key: null,
+          cnt: 3,
+          sum_total: '300',
+          amount_count: 2,
+          avg_confidence: '0.5',
+        },
+      ],
+    ] as any);
+
+    const summary = await getSummary('u1', 30);
+    expect(summary.totalDocs).toBe(3);
+    expect(summary.sumTotal).toBe(300);
+    expect(summary.avgUsage).toBe(summary.sumTotal / 2);
+    expect(pool.query).toHaveBeenCalledOnce();
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining('COALESCE(currency_converted, currency) = ?'),
+      ['u1', 30, 'INR']
+    );
+    expect(String(vi.mocked(pool.query).mock.calls[0][0])).not.toContain("= 'INR'");
+  });
+
+  it('parameterizes the optional category and handles an empty ledger', async () => {
+    vi.mocked(pool.query).mockResolvedValue([
+      [
+        {
+          kind: 'total',
+          group_key: null,
+          cnt: 0,
+          sum_total: '0',
+          amount_count: 0,
+          avg_confidence: '0',
+        },
+      ],
+    ] as any);
+
+    const summary = await getSummary('u1', 30, { category: 'financial' });
+    expect(summary.avgConfidence).toBe(0);
+    expect(summary.avgUsage).toBe(0);
+    expect(pool.query).toHaveBeenCalledWith(expect.stringContaining('AND document_category = ?'), [
+      'u1',
+      30,
+      'financial',
+      'INR',
     ]);
-  });
-
-  it("sums prefer converted amounts in the target currency", async () => {
-    mockAll(1);
-    await getSummary("u1", 30);
-    const firstSql = String(vi.mocked(pool.query).mock.calls[0][0]);
-    expect(firstSql).toContain("totalAmountConverted");
-    expect(firstSql).toContain("currencyConverted");
-  });
-
-  it("defaults avgConfidence to 0 when the ledger is empty", async () => {
-    vi.mocked(pool.query)
-      .mockResolvedValueOnce([[{ cnt: 0, sum: null }]] as any)
-      .mockResolvedValueOnce([[]] as any)
-      .mockResolvedValueOnce([[]] as any)
-      .mockResolvedValueOnce([[]] as any)
-      .mockResolvedValueOnce([[]] as any);
-    const s = await getSummary("u1", 30);
-    expect(s.avgConfidence).toBe(0);
-    expect(s.avgUsage).toBe(0);
   });
 });

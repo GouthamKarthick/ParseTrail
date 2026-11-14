@@ -2,18 +2,18 @@
  * @fileoverview DocumentList — handles loading / empty states and grid vs list rendering.
  */
 
-import type { Document } from "../types";
-import { DocumentRow } from "./DocumentRow";
-import { Skeleton } from "./Skeleton";
-import { EmptyState } from "./Feedback";
-import styles from "./DocumentList.module.scss";
+import type { Document } from '../types';
+import { DocumentRow } from './DocumentRow';
+import { Skeleton } from './Skeleton';
+import { EmptyState } from './Feedback';
+import styles from './DocumentList.module.scss';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 /** Supported visual layout modes. */
-export type ViewMode = "list" | "grid";
+export type ViewMode = 'list' | 'grid';
 
 interface Props {
   documents: Document[];
@@ -37,16 +37,10 @@ interface Props {
  * @returns Document list element
  * @example <DocumentList documents={docs} view="grid" />
  */
-export function DocumentList({
-  documents,
-  view,
-  loading,
-  hasFilters,
-  filterLabel,
-}: Props) {
+export function DocumentList({ documents, view, loading, hasFilters, filterLabel }: Props) {
   if (loading && documents.length === 0) {
     return (
-      <div className={styles["document-list-skeleton"]}>
+      <div className={styles['document-list-skeleton']}>
         <Skeleton lines={5} />
       </div>
     );
@@ -54,7 +48,7 @@ export function DocumentList({
 
   if (documents.length === 0) {
     return (
-      <div className={styles["document-list-empty"]}>
+      <div className={styles['document-list-empty']}>
         {hasFilters ? (
           <EmptyState
             icon="search"
@@ -77,13 +71,9 @@ export function DocumentList({
   return (
     <div>
       <div
-        className={
-          view === "grid"
-            ? styles["document-list-grid"]
-            : styles["document-list-list"]
-        }
+        className={view === 'grid' ? styles['document-list-grid'] : styles['document-list-list']}
       >
-        {documents.map((d) => (
+        {documents.map(d => (
           <DocumentRow key={d.id} doc={d} />
         ))}
       </div>

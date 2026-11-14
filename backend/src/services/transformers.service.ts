@@ -5,11 +5,12 @@
  * owns only the model loader and the deterministic composition around it.
  */
 
-import { logger } from "../config/logger.js";
-import { stripJsonFence } from "../utils/json.js";
-import { normalizeCurrency } from "../utils/currency.js";
-import { normalizeDateISO } from "../utils/date.js";
-import { parseAmount } from "../utils/amount.js";
+import { logger } from '../config/logger.js';
+import { config } from '../config.js';
+import { stripJsonFence } from '../utils/json.js';
+import { normalizeCurrency } from '../utils/currency.js';
+import { normalizeDateISO } from '../utils/date.js';
+import { parseAmount } from '../utils/amount.js';
 import {
   cleanInvoiceNumber,
   cleanVendorCandidate,
@@ -18,37 +19,46 @@ import {
   extractDateFallback,
   extractInvoiceNumberFallback,
   firstVendorLine,
-} from "../utils/regex-utils.js";
-import { getStrategy } from "./strategies.js";
-import { localLlmConfidence, ruleBasedConfidence } from "../utils/confidence.js";
+} from '../utils/regex-utils.js';
+import { getStrategy } from './strategies.js';
+import { localLlmConfidence, ruleBasedConfidence } from '../utils/confidence.js';
 
-type Text2TextPipeline = (prompt: string, opts?: { max_new_tokens?: number; temperature?: number }) => Promise<Array<{ generated_text: string }>>;
+type Text2TextPipeline = (
+  prompt: string,
+  opts?: { max_new_tokens?: number; temperature?: number }
+) => Promise<Array<{ generated_text: string }>>;
 
 let llmPipeline: Text2TextPipeline | null = null;
 let llmLoadPromise: Promise<Text2TextPipeline | null> | null = null;
+let llmFailedUntil = 0;
 
 /**
  * Loads and caches the quantized local Flan-T5 pipeline.
  * @returns Pipeline or null when the model is unavailable
  */
 async function getLocalLLM(): Promise<Text2TextPipeline | null> {
+  if (!config.localLlmEnabled || Date.now() < llmFailedUntil) return null;
   if (llmPipeline) return llmPipeline;
   if (llmLoadPromise) return llmLoadPromise;
   llmLoadPromise = (async () => {
     try {
-      const mod: unknown = await import("@huggingface/transformers");
+      const mod: unknown = await import('@huggingface/transformers');
       const fn = (mod as { default?: unknown }).default ?? mod;
-      if (typeof fn !== "function") throw new Error("pipeline not found");
-      const model = process.env.LOCAL_LLM_MODEL || "Xenova/LaMini-Flan-T5-77M";
-      const p = await fn("text2text-generation", model, {
+      if (typeof fn !== 'function') throw new Error('pipeline not found');
+      const model = config.localLlmModel || 'Xenova/LaMini-Flan-T5-77M';
+      const p = await fn('text2text-generation', model, {
         quantized: true,
-        dtype: "q8",
+        dtype: 'q8',
       });
       llmPipeline = p as Text2TextPipeline;
-      logger.info("Minimal local LLM loaded", { model });
+      llmFailedUntil = 0;
+      logger.info('Minimal local LLM loaded', { model });
       return llmPipeline;
     } catch (e) {
-      logger.warn("Failed to load local LLM, will fallback to Gemini", { error: (e as Error).message });
+      llmFailedUntil = Date.now() + 60_000;
+      logger.warn('Failed to load local LLM; cooling down before retry', {
+        errorType: e instanceof Error ? e.name : 'UnknownError',
+      });
       return null;
     } finally {
       llmLoadPromise = null;
@@ -65,7 +75,10 @@ async function getLocalLLM(): Promise<Text2TextPipeline | null> {
  * @param documentType Type hint
  * @returns Extracted data, confidence, type
  */
-export function extractRulesOnly(text: string, documentType: string): { data: Record<string, unknown>; confidence: number; documentType: string } {
+export function extractRulesOnly(
+  text: string,
+  documentType: string
+): { data: Record<string, unknown>; confidence: number; documentType: string } {
   const data: Record<string, unknown> = {};
   const vendor = firstVendorLine(text);
   if (vendor) data.vendor = vendor;
@@ -87,19 +100,28 @@ export function extractRulesOnly(text: string, documentType: string): { data: Re
  * @param documentType Type hint
  * @returns Extracted data, confidence, type
  */
-export async function runLocalLLMExtraction(text: string, documentType: string): Promise<{ data: Record<string, unknown>; confidence: number; documentType: string }> {
+export async function runLocalLLMExtraction(
+  text: string,
+  documentType: string
+): Promise<{ data: Record<string, unknown>; confidence: number; documentType: string }> {
   const ex = getStrategy(documentType).localExample;
-  const prompt = `Task: extract ${documentType} as JSON only.\n` + `Example:\nText: "${ex.text}"\nJSON: ${ex.json}\n\n` + `Text: "${text.slice(0, 800).replace(/\n/g, " ")}"\nJSON:`;
+  const prompt =
+    `Task: extract ${documentType} as JSON only.\n` +
+    `Example:\nText: "${ex.text}"\nJSON: ${ex.json}\n\n` +
+    `Text: "${text.slice(0, 800).replace(/\n/g, ' ')}"\nJSON:`;
   try {
     const pipe = await getLocalLLM();
     if (!pipe) return { data: {}, confidence: 0, documentType };
-    const out = await pipe(prompt, { max_new_tokens: 256, temperature: 0.0 } as unknown as Record<string, unknown>);
-    const raw = out[0]?.generated_text?.trim() ?? "";
+    const out = await pipe(prompt, { max_new_tokens: 256, temperature: 0.0 } as Record<
+      string,
+      unknown
+    >);
+    const raw = out[0]?.generated_text?.trim() ?? '';
     let jsonStr = stripJsonFence(raw);
-    const lastJsonIdx = jsonStr.lastIndexOf("JSON:");
+    const lastJsonIdx = jsonStr.lastIndexOf('JSON:');
     if (lastJsonIdx >= 0) jsonStr = jsonStr.slice(lastJsonIdx + 5).trim();
-    const start = jsonStr.indexOf("{");
-    const end = jsonStr.lastIndexOf("}");
+    const start = jsonStr.indexOf('{');
+    const end = jsonStr.lastIndexOf('}');
     const slice = start >= 0 && end > start ? jsonStr.slice(start, end + 1) : jsonStr;
     let parsed: Record<string, unknown>;
     try {
@@ -112,31 +134,45 @@ export async function runLocalLLMExtraction(text: string, documentType: string):
       }
       const filledF = Object.keys(dataFallback).length;
       if (filledF > 0) {
-        logger.info("Local LLM non-JSON fallback used", { raw: raw.slice(0, 80), dataFallback });
+        logger.info('Local LLM non-JSON fallback used', { fieldCount: filledF });
         return { data: dataFallback, confidence: localLlmConfidence(filledF), documentType };
       }
-      throw new Error(`Invalid JSON from Flan: ${raw.slice(0, 80)}`);
+      throw new Error('Invalid JSON from local model');
     }
     const data: Record<string, unknown> = {};
-    const parsedVendor = cleanVendorCandidate(typeof parsed.vendor === "string" ? parsed.vendor : undefined);
+    const parsedVendor = cleanVendorCandidate(
+      typeof parsed.vendor === 'string' ? parsed.vendor : undefined
+    );
     if (parsedVendor) data.vendor = parsedVendor;
-    const parsedInvNum = cleanInvoiceNumber(typeof parsed.invoiceNumber === "string" ? parsed.invoiceNumber : undefined);
+    const parsedInvNum = cleanInvoiceNumber(
+      typeof parsed.invoiceNumber === 'string' ? parsed.invoiceNumber : undefined
+    );
     if (parsedInvNum) data.invoiceNumber = parsedInvNum;
-    if (typeof parsed.invoiceDate === "string" && parsed.invoiceDate.trim()) data.invoiceDate = normalizeDateISO(parsed.invoiceDate);
+    if (typeof parsed.invoiceDate === 'string' && parsed.invoiceDate.trim())
+      data.invoiceDate = normalizeDateISO(parsed.invoiceDate);
     const amt = parseAmount(parsed.totalAmount);
     if (amt != null) data.totalAmount = amt;
     const cur = normalizeCurrency(parsed.currency);
     if (cur) data.currency = cur;
-    if (!data.vendor || !data.invoiceNumber || !data.invoiceDate || data.totalAmount == null || !data.currency) {
+    if (
+      !data.vendor ||
+      !data.invoiceNumber ||
+      !data.invoiceDate ||
+      data.totalAmount == null ||
+      !data.currency
+    ) {
       const rules = extractRulesOnly(text, documentType);
-      for (const [k, v] of Object.entries(rules.data)) if (data[k] == null && v != null) data[k] = v;
+      for (const [k, v] of Object.entries(rules.data))
+        if (data[k] == null && v != null) data[k] = v;
     }
     const filled = Object.keys(data).length;
     const confidence = ruleBasedConfidence(filled);
-    logger.info("Local LLM extraction", { documentType, filled, confidence, data });
+    logger.info('Local LLM extraction', { documentType, filled, confidence });
     return { data, confidence, documentType };
   } catch (e) {
-    logger.warn("Local LLM extraction failed", { error: (e as Error).message });
+    logger.warn('Local LLM extraction failed', {
+      errorType: e instanceof Error ? e.name : 'UnknownError',
+    });
     return { data: {}, confidence: 0, documentType };
   }
 }

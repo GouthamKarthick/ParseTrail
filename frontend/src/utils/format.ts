@@ -26,7 +26,7 @@ function formatterFor(currency?: string | null): Intl.NumberFormat {
   if (hit) return hit;
   try {
     const f = new Intl.NumberFormat(undefined, {
-      style: "currency",
+      style: 'currency',
       currency,
     });
     formatterCache.set(currency, f);
@@ -37,11 +37,8 @@ function formatterFor(currency?: string | null): Intl.NumberFormat {
   return plainFormatter;
 }
 
-export function formatMoney(
-  value: number | null | undefined,
-  currency?: string | null,
-): string {
-  if (value == null || !Number.isFinite(value)) return "—";
+export function formatMoney(value: number | null | undefined, currency?: string | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
   return formatterFor(currency).format(value);
 }
 
@@ -52,7 +49,7 @@ export function formatMoney(
  * @example formatPercent01(0.85) // "85%"
  */
 export function formatPercent01(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
+  if (value == null || !Number.isFinite(value)) return '—';
   return `${Math.round(value * 100)}%`;
 }
 
@@ -63,5 +60,5 @@ export function formatPercent01(value: number | null | undefined): string {
  * @example normalizePhone("+91 98-1234 (56)") // "+9198123456"
  */
 export function normalizePhone(v: string): string {
-  return v.trim().replace(/[\s\-()]/g, "");
+  return v.trim().replace(/[\s\-()]/g, '');
 }

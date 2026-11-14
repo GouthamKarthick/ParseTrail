@@ -7,14 +7,14 @@
  */
 
 export const REQUIRED_FIELDS: Record<string, string[]> = {
-  invoice: ["totalAmount", "invoiceDate"],
-  receipt: ["totalAmount", "invoiceDate"],
-  bill: ["totalAmount", "invoiceDate"],
-  payment: ["totalAmount", "invoiceDate"],
-  payslip: ["totalAmount"],
-  settlement_slip: ["totalAmount"],
-  other: ["totalAmount"],
-  unknown: ["totalAmount"],
+  invoice: ['totalAmount', 'invoiceDate'],
+  receipt: ['totalAmount', 'invoiceDate'],
+  bill: ['totalAmount', 'invoiceDate'],
+  payment: ['totalAmount', 'invoiceDate'],
+  payslip: ['totalAmount'],
+  settlement_slip: ['totalAmount'],
+  other: ['totalAmount'],
+  unknown: ['totalAmount'],
 };
 
 /**
@@ -23,15 +23,12 @@ export const REQUIRED_FIELDS: Record<string, string[]> = {
  * @returns Valid flag
  */
 export function isValidDate(s: unknown): boolean {
-  if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const [y, m, d] = s.split("-").map(Number);
-  if (y < 2000 || y > 2030 || m < 1 || m > 12 || d < 1 || d > 31) return false;
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  if (y < 2000 || y > new Date().getFullYear() + 2 || m < 1 || m > 12 || d < 1 || d > 31)
+    return false;
   const dt = new Date(Date.UTC(y, m - 1, d));
-  return (
-    dt.getUTCFullYear() === y &&
-    dt.getUTCMonth() === m - 1 &&
-    dt.getUTCDate() === d
-  );
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }
 
 /**
@@ -48,28 +45,25 @@ export function isValidDate(s: unknown): boolean {
 export function needsRefinement(
   data: Record<string, unknown>,
   documentType: string,
-  attempts: Array<{ fallbackReason?: string }>,
+  attempts: Array<{ conflicts?: string[] }>
 ): { needed: boolean; reason?: string } {
   const req = REQUIRED_FIELDS[documentType] ?? REQUIRED_FIELDS.unknown;
-  const missing = req.filter((k) => {
-    if (k === "totalAmount")
+  const missing = req.filter(k => {
+    if (k === 'totalAmount')
       return !(
-        typeof data.totalAmount === "number" &&
+        typeof data.totalAmount === 'number' &&
         isFinite(data.totalAmount) &&
         (data.totalAmount as number) >= 0
       );
-    if (k === "invoiceDate") return !isValidDate(data.invoiceDate);
+    if (k === 'invoiceDate') return !isValidDate(data.invoiceDate);
     return data[k] == null;
   });
   if (missing.length > 0)
     return {
       needed: true,
-      reason: `missing required fields: ${missing.join(",")}`,
+      reason: `missing required fields: ${missing.join(',')}`,
     };
-  const disagree = (attempts ?? []).some((a) =>
-    (a.fallbackReason ?? "").includes("disagree"),
-  );
-  if (disagree)
-    return { needed: true, reason: "strategies disagreed on field values" };
+  const hasConflicts = (attempts ?? []).some(attempt => (attempt.conflicts?.length ?? 0) > 0);
+  if (hasConflicts) return { needed: true, reason: 'strategies disagreed on field values' };
   return { needed: false };
 }

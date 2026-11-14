@@ -2,16 +2,11 @@
  * middleware/upload.ts — Multer upload handling.
  */
 
-import multer from "multer";
-import { randomUUID } from "crypto";
-import { config } from "../config.js";
+import multer from 'multer';
+import { randomUUID } from 'crypto';
+import { config } from '../config.js';
 
-const allowedMimes = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-]);
+const allowedMimes = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/jpg']);
 
 /** Multer instance for document uploads. */
 export const upload = multer({
@@ -21,18 +16,22 @@ export const upload = multer({
     },
     filename(_req, file, cb) {
       const id = randomUUID();
-      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
       cb(null, `${id}-${safe}`);
     },
   }),
   limits: { fileSize: config.maxFileSize },
   fileFilter(_req, file, cb) {
+    if (file.size === 0) {
+      cb(new Error('Empty file not allowed'));
+      return;
+    }
     if (!allowedMimes.has(file.mimetype)) {
       cb(new Error(`Invalid file type. Allowed: pdf, png, jpg`));
       return;
     }
     if (
-      file.originalname.includes("..") ||
+      file.originalname.includes('..') ||
       /[<>]/.test(file.originalname) ||
       file.originalname.length > 255
     ) {

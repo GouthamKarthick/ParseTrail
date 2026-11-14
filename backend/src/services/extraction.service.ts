@@ -2,28 +2,28 @@
  * services/extraction.service.ts — Orchestrates PDF parsing, OCR, and LLM extraction.
  */
 
-import fs from "fs/promises";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import { randomUUID } from "crypto";
-import { config } from "../config.js";
-import { ruleBasedConfidence } from "../utils/confidence.js";
-import { logger } from "../config/logger.js";
-import { pool } from "../db/pool.js";
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { randomUUID } from 'crypto';
+import { config } from '../config.js';
+import { ruleBasedConfidence } from '../utils/confidence.js';
+import { logger } from '../config/logger.js';
+import { pool } from '../db/pool.js';
 import type {
   AttemptRecord,
+  ExtractionCascadeResult,
   ExtractionOrder,
   ExtractionResult,
   ExtractedData,
-} from "../types/index.js";
-import { tryAI } from "./ai.service.js";
-import { ocrBuffer } from "./ocr.service.js";
-import {
-  extractRulesOnly,
-  runLocalLLMExtraction,
-} from "./transformers.service.js";
-import { getCategory, getPromptForType } from "./registry.js";
-import { applyConversion } from "../utils/conversion.js";
+} from '../types/index.js';
+import { tryAI } from './ai.service.js';
+import { ocrBuffer } from './ocr.service.js';
+import { extractRulesOnly, runLocalLLMExtraction } from './transformers.service.js';
+import { getCategory, getPromptForType } from './registry.js';
+import { applyConversion } from '../utils/conversion.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -37,10 +37,7 @@ async function enrichWithConversion(data: ExtractedData): Promise<void> {
   try {
     await applyConversion(data);
   } catch {
-    logger.warn("Skipping currency conversion enrichment", {
-      totalAmount: data.totalAmount,
-      currency: data.currency,
-    });
+    logger.warn('Skipping currency conversion enrichment');
   }
 }
 
@@ -50,54 +47,78 @@ async function enrichWithConversion(data: ExtractedData): Promise<void> {
  * @returns Mime type
  */
 function getImageMime(buffer: Buffer): string {
-  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50)
-    return "image/png";
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8)
-    return "image/jpeg";
-  return "image/jpeg";
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
+  return 'image/jpeg';
 }
 
 /**
- * Parses PDF text via pdf-parse then pdftotext fallback.
+ * Parses PDF text via pdfjs-dist (legacy Node build) then pdftotext fallback.
  * @param buffer PDF buffer
  * @returns Extracted text
  */
-async function parsePdf(buffer: Buffer): Promise<string> {
-  let text = "";
+const MAX_PDF_PAGES = 50;
+const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10 MB
+
+export async function parsePdfWithPdfjs(buffer: Buffer): Promise<string> {
+  if (buffer.length > MAX_PDF_SIZE) {
+    logger.warn('PDF too large for text extraction', { size: buffer.length });
+    return '';
+  }
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    isEvalSupported: false,
+  });
+  const pdf = await loadingTask.promise;
+  const numPages = Math.min(pdf.numPages, MAX_PDF_PAGES);
+  const pageTexts: string[] = [];
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const items = content.items as { str?: string }[];
+    const pageText = items
+      .filter(item => item.str != null)
+      .map(item => item.str!)
+      .join(' ');
+    pageTexts.push(pageText);
+  }
+  const text = pageTexts.join('\n').trim();
+  if (text.length === 0) throw new Error('pdfjs-dist returned no text');
+  return text;
+}
+
+/**
+ * Parses PDF text via pdfjs-dist (legacy Node build) then pdftotext fallback.
+ * @param buffer PDF buffer
+ * @returns Extracted text
+ */
+export async function parsePdf(buffer: Buffer): Promise<string> {
   try {
-    const mod: unknown = await import("pdf-parse");
-    const fn = (mod as { default?: unknown }).default ?? mod;
-    if (typeof fn === "function") {
-      const data = await (fn as (b: Buffer) => Promise<{ text: string }>)(
-        buffer,
-      );
-      text = (data.text as string) || "";
-      if (text.trim().length > 10) return text;
-    }
+    return await parsePdfWithPdfjs(buffer);
   } catch (e) {
-    logger.warn("pdf-parse failed, trying pdftotext", {
+    logger.warn('pdfjs-dist failed, trying pdftotext', {
       error: (e as Error).message,
     });
   }
   try {
-    const { writeFile, unlink } = await import("fs/promises");
-    const tmp = `/tmp/clarity-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`;
-    await writeFile(tmp, buffer);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'parsetrail-pdf-'));
+    const tmp = path.join(tmpDir, 'input.pdf');
     try {
-      const { stdout } = await execFileAsync("pdftotext", [
-        "-layout",
-        tmp,
-        "-",
-      ]);
-      text = stdout || "";
+      await fs.writeFile(tmp, buffer);
+      const { stdout } = await execFileAsync('pdftotext', ['-layout', tmp, '-'], {
+        timeout: 15_000,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const text = stdout || '';
+      if (text.trim().length > 5) return text;
     } finally {
-      await unlink(tmp).catch(() => {});
+      await fs.rm(tmpDir, { recursive: true, force: true });
     }
-    if (text.trim().length > 5) return text;
   } catch (e) {
-    logger.warn("pdftotext fallback failed", { error: (e as Error).message });
+    logger.warn('pdftotext fallback failed', { error: (e as Error).message });
   }
-  return text;
+  return '';
 }
 
 /**
@@ -110,79 +131,65 @@ export function detectDocTypeLight(text: string): {
   confidence: number;
 } {
   const t = text.toLowerCase();
-  const heading = text.split("\n").slice(0, 10).join("\n").toLowerCase();
+  const heading = text.split('\n').slice(0, 10).join('\n').toLowerCase();
   const isNarrowReceipt =
-    /grand\s*total/i.test(text) &&
-    /rs\.?/i.test(text) &&
-    text.split("\n").length < 20;
-  const hasMultipage =
-    /page\s*1\s*of\s*2/i.test(text) || /page\s*2\s*of\s*2/i.test(text);
-  if (heading.includes("settlement slip"))
-    return { type: "settlement_slip", confidence: 0.95 };
-  if (t.includes("settlement slip"))
-    return { type: "settlement_slip", confidence: 0.9 };
+    /grand\s*total/i.test(text) && /rs\.?/i.test(text) && text.split('\n').length < 20;
+  const hasMultipage = /page\s*1\s*of\s*2/i.test(text) || /page\s*2\s*of\s*2/i.test(text);
+  if (heading.includes('settlement slip')) return { type: 'settlement_slip', confidence: 0.95 };
+  if (t.includes('settlement slip')) return { type: 'settlement_slip', confidence: 0.9 };
   if (
-    t.includes("contract note") ||
-    t.includes("final settlement") ||
-    t.includes("settlement sheet") ||
-    t.includes("settlement statement") ||
+    t.includes('contract note') ||
+    t.includes('final settlement') ||
+    t.includes('settlement sheet') ||
+    t.includes('settlement statement') ||
     /\bsettlement\s*(no|number|date)\b/.test(t)
   )
-    return { type: "settlement_slip", confidence: 0.85 };
+    return { type: 'settlement_slip', confidence: 0.85 };
   if (
-    heading.includes("payslip") ||
-    t.includes("payslip") ||
-    t.includes("pay slip") ||
-    t.includes("pay stub") ||
-    t.includes("earnings statement") ||
-    t.includes("statement of earnings")
+    heading.includes('payslip') ||
+    t.includes('payslip') ||
+    t.includes('pay slip') ||
+    t.includes('pay stub') ||
+    t.includes('earnings statement') ||
+    t.includes('statement of earnings')
   )
-    return { type: "payslip", confidence: 0.9 };
+    return { type: 'payslip', confidence: 0.9 };
   if (
-    heading.includes("payment status") ||
-    heading.includes("payment received") ||
-    t.includes("payment status")
+    heading.includes('payment status') ||
+    heading.includes('payment received') ||
+    t.includes('payment status')
   )
-    return { type: "payment", confidence: 0.9 };
+    return { type: 'payment', confidence: 0.9 };
   const paySignal =
     /payment\s*advice|transfer\s*confirmation|transaction\s*status|payment\s*successful|successful\s*(payment|transaction)|\bzelle\b|\bupi\b|we have transferred|rent\s*receipt|receipt\s*(for|of)\s*(house\s*)?rent|received.*as rent|rent for the (month|period)/i.test(
-      t,
+      t
     );
-  if (paySignal) return { type: "payment", confidence: 0.9 };
+  if (paySignal) return { type: 'payment', confidence: 0.9 };
   const hasUtility =
     /kwh|\bmeter\b|energy\s*charge|electricity|electric\s*bill|gas\s*(bill|charge|supply)|water\s*(bill|charge)|power\s*(bill|charge|supply)|supply\s*(address|charges?)|distribution\s*(delivery|charges?)|\butility\b/i.test(
-      t,
+      t
     );
   const hasDueOrBill =
     /\bamount\s*due|\btotal\s*due|\bbalance\s*due|\bdue\s*date|\bpayment\s*(is\s*)?due|\bpayable\b|bill\s*(date|no|number|period|basis)/i.test(
-      t,
+      t
     );
-  if (hasUtility && hasDueOrBill) return { type: "bill", confidence: 0.8 };
+  if (hasUtility && hasDueOrBill) return { type: 'bill', confidence: 0.8 };
+  if (isNarrowReceipt || heading.includes('chai point') || /bill\s*no\s*:/i.test(heading))
+    return { type: 'receipt', confidence: 0.85 };
+  if (t.includes('receipt')) return { type: 'receipt', confidence: 0.7 };
   if (
-    isNarrowReceipt ||
-    heading.includes("chai point") ||
-    /bill\s*no\s*:/i.test(heading)
-  )
-    return { type: "receipt", confidence: 0.85 };
-  if (t.includes("receipt")) return { type: "receipt", confidence: 0.7 };
-  if (
-    heading.includes("invoice") ||
-    heading.includes("rechnung") ||
+    heading.includes('invoice') ||
+    heading.includes('rechnung') ||
     /invoice\s*(number|#|no)/i.test(heading)
   )
-    return { type: "invoice", confidence: 0.85 };
-  if (hasMultipage && /total\s*due/i.test(text))
-    return { type: "invoice", confidence: 0.8 };
-  if (t.includes("invoice") || t.includes("rechn"))
-    return { type: "invoice", confidence: 0.6 };
-  if (/^\s*bill\s*$/im.test(heading)) return { type: "bill", confidence: 0.6 };
-  if (
-    /amount\s*:\s*[0-9]/i.test(text) &&
-    !/invoice|receipt|payment|payslip|settlement/i.test(t)
-  )
-    return { type: "other", confidence: 0.5 };
-  if (text.trim().length < 15) return { type: "unknown", confidence: 0.3 };
-  return { type: "other", confidence: 0.4 };
+    return { type: 'invoice', confidence: 0.85 };
+  if (hasMultipage && /total\s*due/i.test(text)) return { type: 'invoice', confidence: 0.8 };
+  if (t.includes('invoice') || t.includes('rechn')) return { type: 'invoice', confidence: 0.6 };
+  if (/^\s*bill\s*$/im.test(heading)) return { type: 'bill', confidence: 0.6 };
+  if (/amount\s*:\s*[0-9]/i.test(text) && !/invoice|receipt|payment|payslip|settlement/i.test(t))
+    return { type: 'other', confidence: 0.5 };
+  if (text.trim().length < 15) return { type: 'unknown', confidence: 0.3 };
+  return { type: 'other', confidence: 0.4 };
 }
 
 /**
@@ -193,14 +200,11 @@ export function detectDocTypeLight(text: string): {
  * @param model Model output
  * @returns Conflicting field names
  */
-function fieldsConflict(
-  rules: Record<string, unknown>,
-  model: Record<string, unknown>,
-): string[] {
+function fieldsConflict(rules: Record<string, unknown>, model: Record<string, unknown>): string[] {
   const out: string[] = [];
   const norm = (v: unknown): string | null =>
-    typeof v === "number" ? String(v) : typeof v === "string" ? v.trim() : null;
-  for (const k of ["invoiceNumber", "invoiceDate", "totalAmount", "currency"]) {
+    typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : null;
+  for (const k of ['invoiceNumber', 'invoiceDate', 'totalAmount', 'currency']) {
     const x = norm(rules[k]);
     const y = norm(model[k]);
     if (x != null && y != null && x !== y) out.push(k);
@@ -216,13 +220,13 @@ function fieldsConflict(
  */
 export async function recordAttempts(
   documentId: string,
-  attempts: AttemptRecord[] | undefined,
+  attempts: AttemptRecord[] | undefined
 ): Promise<void> {
   try {
     if (!documentId || !attempts || attempts.length === 0) return;
     for (const a of attempts) {
       await pool.query(
-        "INSERT INTO extraction_attempts (id, document_id, method, predicted_type, confidence, latency_ms, cost_estimate, succeeded, fallback_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        'INSERT INTO extraction_attempts (id, document_id, method, predicted_type, confidence, latency_ms, cost_estimate, succeeded, fallback_reason, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           randomUUID(),
           documentId,
@@ -233,11 +237,13 @@ export async function recordAttempts(
           a.cost,
           a.succeeded ? 1 : 0,
           a.fallbackReason ?? null,
-        ],
+          a.inputTokens ?? null,
+          a.outputTokens ?? null,
+        ]
       );
     }
   } catch (e) {
-    logger.warn("Failed to record extraction attempts", {
+    logger.warn('Failed to record extraction attempts', {
       error: (e as Error).message,
     });
   }
@@ -256,12 +262,19 @@ interface LocalStageOut {
   typeConf: number;
   fresh: boolean;
   passed: boolean;
+  conflicts: string[];
 }
 
 type FinalResult = ExtractionResult & {
   attempts: AttemptRecord[];
   typeVotes: string[];
 };
+
+function hasConfiguredCloudProviderKey(): boolean {
+  return config.ai.providers.some(provider => {
+    return Boolean(config.ai.providerKeys[provider]?.apiKey);
+  });
+}
 
 /**
  * Runs the deterministic rules stage (rules-first order only).
@@ -279,7 +292,7 @@ function runRulesStage(
   hasText: boolean,
   rulesFirst: boolean,
   lightType: { type: string; confidence: number },
-  attempts: AttemptRecord[],
+  attempts: AttemptRecord[]
 ): RulesStageOut | null {
   if (!rulesFirst || !hasText || text.trim().length < 5) return null;
   const t0 = Date.now();
@@ -287,7 +300,7 @@ function runRulesStage(
   const ruleFields = Object.keys(rules.data).length;
   const rulesOk = ruleFields > 0 && rules.confidence >= 0.4;
   attempts.push({
-    method: "rule-based",
+    method: 'rule-based',
     predictedType: lightType.type,
     confidence: rules.confidence,
     latencyMs: Date.now() - t0,
@@ -301,7 +314,7 @@ function runRulesStage(
   const passed = rulesOk && lightType.confidence >= 0.4;
   if (!passed && data) delete data.vendor;
   if (!passed)
-    logger.info("Rules-first escalating to local model", {
+    logger.info('Rules-first escalating to local model', {
       ruleFields,
       ruleConf: rules.confidence,
     });
@@ -327,7 +340,7 @@ async function runLocalStage(
   lightType: { type: string; confidence: number },
   seed: { data: Record<string, unknown>; conf: number } | null,
   attempts: AttemptRecord[],
-  typeVotes: string[],
+  typeVotes: string[]
 ): Promise<LocalStageOut | null> {
   if (!(hasText && text.trim().length > 30)) {
     return seed
@@ -338,11 +351,13 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         }
       : null;
   }
   const t0 = Date.now();
   let conflictNote: string | undefined;
+  let conflicts: string[] = [];
   try {
     const localRes = await runLocalLLMExtraction(text, lightType.type);
     const flanLatency = Date.now() - t0;
@@ -354,18 +369,13 @@ async function runLocalStage(
       if (rulesFirst && seed?.data) {
         let filledByFlan = 0;
         const norm = (v: unknown): string | null =>
-          typeof v === "number"
-            ? String(v)
-            : typeof v === "string"
-              ? v.trim()
-              : null;
-        const conflicts: string[] = [];
+          typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : null;
         for (const [k, v] of Object.entries(localRes.data)) {
           if (seed.data[k] == null && v != null) {
             seed.data[k] = v;
             filledByFlan++;
           } else if (
-            k !== "vendor" &&
+            k !== 'vendor' &&
             seed.data[k] != null &&
             v != null &&
             norm(seed.data[k]) !== norm(v)
@@ -378,58 +388,63 @@ async function runLocalStage(
         conf = ruleBasedConfidence(filled);
         type = localRes.documentType;
         typeConf = localRes.confidence;
-        logger.info("Local LLM filled rules-first gaps", {
+        logger.info('Local LLM filled rules-first gaps', {
           filledByFlan,
           conflicts,
           confidence: conf,
         });
         if (conflicts.length > 0) {
           conf = Math.min(conf, 0.39);
-          conflictNote = `rules/model disagree on ${conflicts.join(",")}, escalating to cloud`;
+          conflictNote = `rules/model disagree on ${conflicts.join(',')}, escalating to cloud`;
         }
       } else if (!rulesFirst && hasText && data) {
         const ruleCheck = extractRulesOnly(text, lightType.type);
-        const conflicts = fieldsConflict(
-          ruleCheck.data,
-          localRes.data as Record<string, unknown>,
-        );
+        conflicts = fieldsConflict(ruleCheck.data, localRes.data as Record<string, unknown>);
         for (const k of conflicts) {
           const rv = ruleCheck.data[k];
           if (rv != null) (data as Record<string, unknown>)[k] = rv;
         }
         if (conflicts.length > 0) {
-          conflictNote = `rules/model disagree on ${conflicts.join(",")}, escalating to cloud`;
+          conflictNote = `rules/model disagree on ${conflicts.join(',')}, escalating to cloud`;
         }
       }
-      logger.info("Local LLM extraction", {
+      logger.info('Local LLM extraction', {
         documentType: type,
         confidence: conf,
-        data,
+        fieldCount: Object.keys(data).length,
       });
       if (!typeVotes.includes(type)) typeVotes.push(type);
       const localOk = conf >= 0.4 && typeConf >= 0.4 && !conflictNote;
       attempts.push({
-        method: "local-llm",
+        method: 'local-llm',
         predictedType: type,
         confidence: conf,
         latencyMs: flanLatency,
         cost: 0,
         succeeded: localOk,
+        conflicts,
         fallbackReason: localOk
           ? undefined
-          : (conflictNote ??
-            `local confidence ${conf} < 0.4, escalating to cloud`),
+          : (conflictNote ?? `local confidence ${conf} < 0.4, escalating to cloud`),
       });
-      return { data, conf, type, typeConf, fresh: true, passed: localOk };
+      return {
+        data,
+        conf,
+        type,
+        typeConf,
+        fresh: true,
+        passed: localOk,
+        conflicts,
+      };
     }
     attempts.push({
-      method: "local-llm",
+      method: 'local-llm',
       predictedType: lightType.type,
       confidence: 0,
       latencyMs: flanLatency,
       cost: 0,
       succeeded: false,
-      fallbackReason: "local model returned no fields, escalating to cloud",
+      fallbackReason: 'local model returned no fields, escalating to cloud',
     });
     return seed
       ? {
@@ -439,6 +454,7 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         }
       : {
           data: null,
@@ -447,19 +463,20 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         };
   } catch (e) {
     attempts.push({
-      method: "local-llm",
+      method: 'local-llm',
       predictedType: lightType.type,
       confidence: 0,
       latencyMs: Date.now() - t0,
       cost: 0,
       succeeded: false,
-      fallbackReason: `local model error: ${(e as Error).message.slice(0, 120)}`,
+      fallbackReason: 'local model error',
     });
-    logger.warn("Local LLM failed, will escalate to Gemini", {
-      error: (e as Error).message,
+    logger.warn('Local LLM failed, will escalate to cloud provider', {
+      errorType: e instanceof Error ? e.name : 'UnknownError',
     });
     return seed
       ? {
@@ -469,6 +486,7 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         }
       : {
           data: null,
@@ -477,12 +495,13 @@ async function runLocalStage(
           typeConf: lightType.confidence,
           fresh: false,
           passed: false,
+          conflicts: [],
         };
   }
 }
 
 /**
- * Runs the cloud stage (Gemini) with merge/keep/direct semantics.
+ * Runs the cloud stage with merge/keep/direct semantics.
  * @param args Stage inputs including local output and ledgers
  * @returns Final result, or null when cloud is skipped/inapplicable
  */
@@ -516,6 +535,7 @@ async function runCloudStage(args: {
   const localConf = local?.conf ?? 0;
   const localType = local?.type ?? lightType.type;
   const localTypeConf = local?.typeConf ?? lightType.confidence;
+  const conflictFields = new Set(local?.conflicts ?? []);
   const needAI =
     cloudOnly ||
     !hasText ||
@@ -526,7 +546,7 @@ async function runCloudStage(args: {
     localTypeConf < 0.6;
   if (!(
     allowCloud &&
-    config.ai.apiKey &&
+    hasConfiguredCloudProviderKey() &&
     (hasText || isImage || isScannedPdf || needAI)
   ))
     return null;
@@ -534,22 +554,16 @@ async function runCloudStage(args: {
   try {
     const guessedType = localType || lightType.type;
     const prompt = getPromptForType(guessedType);
-    const imageBase64 =
-      isImage || isScannedPdf ? buffer!.toString("base64") : undefined;
-    const imageMime = isScannedPdf ? "application/pdf" : "image/jpeg";
+    const imageBase64 = isImage || isScannedPdf ? buffer!.toString('base64') : undefined;
+    const imageMime = isScannedPdf ? 'application/pdf' : getImageMime(buffer!);
     const aiText = hasText
       ? text
       : `Scanned ${guessedType} with no text layer — extract from image.`;
-    const ai: ExtractionResult = await tryAI(
-      aiText,
-      imageBase64,
-      imageMime,
-      prompt,
-    );
-    logger.info("AI extraction", {
+    const ai: ExtractionResult = await tryAI(aiText, imageBase64, imageMime, prompt);
+    logger.info('AI extraction', {
       method: ai.method,
       confidence: ai.confidence,
-      data: ai.data,
+      fieldCount: Object.keys(ai.data).length,
       documentType: ai.documentType,
     });
     const aiLatency = Date.now() - t0;
@@ -557,27 +571,29 @@ async function runCloudStage(args: {
     if (
       localData &&
       Object.keys(localData).length > 0 &&
-      ai.confidence >= localConf
+      (ai.confidence >= localConf || conflictFields.size > 0)
     ) {
       const merged: Record<string, unknown> = { ...localData };
       let filledFromAI = 0;
       for (const [k, v] of Object.entries(ai.data as Record<string, unknown>))
-        if (merged[k] == null && v != null) {
+        if (v != null && (merged[k] == null || conflictFields.has(k))) {
           merged[k] = v;
           filledFromAI++;
         }
       if (filledFromAI > 0) {
         const finalType = ai.documentType || localType;
         attempts.push({
-          method: "llm",
+          method: 'llm',
           predictedType: ai.documentType,
           confidence: ai.confidence,
           latencyMs: aiLatency,
           cost: 0,
           succeeded: true,
+          inputTokens: ai.tokenUsage?.inputTokens,
+          outputTokens: ai.tokenUsage?.outputTokens,
         });
         attempts.push({
-          method: "fallback-merge",
+          method: 'fallback-merge',
           predictedType: finalType,
           confidence: Math.max(localConf, ai.confidence),
           latencyMs: 0,
@@ -588,11 +604,11 @@ async function runCloudStage(args: {
         return {
           data: merged,
           confidence: Math.max(localConf, ai.confidence),
-          method: "local-llm+llm",
-          documentType:
-            ai.documentType || (localType as ExtractionResult["documentType"]),
+          method: 'local-llm+llm',
+          documentType: ai.documentType || (localType as ExtractionResult['documentType']),
           documentTypeConfidence: ai.documentTypeConfidence || localTypeConf,
           documentCategory: getCategory(ai.documentType || localType),
+          tokenUsage: ai.tokenUsage,
           attempts,
           typeVotes,
         };
@@ -605,50 +621,55 @@ async function runCloudStage(args: {
       localConf >= 0.4
     ) {
       attempts.push({
-        method: "llm",
+        method: 'llm',
         predictedType: ai.documentType,
         confidence: ai.confidence,
         latencyMs: aiLatency,
         cost: 0,
         succeeded: false,
         fallbackReason: `cloud confidence ${ai.confidence} < local ${localConf}, keeping local`,
+        inputTokens: ai.tokenUsage?.inputTokens,
+        outputTokens: ai.tokenUsage?.outputTokens,
       });
       await enrichWithConversion(localData as ExtractedData);
       return {
         data: localData,
         confidence: localConf,
-        method: "local-llm",
-        documentType: localType as ExtractionResult["documentType"],
+        method: 'local-llm',
+        documentType: localType as ExtractionResult['documentType'],
         documentTypeConfidence: localTypeConf,
         documentCategory: getCategory(localType),
+        tokenUsage: ai.tokenUsage,
         attempts,
         typeVotes,
       };
     }
     attempts.push({
-      method: "llm",
+      method: 'llm',
       predictedType: ai.documentType,
       confidence: ai.confidence,
       latencyMs: aiLatency,
       cost: 0,
       succeeded: ai.confidence > 0,
-      fallbackReason:
-        ai.confidence <= 0 ? "cloud returned no confidence" : undefined,
+      inputTokens: ai.tokenUsage?.inputTokens,
+      outputTokens: ai.tokenUsage?.outputTokens,
+      fallbackReason: ai.confidence <= 0 ? 'cloud returned no confidence' : undefined,
     });
     await enrichWithConversion(ai.data as ExtractedData);
     return {
       data: ai.data,
       confidence: ai.confidence,
       method: ai.method,
-      documentType: ai.documentType as ExtractionResult["documentType"],
+      documentType: ai.documentType as ExtractionResult['documentType'],
       documentTypeConfidence: ai.documentTypeConfidence,
       documentCategory: getCategory(ai.documentType as string),
+      tokenUsage: ai.tokenUsage,
       attempts,
       typeVotes,
     };
   } catch (e) {
     attempts.push({
-      method: "llm",
+      method: 'llm',
       predictedType: localType,
       confidence: 0,
       latencyMs: Date.now() - t0,
@@ -656,7 +677,7 @@ async function runCloudStage(args: {
       succeeded: false,
       fallbackReason: `cloud error: ${(e as Error).message.slice(0, 120)}`,
     });
-    logger.warn("AI extraction failed, falling back to local", {
+    logger.warn('AI extraction failed, falling back to local', {
       error: (e as Error).message,
     });
     if (localData && Object.keys(localData).length > 0) {
@@ -664,8 +685,8 @@ async function runCloudStage(args: {
       return {
         data: localData,
         confidence: localConf,
-        method: "local-llm",
-        documentType: localType as ExtractionResult["documentType"],
+        method: 'local-llm',
+        documentType: localType as ExtractionResult['documentType'],
         documentTypeConfidence: localTypeConf,
         documentCategory: getCategory(localType),
         attempts,
@@ -678,9 +699,16 @@ async function runCloudStage(args: {
 
 /**
  * Extracts structured data from file path or buffer.
+ *
+ * Cascade order (see ExtractionCascadeResult docs):
+ *   heuristic-detect → rule-based → local-llm → cloud (only when needed)
+ * Rules win on any conflict with ML outputs; cloud arbitration is forced
+ * on rules/model disagreement. Cloud quota is spent only on successful
+ * calls. See PRD deviations #10 and #16.
+ *
  * @param filePathOrBuffer File path or buffer
  * @param opts Optional cascade ordering (default rules-first) and cloud flag
- * @returns Extraction result with per-stage attempts and type votes
+ * @returns Extraction result with the full cascade ledger
  */
 export async function extract(
   filePathOrBuffer: string | Buffer,
@@ -689,48 +717,44 @@ export async function extract(
     allowCloud?: boolean;
     cloudOnly?: boolean;
     hintLang?: string;
-  },
-): Promise<
-  ExtractionResult & { attempts: AttemptRecord[]; typeVotes: string[] }
-> {
+  }
+): Promise<ExtractionCascadeResult> {
   const start = Date.now();
-  let text = "";
+  let text = '';
   let buffer: Buffer | null = null;
   let ocrConfidence = 0;
   let ocrPages = 0;
   try {
     buffer =
-      typeof filePathOrBuffer === "string"
-        ? await fs.readFile(filePathOrBuffer)
-        : filePathOrBuffer;
-    const isPdf = buffer.subarray(0, 4).toString() === "%PDF";
+      typeof filePathOrBuffer === 'string' ? await fs.readFile(filePathOrBuffer) : filePathOrBuffer;
+    const isPdf = buffer.subarray(0, 4).toString() === '%PDF';
     if (isPdf) {
       text = await parsePdf(buffer);
       if (text.trim().length < 20) {
-        logger.info("Scanned PDF detected, invoking lib OCR", {
+        logger.info('Scanned PDF detected, invoking lib OCR', {
           textLen: text.trim().length,
         });
         try {
-          const r = await ocrBuffer(buffer, "application/pdf", opts?.hintLang);
+          const r = await ocrBuffer(buffer, 'application/pdf', opts?.hintLang);
           if (r.text.trim().length > text.trim().length) {
             text = r.text;
             ocrConfidence = r.confidence;
             ocrPages = r.pages;
-            logger.info("Lib OCR succeeded for PDF", {
+            logger.info('Lib OCR succeeded for PDF', {
               confidence: ocrConfidence,
               pages: ocrPages,
-              textSnippet: text.slice(0, 600),
+              textLength: text.length,
             });
           }
         } catch (e) {
-          logger.warn("Lib OCR failed for PDF, will fallback to AI", {
+          logger.warn('Lib OCR failed for PDF, will fallback to AI', {
             error: (e as Error).message,
           });
         }
       }
     } else {
       const mime = getImageMime(buffer);
-      logger.info("Image detected, invoking lib OCR", {
+      logger.info('Image detected, invoking lib OCR', {
         mime,
         size: buffer.length,
       });
@@ -739,40 +763,39 @@ export async function extract(
         text = r.text;
         ocrConfidence = r.confidence;
         ocrPages = r.pages;
-        logger.info("Lib OCR succeeded for image", {
+        logger.info('Lib OCR succeeded for image', {
           mime,
           confidence: ocrConfidence,
-          textSnippet: text.slice(0, 600),
+          textLength: text.length,
         });
       } catch (e) {
-        logger.warn("Lib OCR failed for image", {
+        logger.warn('Lib OCR failed for image', {
           error: (e as Error).message,
           mime,
         });
-        text = buffer.toString("utf8");
-        if (text.trim().length < 5) text = "";
+        text = buffer.toString('utf8');
+        if (text.trim().length < 5) text = '';
       }
     }
   } catch (e) {
-    logger.warn("PDF parse failed", {
+    logger.warn('PDF parse failed', {
       error: (e as Error).message,
       stack: (e as Error).stack,
     });
   }
   const hasText = text.trim().length > 5;
-  const isImage = buffer ? buffer.subarray(0, 4).toString() !== "%PDF" : false;
-  const isScannedPdf =
-    !hasText && buffer ? buffer.subarray(0, 4).toString() === "%PDF" : false;
+  const isImage = buffer ? buffer.subarray(0, 4).toString() !== '%PDF' : false;
+  const isScannedPdf = !hasText && buffer ? buffer.subarray(0, 4).toString() === '%PDF' : false;
   const lightType = detectDocTypeLight(text);
-  logger.debug("Light type detection", {
+  logger.debug('Light type detection', {
     docType: lightType.type,
     docTypeConfidence: lightType.confidence,
     ocrConfidence,
-    textSnippet: text.slice(0, 800),
+    textLength: text.length,
   });
   const attempts: AttemptRecord[] = [
     {
-      method: "heuristic-detect",
+      method: 'heuristic-detect',
       predictedType: lightType.type,
       confidence: lightType.confidence,
       latencyMs: 0,
@@ -785,55 +808,43 @@ export async function extract(
     },
   ];
   const typeVotes: string[] = [lightType.type];
-  const rulesFirst = (opts?.order ?? "rules-first") === "rules-first";
+  const extractedText = text.slice(0, 100_000);
+  const rulesFirst = (opts?.order ?? 'rules-first') === 'rules-first';
   const allowCloud = opts?.allowCloud !== false;
   const cloudOnly = opts?.cloudOnly === true;
-  const rulesOut = cloudOnly
-    ? null
-    : runRulesStage(text, hasText, rulesFirst, lightType, attempts);
+  const rulesOut = cloudOnly ? null : runRulesStage(text, hasText, rulesFirst, lightType, attempts);
   if (rulesOut?.passed && rulesOut.data) {
     await enrichWithConversion(rulesOut.data as ExtractedData);
     return {
       data: rulesOut.data,
       confidence: rulesOut.conf,
-      method: "rule-based",
-      documentType: lightType.type as ExtractionResult["documentType"],
+      method: 'rule-based',
+      documentType: lightType.type as ExtractionResult['documentType'],
       documentTypeConfidence: lightType.confidence,
       documentCategory: getCategory(lightType.type),
       attempts,
       typeVotes,
+      extractedText,
+      conflicts: [],
     };
   }
-  const seed = rulesOut?.data
-    ? { data: rulesOut.data, conf: rulesOut.conf }
-    : null;
+  const seed = rulesOut?.data ? { data: rulesOut.data, conf: rulesOut.conf } : null;
   const local = cloudOnly
     ? null
-    : await runLocalStage(
-        text,
-        hasText,
-        rulesFirst,
-        lightType,
-        seed,
-        attempts,
-        typeVotes,
-      );
-  if (
-    local &&
-    local.passed &&
-    local.data &&
-    Object.keys(local.data).length > 0
-  ) {
+    : await runLocalStage(text, hasText, rulesFirst, lightType, seed, attempts, typeVotes);
+  if (local && local.passed && local.data && Object.keys(local.data).length > 0) {
     await enrichWithConversion(local.data as ExtractedData);
     return {
       data: local.data,
       confidence: local.conf,
-      method: "local-llm",
-      documentType: local.type as ExtractionResult["documentType"],
+      method: 'local-llm',
+      documentType: local.type as ExtractionResult['documentType'],
       documentTypeConfidence: local.typeConf,
       documentCategory: getCategory(local.type),
       attempts,
       typeVotes,
+      extractedText,
+      conflicts: local.conflicts,
     };
   }
   const clouded = await runCloudStage({
@@ -849,35 +860,69 @@ export async function extract(
     attempts,
     typeVotes,
   });
-  if (clouded) return clouded;
+  if (clouded) return { ...clouded, extractedText, conflicts: local?.conflicts ?? [] };
   if (local && local.data && Object.keys(local.data).length > 0) {
     await enrichWithConversion(local.data as ExtractedData);
     return {
       data: local.data,
       confidence: local.conf,
-      method: "local-llm",
-      documentType: local.type as ExtractionResult["documentType"],
+      method: 'local-llm',
+      documentType: local.type as ExtractionResult['documentType'],
       documentTypeConfidence: local.typeConf,
       documentCategory: getCategory(local.type),
       attempts,
       typeVotes,
+      extractedText,
+      conflicts: local.conflicts,
     };
   }
   const latency = Date.now() - start;
-  logger.info("Extraction latency (no local/Gemini)", {
+  logger.info('Extraction completed without cloud provider', {
     latency,
-    method: "local-llm",
+    method: 'local-llm',
     ocrConfidence,
     hasText: text.trim().length,
   });
   return {
     data: {},
     confidence: 0,
-    method: "local-llm",
-    documentType: lightType.type as ExtractionResult["documentType"],
+    method: 'local-llm',
+    documentType: lightType.type as ExtractionResult['documentType'],
     documentTypeConfidence: lightType.confidence,
     documentCategory: getCategory(lightType.type),
     attempts,
     typeVotes,
+    extractedText,
+    conflicts: [],
+  };
+}
+
+/**
+ * Runs cloud extraction over previously extracted text without reopening or
+ * OCRing the original upload.
+ */
+export async function extractFromText(text: string): Promise<ExtractionCascadeResult> {
+  const started = Date.now();
+  const detected = detectDocTypeLight(text);
+  const result = await tryAI(text, undefined, undefined, getPromptForType(detected.type));
+  const attempts: AttemptRecord[] = [
+    {
+      method: 'llm',
+      predictedType: result.documentType,
+      confidence: result.confidence,
+      latencyMs: Date.now() - started,
+      cost: 0,
+      succeeded: result.confidence > 0,
+      inputTokens: result.tokenUsage?.inputTokens,
+      outputTokens: result.tokenUsage?.outputTokens,
+    },
+  ];
+  await enrichWithConversion(result.data as ExtractedData);
+  return {
+    ...result,
+    attempts,
+    typeVotes: [detected.type, result.documentType],
+    extractedText: text.slice(0, 100_000),
+    conflicts: [],
   };
 }

@@ -3,21 +3,14 @@
  * Wraps API calls in React context for global auth access.
  */
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-  useMemo,
-} from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   me,
   login as apiLogin,
   logout as apiLogout,
   register as apiRegister,
   getAvatar,
-} from "../api/client";
+} from '../api/client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,12 +33,7 @@ const Ctx = createContext<{
   loading: boolean;
   avatar: string | null;
   login: (e: string, p: string) => Promise<void>;
-  register: (
-    f: string,
-    l: string,
-    e: string,
-    p: string,
-  ) => Promise<AuthState>;
+  register: (f: string, l: string, e: string, p: string) => Promise<AuthState>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   setAvatarState: (s: string | null) => void;
@@ -77,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     me()
-      .then((u) => {
+      .then(u => {
         setUser(u);
         fetchAvatarQuiet();
       })
@@ -91,22 +79,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(u);
       await fetchAvatarQuiet();
     },
-    [fetchAvatarQuiet],
+    [fetchAvatarQuiet]
   );
 
   const register = useCallback(
-    async (
-      first_name: string,
-      last_name: string,
-      email: string,
-      password: string,
-    ) => {
+    async (first_name: string, last_name: string, email: string, password: string) => {
       const u = await apiRegister(first_name, last_name, email, password);
       setUser(u);
       setAvatar(null);
       return u;
     },
-    [],
+    []
   );
 
   const logout = useCallback(async () => {
@@ -133,7 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refresh,
       setAvatarState,
     }),
-    [user, loading, avatar, login, register, logout, refresh, setAvatarState],
+    [user, loading, avatar, login, register, logout, refresh, setAvatarState]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -151,6 +134,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
  */
 export function useAuth() {
   const v = useContext(Ctx);
-  if (!v) throw new Error("AuthContext missing");
+  if (!v) throw new Error('AuthContext missing');
   return v;
 }

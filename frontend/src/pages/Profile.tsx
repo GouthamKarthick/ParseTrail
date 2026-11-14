@@ -2,14 +2,14 @@
  * @fileoverview Profile — center avatar with hover edit, names editable only when empty (legacy).
  */
 
-import { useEffect, useRef, useState } from "react";
-import { putAvatar, deleteAvatar, updateProfile } from "../api/client";
-import { useAuth } from "../context/AuthContext";
-import { useToastContext } from "../context/ToastContext";
-import { Avatar } from "../components/Avatar";
-import { processAvatarFile } from "../utils/avatar";
-import { normalizePhone } from "../utils/format";
-import authStyles from "./Auth.module.scss";
+import { useRef, useState } from 'react';
+import { putAvatar, deleteAvatar, updateProfile } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import { useToastContext } from '../context/ToastContext';
+import { Avatar } from '../components/Avatar';
+import { processAvatarFile } from '../utils/avatar';
+import { normalizePhone } from '../utils/format';
+import authStyles from './Auth.module.scss';
 
 /**
  * User profile page.
@@ -18,22 +18,15 @@ export default function Profile() {
   const { user, avatar, setAvatarState, refresh } = useAuth();
   const { show } = useToastContext();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [firstName, setFirstName] = useState(user?.first_name ?? "");
-  const [lastName, setLastName] = useState(user?.last_name ?? "");
-  const [phone, setPhone] = useState(user?.phone ?? "");
+  const [firstName, setFirstName] = useState(user?.first_name ?? '');
+  const [lastName, setLastName] = useState(user?.last_name ?? '');
+  const [phone, setPhone] = useState(user?.phone ?? '');
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Sync when user loads / refreshes
-  useEffect(() => {
-    setFirstName(user?.first_name ?? "");
-    setLastName(user?.last_name ?? "");
-    setPhone(user?.phone ?? "");
-  }, [user?.first_name, user?.last_name, user?.phone]);
-
-  const firstEditable = !(user?.first_name || "").trim();
-  const lastEditable = !(user?.last_name || "").trim();
+  const firstEditable = !(user?.first_name || '').trim();
+  const lastEditable = !(user?.last_name || '').trim();
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null;
@@ -47,7 +40,7 @@ export default function Profile() {
       setErr((err as Error).message);
     }
     // reset input so same file can be re-chosen
-    e.target.value = "";
+    e.target.value = '';
   }
 
   async function onSave() {
@@ -67,25 +60,25 @@ export default function Profile() {
       } = {};
       const norm = normalizePhone(phone);
       if (norm && !/^\+[1-9]\d{7,14}$/.test(norm))
-        throw new Error("Phone must be E.164 format, e.g. +919876543210");
+        throw new Error('Phone must be E.164 format, e.g. +919876543210');
       payload.phone = norm || null;
       if (firstEditable) {
-        if (!firstName.trim()) throw new Error("First name is required");
+        if (!firstName.trim()) throw new Error('First name is required');
         payload.first_name = firstName.trim().slice(0, 50);
       }
       if (lastEditable) {
-        if (!lastName.trim()) throw new Error("Last name is required");
+        if (!lastName.trim()) throw new Error('Last name is required');
         payload.last_name = lastName.trim().slice(0, 50);
       }
       if (Object.keys(payload).length > 0) {
         await updateProfile(payload);
       }
       await refresh();
-      show("success", "Profile saved");
+      show('success', 'Profile saved');
     } catch (e) {
       const msg = (e as Error).message;
       setErr(msg);
-      show("warning", msg);
+      show('warning', msg);
     } finally {
       setBusy(false);
     }
@@ -97,7 +90,7 @@ export default function Profile() {
       await deleteAvatar();
       setAvatarState(null);
       setPreview(null);
-      show("success", "Photo removed");
+      show('success', 'Photo removed');
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -107,15 +100,15 @@ export default function Profile() {
 
   return (
     <div className="page">
-      <div className={authStyles["auth-card"]}>
+      <div className={authStyles['auth-card']}>
         <h2>Profile</h2>
 
-        <div className={authStyles["profile-header"]}>
+        <div className={authStyles['profile-header']}>
           <div
-            className={authStyles["profile-avatar-wrap"]}
+            className={authStyles['profile-avatar-wrap']}
             onClick={() => fileRef.current?.click()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") fileRef.current?.click();
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click();
             }}
             role="button"
             tabIndex={0}
@@ -123,19 +116,17 @@ export default function Profile() {
             title="Change photo"
           >
             <Avatar
-              first_name={
-                firstEditable && firstName ? firstName : user?.first_name
-              }
+              first_name={firstEditable && firstName ? firstName : user?.first_name}
               last_name={lastEditable && lastName ? lastName : user?.last_name}
               email={user?.email}
               src={preview ?? avatar}
               size={104}
             />
-            <span className={authStyles["profile-avatar-overlay"]} aria-hidden>
+            <span className={authStyles['profile-avatar-overlay']} aria-hidden>
               <i className="bi bi-pencil" aria-hidden />
             </span>
           </div>
-          <p className={authStyles["profile-email"]}>{user?.email ?? ""}</p>
+          <p className={authStyles['profile-email']}>{user?.email ?? ''}</p>
         </div>
 
         <input
@@ -144,62 +135,52 @@ export default function Profile() {
           accept="image/jpeg,image/png,image/webp"
           onChange={onFile}
           aria-label="Upload profile photo"
-          className={authStyles["profile-file-input"]}
+          className={authStyles['profile-file-input']}
         />
-        <p className={authStyles["auth-hint"]}>
-          <span className={authStyles["profile-hint-touch"]}>
-            Tap the picture to change it.
-          </span>
-          <span className={authStyles["profile-hint-desktop"]}>
+        <p className={authStyles['auth-hint']}>
+          <span className={authStyles['profile-hint-touch']}>Tap the picture to change it.</span>
+          <span className={authStyles['profile-hint-desktop']}>
             Click the picture to change it.
           </span>
         </p>
 
-        <label className={authStyles["auth-label"]}>First Name</label>
+        <label className={authStyles['auth-label']}>First Name</label>
         <input
-          value={firstEditable ? firstName : (user?.first_name ?? "")}
-          onChange={(e) => setFirstName(e.target.value)}
+          value={firstEditable ? firstName : (user?.first_name ?? '')}
+          onChange={e => setFirstName(e.target.value)}
           disabled={!firstEditable}
           maxLength={50}
           placeholder="John"
-          className={authStyles["auth-input"]}
+          className={authStyles['auth-input']}
         />
-        <label className={authStyles["auth-label"]}>Last Name</label>
+        <label className={authStyles['auth-label']}>Last Name</label>
         <input
-          value={lastEditable ? lastName : (user?.last_name ?? "")}
-          onChange={(e) => setLastName(e.target.value)}
+          value={lastEditable ? lastName : (user?.last_name ?? '')}
+          onChange={e => setLastName(e.target.value)}
           disabled={!lastEditable}
           maxLength={50}
           placeholder="Doe"
-          className={authStyles["auth-input"]}
+          className={authStyles['auth-input']}
         />
-        <label className={authStyles["auth-label"]}>Email</label>
-        <input
-          value={user?.email ?? ""}
-          disabled
-          className={authStyles["auth-input"]}
-        />
+        <label className={authStyles['auth-label']}>Email</label>
+        <input value={user?.email ?? ''} disabled className={authStyles['auth-input']} />
 
-        <label className={authStyles["auth-label"]}>Phone</label>
+        <label className={authStyles['auth-label']}>Phone</label>
         <input
           value={phone}
-          onChange={(e) => setPhone(e.target.value)}
+          onChange={e => setPhone(e.target.value)}
           placeholder="+919876543210"
           inputMode="tel"
-          className={authStyles["auth-input"]}
+          className={authStyles['auth-input']}
         />
 
-        <div className={authStyles["profile-actions"]}>
-          <button
-            className={authStyles["auth-verify-btn"]}
-            onClick={onSave}
-            disabled={busy}
-          >
-            {busy ? "Saving…" : "Save"}
+        <div className={authStyles['profile-actions']}>
+          <button className={authStyles['auth-verify-btn']} onClick={onSave} disabled={busy}>
+            {busy ? 'Saving…' : 'Save'}
           </button>
           {(preview ?? avatar) && (
             <button
-              className={authStyles["profile-remove-btn"]}
+              className={authStyles['profile-remove-btn']}
               onClick={onRemoveAvatar}
               disabled={busy}
               type="button"
@@ -209,7 +190,7 @@ export default function Profile() {
           )}
         </div>
 
-        {err && <p className={authStyles["auth-hint--error"]}>{err}</p>}
+        {err && <p className={authStyles['auth-hint--error']}>{err}</p>}
       </div>
     </div>
   );

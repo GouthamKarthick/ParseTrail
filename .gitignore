@@ -10,10 +10,11 @@ backend/uploads/
 *.traineddata
 backend/fixtures/*
 !backend/fixtures/.gitkeep
-backend/eval/fixtures/*
-!backend/eval/fixtures/.gitkeep
 backend/eval/cache/
 backend/eval/
+backend/secrets/
+secrets/
+ai-keys.json
 .env
 .env.local
 .env.*.local

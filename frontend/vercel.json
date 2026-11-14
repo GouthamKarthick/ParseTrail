@@ -1,7 +1,13 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://claritydocs.onrender.com/api/:path*" },
-    { "source": "/health", "destination": "https://claritydocs.onrender.com/health" },
+    { "source": "/api/:path*", "destination": "https://parsetrail.onrender.com/api/:path*" },
+    { "source": "/health", "destination": "https://parsetrail.onrender.com/health" },
     { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "**": false,
+      "main": true
+    }
+  }
 }
