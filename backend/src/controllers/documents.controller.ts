@@ -82,7 +82,7 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
     res.status(401).json({ error: 'Not authenticated' });
     return;
   }
-  const file = (req as unknown as { file?: Express.Multer.File }).file;
+  const file = req.file;
   if (!file) {
     res.status(400).json({ error: "No file uploaded. Field name must be 'file'." });
     return;
@@ -197,15 +197,7 @@ export async function listDocuments(req: Request, res: Response, next: NextFunct
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    const pagination = (req as unknown as Record<string, unknown>)._pagination as
-      | {
-          limit: number;
-          offset: number;
-          q?: string;
-          document_type?: string[];
-          document_category?: string;
-        }
-      | undefined;
+    const pagination = req._pagination;
     const limit = pagination?.limit ?? Number(req.query.limit ?? 20);
     const offset = pagination?.offset ?? Number(req.query.offset ?? 0);
     const q = pagination?.q?.trim() || undefined;

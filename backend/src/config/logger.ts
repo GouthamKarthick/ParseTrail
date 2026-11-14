@@ -82,11 +82,8 @@ function levelFilter(lvl: string) {
 
 for (const t of logger.transports) {
   if (t instanceof DailyRotateFile) {
-    const lvl = (t as unknown as { level: string }).level;
-    const origFormat = (t as unknown as { format: unknown }).format;
-    (t as unknown as { format: unknown }).format = winston.format.combine(
-      levelFilter(lvl),
-      origFormat as never
-    );
+    const lvl = t.level ?? 'info';
+    const origFormat = t.format;
+    t.format = winston.format.combine(levelFilter(lvl), ...(origFormat ? [origFormat] : []));
   }
 }

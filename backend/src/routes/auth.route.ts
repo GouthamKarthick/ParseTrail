@@ -59,7 +59,7 @@ const resetPasswordSchema = z.object({
  */
 function signToken(id: string, email: string) {
   return jwt.sign({ id, email, emailVerified: true }, config.jwtSecret, {
-    expiresIn: config.jwtExpiry as unknown as jwt.SignOptions['expiresIn'],
+    expiresIn: config.jwtExpiry as jwt.SignOptions['expiresIn'],
     algorithm: 'HS256',
   });
 }
@@ -280,7 +280,7 @@ router.post('/logout', (_req, res) => {
 });
 
 router.get('/me', authenticate, async (req, res) => {
-  const user = (req as unknown as { user: { id: string; email: string } }).user;
+  const user = req.user!;
   const [rows] = await pool.query(
     'SELECT id, email, first_name, last_name, phone, email_verified, created_at FROM users WHERE id=?',
     [user.id]
@@ -305,7 +305,7 @@ router.patch('/profile', authenticate, async (req, res) => {
     });
     return;
   }
-  const user = (req as unknown as { user: { id: string } }).user;
+  const user = req.user!;
   const [existing] = await pool.query('SELECT first_name, last_name FROM users WHERE id=?', [
     user.id,
   ]);
@@ -379,7 +379,7 @@ function parseAvatarDataUrl(s: string): { mime: string; b64: string } | null {
 }
 
 router.get('/avatar', authenticate, async (req, res) => {
-  const user = (req as unknown as { user: { id: string } }).user;
+  const user = req.user!;
   const [rows] = await pool.query(
     'SELECT mime, data, size_bytes FROM user_avatars WHERE user_id=?',
     [user.id]
@@ -423,7 +423,7 @@ router.put('/avatar', authenticate, async (req, res) => {
     res.status(413).json({ error: 'Avatar must be ≤1MB' });
     return;
   }
-  const user = (req as unknown as { user: { id: string } }).user;
+  const user = req.user!;
   await pool.query(
     'INSERT INTO user_avatars (user_id, mime, data, size_bytes) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE mime=VALUES(mime), data=VALUES(data), size_bytes=VALUES(size_bytes)',
     [user.id, parsed.mime, parsed.b64, size_bytes]
@@ -432,7 +432,7 @@ router.put('/avatar', authenticate, async (req, res) => {
 });
 
 router.delete('/avatar', authenticate, async (req, res) => {
-  const user = (req as unknown as { user: { id: string } }).user;
+  const user = req.user!;
   await pool.query('DELETE FROM user_avatars WHERE user_id=?', [user.id]);
   res.json({ ok: true });
 });

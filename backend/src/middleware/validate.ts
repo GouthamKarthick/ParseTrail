@@ -51,8 +51,25 @@ export function validatePagination(req: Request, _res: Response, next: NextFunct
     });
     return;
   }
-  (req as unknown as Record<string, unknown>)._pagination = parsed.data;
+  req._pagination = parsed.data;
   next();
 }
 
 export const uuidSchema = z.string().uuid();
+
+/**
+ * Validates the :id URL parameter is a UUID and stores the parsed value on req.parsedId.
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
+export function validateIdParam(req: Request, res: Response, next: NextFunction): void {
+  const parsed = uuidSchema.safeParse(req.params.id);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid document id' });
+    return;
+  }
+  req.parsedId = parsed.data;
+  next();
+}
