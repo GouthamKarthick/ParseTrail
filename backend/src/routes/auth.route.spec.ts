@@ -13,6 +13,14 @@ vi.mock('../services/email.service.js', () => ({
   sendResetEmail: vi.fn(),
 }));
 
+vi.mock('../config.js', async importOriginal => {
+  const m = await importOriginal<typeof import('../config.js')>();
+  return {
+    ...m,
+    config: { ...m.config, smtp: { ...m.config.smtp, host: 'smtp.test.local' } },
+  };
+});
+
 import authRouter from './auth.route.js';
 
 describe('email verification', () => {
