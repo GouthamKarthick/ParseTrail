@@ -3,7 +3,7 @@
  */
 
 import { Router, type Response } from 'express';
-import { createHash, randomInt, randomUUID } from 'crypto';
+import { createHash, randomInt, randomUUID, timingSafeEqual } from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
@@ -106,6 +106,7 @@ router.post('/register', async (req, res) => {
   const hash = await bcrypt.hash(password, 10);
   const id = randomUUID();
   const verificationToken = randomUUID();
+  const verificationTokenHash = hashResetToken(verificationToken);
   const verificationCode = randomInt(0, 1_000_000).toString().padStart(6, '0');
   const verificationExpires = new Date(Date.now() + 15 * 60 * 1000);
   let verificationEmailSent = true;
@@ -118,7 +119,7 @@ router.post('/register', async (req, res) => {
         first_name.trim(),
         last_name.trim(),
         hash,
-        verificationToken,
+        verificationTokenHash,
         verificationCode,
         verificationExpires,
       ]
@@ -479,11 +480,12 @@ router.post('/resend-verification', async (req, res) => {
   // Always ok to avoid enumeration; only send if unverified
   if (user && !user.email_verified) {
     const verificationToken = randomUUID();
+    const verificationTokenHash = hashResetToken(verificationToken);
     const verificationCode = randomInt(0, 1_000_000).toString().padStart(6, '0');
     const verificationExpires = new Date(Date.now() + 15 * 60 * 1000);
     await pool.query(
       'UPDATE users SET verification_token=?, verification_code=?, verification_expires=?, verification_attempts=0 WHERE id=?',
-      [verificationToken, verificationCode, verificationExpires, user.id]
+      [verificationTokenHash, verificationCode, verificationExpires, user.id]
     );
     try {
       await sendVerificationEmail(email, verificationToken, verificationCode);
@@ -505,18 +507,22 @@ router.post('/resend-verification', async (req, res) => {
 });
 
 router.post('/verify-email', async (req, res) => {
-  const token = (req.body?.token as string) || (req.query.token as string);
-  const code = (req.body?.code as string) || (req.query.code as string);
-  const rawEmail = (req.body?.email as string) || (req.query.email as string);
-  const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+  // Body-only: never read verification token/code/email from the query string,
+  // so they cannot leak through server access logs, browser history, or proxies.
+  const token = typeof req.body?.token === 'string' ? req.body.token : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  const rawEmail = typeof req.body?.email === 'string' ? req.body.email : '';
+  const email = rawEmail.trim().toLowerCase();
   if (!email || !z.string().email().safeParse(email).success) {
     res.status(400).json({ error: 'Valid email required' });
     return;
   }
   if (token) {
+    // Stored token is hashed (sha256); compare the hash of the presented token.
+    const tokenHash = hashResetToken(token);
     const [rows] = await pool.query(
       'SELECT id, email FROM users WHERE email=? AND verification_token=? AND verification_expires > NOW()',
-      [email, token]
+      [email, tokenHash]
     );
     const user = (rows as Array<{ id: string; email: string }>)[0];
     if (!user) {
@@ -556,7 +562,14 @@ router.post('/verify-email', async (req, res) => {
     res.status(400).json({ error: 'Invalid or expired code' });
     return;
   }
-  if (user.verification_code !== cleanCode) {
+  // Timing-safe comparison so an incorrect code does not leak via response time.
+  const expected = Buffer.from(user.verification_code ?? '');
+  const given = Buffer.from(cleanCode);
+  let codeMatches = false;
+  if (expected.length === given.length) {
+    codeMatches = timingSafeEqual(expected, given);
+  }
+  if (!codeMatches) {
     await pool.query(
       'UPDATE users SET verification_attempts=verification_attempts+1, verification_code=IF(verification_attempts+1 >= 5, NULL, verification_code), verification_token=IF(verification_attempts+1 >= 5, NULL, verification_token), verification_expires=IF(verification_attempts+1 >= 5, NULL, verification_expires) WHERE id=? AND verification_attempts < 5',
       [user.id]

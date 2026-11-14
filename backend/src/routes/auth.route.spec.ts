@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'crypto';
 import express from 'express';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
@@ -206,5 +207,130 @@ describe('auth route — login timing', () => {
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: 'Invalid credentials' });
     expect(compareSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('verify-email — body-only + hashed token', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('ignores query-string parameters (reads body only)', async () => {
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app)
+      .post('/verify-email?token=any-token&email=user@example.com&code=123456')
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Valid email required');
+  });
+
+  it('verifies a hashed token sent in the body', async () => {
+    const presented = 'body-token-123';
+    const presentedHash = createHash('sha256').update(presented).digest('hex');
+    let receivedHash: string | undefined;
+    mockQuery.mockImplementation(async (sql: unknown, params: unknown[]) => {
+      if (
+        String(sql).startsWith('SELECT id, email FROM users WHERE email=? AND verification_token=?')
+      ) {
+        receivedHash = params[1] as string;
+        return [[{ id: 'u1', email: 'user@example.com' }], []];
+      }
+      if (String(sql).startsWith('UPDATE users SET email_verified=TRUE')) {
+        return [{ affectedRows: 1 }, []];
+      }
+      return [[], []];
+    });
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app)
+      .post('/verify-email')
+      .send({ token: presented, email: 'user@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(receivedHash).toBe(presentedHash);
+  });
+
+  it('rejects a wrong token (hash mismatch)', async () => {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      if (
+        String(sql).startsWith('SELECT id, email FROM users WHERE email=? AND verification_token=?')
+      ) {
+        return [[], []];
+      }
+      return [[], []];
+    });
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app)
+      .post('/verify-email')
+      .send({ token: 'wrong-token', email: 'user@example.com' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid or expired token');
+  });
+
+  it('verifies a 6-digit code via timing-safe comparison', async () => {
+    mockQuery.mockImplementation(async (sql: unknown, _params: unknown[]) => {
+      if (String(sql).startsWith('SELECT id, email, verification_code')) {
+        return [
+          [
+            {
+              id: 'u1',
+              email: 'user@example.com',
+              verification_code: '123456',
+              verification_attempts: 0,
+            },
+          ],
+          [],
+        ];
+      }
+      if (String(sql).startsWith('UPDATE users SET email_verified=TRUE')) {
+        return [{ affectedRows: 1 }, []];
+      }
+      return [[], []];
+    });
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app)
+      .post('/verify-email')
+      .send({ code: '123456', email: 'user@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+  });
+
+  it('rejects a wrong 6-digit code', async () => {
+    mockQuery.mockImplementation(async (sql: unknown) => {
+      if (String(sql).startsWith('SELECT id, email, verification_code')) {
+        return [
+          [
+            {
+              id: 'u1',
+              email: 'user@example.com',
+              verification_code: '123456',
+              verification_attempts: 0,
+            },
+          ],
+          [],
+        ];
+      }
+      if (String(sql).includes('SET verification_attempts=verification_attempts+1')) {
+        return [{ affectedRows: 1 }, []];
+      }
+      return [[], []];
+    });
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app)
+      .post('/verify-email')
+      .send({ code: '000000', email: 'user@example.com' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid or expired code');
   });
 });
