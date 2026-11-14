@@ -1,7 +1,7 @@
 # ParseTrail — Technical Specification
 
-> Derived from `ParseTrail-PRD.md`. Covers API contract (Phase1 vs Phase2), DDL, folder structure, AWS resources, and phased checklist. Stack: `Node 20 + Express + TypeScript (ESM)` + `React + TypeScript + Vite SPA` + `MySQL (mysql2, no ORM)` + `pdf-parse` (Phase1, swappable) per PRD §8. Deploy deferred.
-> **Update 2026-09-14 — Freelancing Finish:** `S3/SQS/Lambda` dropped (code in `backend/src/lambda/` `backend/infra/` deleted per user trade-off), MySQL cloud (`Clever Cloud`/`Railway` free) used for online deploy, `Render` ephemeral `UPLOAD_DIR=/tmp/uploads` accepted. See §10 Reasoning.
+> Derived from `ParseTrail-PRD.md`. Covers API contract (Phase1 vs Phase2), DDL, folder structure, AWS resources, and phased checklist. Stack: `Node 20 + Express + TypeScript (ESM)` + `React + TypeScript + Vite SPA` + `MySQL (mysql2, no ORM)` + `pdfjs-dist` (legacy Node build) per PRD §8. Deploy deferred.
+> **Update 2026-09-14 — Freelancing Finish:** `S3/SQS/Lambda` dropped (code in `backend/src/lambda/` `backend/infra/` deleted per user trade-off), any MySQL-compatible database (TiDB Cloud Starter recommended) used for online deploy, `Render` ephemeral `UPLOAD_DIR=/tmp/uploads` accepted. See §10 Reasoning.
 
 ---
 
@@ -140,7 +140,7 @@ Auth failures: unauthenticated → `401`; unverified login → `403 EMAIL_NOT_VE
 | Aspect | Phase1 (sync, local-only) | Phase2 (async, DB-backed refine) |
 |---|---|---|
 | `POST /upload` latency | Includes local extraction (no cloud call) | Same, plus a `refine_jobs` insert when the local result is incomplete |
-| `path` | Local `./uploads/<uuid>-<name>` | Same (local disk; cloud deploy uses `UPLOAD_DIR=/tmp/uploads`, rows in MySQL cloud are the source of truth) |
+| `path` | Local `./uploads/<uuid>-<name>` | Same (local disk; cloud deploy uses `UPLOAD_DIR=/tmp/uploads`, rows in the MySQL-compatible DB are the source of truth) |
 | `status` lifecycle | `pending → processing → done/failed` in the request handler | Same, plus optional `refine_jobs queued → working → done/retry/dead` afterwards |
 | Queue | None | `refine_jobs` table + in-process worker (`REFINE_POLL_MS`, `REFINE_DAILY_CAP`) |
 | Worker | None | `jobs/refine.ts` `startRefineWorker()`, reuses `extraction.service` cloud path |
@@ -277,7 +277,7 @@ ParseTrail/
 │   └── TEST_PLAN.md
 ├── docker-compose.yml       # mysql:8 for local dev
 ├── backend/
-│   ├── package.json         # type: module, ESM — pdf-parse, tesseract.js, sharp, @huggingface/transformers, mysql2; NO @aws-sdk/*
+│   ├── package.json         # type: module, ESM — pdfjs-dist, tesseract.js, sharp, @huggingface/transformers, mysql2; NO @aws-sdk/*
 │   ├── tsconfig.json        # module NodeNext
 │   ├── .env.example
 │   ├── src/
@@ -344,7 +344,7 @@ export interface ExtractionResult {
 }
 export async function extract(filePathOrBuffer: string | Buffer): Promise<ExtractionResult>;
 ```
-Impl: `pdf-parse` → text (→ `pdftotext` fallback) → deterministic rules; images/scanned PDFs → `tesseract.js`+`sharp` OCR; then one lazy-loaded quantized local LaMini-Flan-T5-77M fill (`LOCAL_LLM_MODEL` override), cloud Gemini arbitration, and FX enrichment. Models are not pre-baked into Docker builds. (The `pdfjs-dist` swap note from early drafts is stale — that package is not installed.)
+Impl: `pdfjs-dist` → text (→ `pdftotext` fallback) → deterministic rules; images/scanned PDFs → `tesseract.js`+`sharp` OCR; then one lazy-loaded quantized local LaMini-Flan-T5-77M fill (`LOCAL_LLM_MODEL` override), cloud Gemini arbitration, and FX enrichment. Models are not pre-baked into Docker builds.
 
 - **services/jobs/refine.ts (replaces the two deleted adapters below):** `enqueueRefineJob` + `startRefineWorker()` poll `refine_jobs`; no S3/SQS involved.
 
@@ -358,12 +358,12 @@ The S3/SQS/Lambda design below from early drafts was **deleted** (2026-09-14, $0
 
 | Resource (dropped) | Was planned as | Replaced by |
 |---|---|---|
-| **S3 Bucket** | `parsetrail-uploads-*`, 5 GB free | Local `UPLOAD_DIR` (`/tmp/uploads` on Render ephemeral); rows in MySQL cloud are the source of truth |
+| **S3 Bucket** | `parsetrail-uploads-*`, 5 GB free | Local `UPLOAD_DIR` (`/tmp/uploads` on Render ephemeral); rows in the MySQL-compatible DB are the source of truth |
 | **SQS Queue + DLQ** | `parsetrail-jobs`, 1M req/mo free | `refine_jobs` table (`queued/working/done/retry/dead`), 5 tries → dead, sweep of stale `working` |
 | **Lambda worker** | `nodejs20.x`, SQS trigger | In-process `startRefineWorker()` (`setInterval REFINE_POLL_MS`), same `extraction.service` code |
 | **IAM role** | S3/SQS/logs policies | Nothing — no AWS calls remain |
 
-**Actual deploy:** backend on Render (`node:20-alpine`, `PORT=10000`, `UPLOAD_DIR=/tmp/uploads`), MySQL cloud (Clever Cloud/Railway free, `DB_*` env), frontend on Vercel (`VITE_BACKEND_URL`). Demo scale (<100 docs/mo) fits free tiers.
+**Actual deploy:** backend on Render (`node:20-alpine`, `PORT=10000`, `UPLOAD_DIR=/tmp/uploads`), any MySQL-compatible DB (TiDB Cloud Starter recommended, `DB_*` env), frontend on Vercel (`VITE_BACKEND_URL`). Demo scale (<100 docs/mo) fits free tiers.
 
 ---
 
@@ -390,14 +390,14 @@ The S3/SQS/Lambda design below from early drafts was **deleted** (2026-09-14, $0
 - [x] Frontend **unchanged** — polling contract identical; UI shows refining badge from `refine_status`
 - [x] Verification: upload low-confidence doc → `done` + refining badge → cloud fill lands without new upload; kill worker mid-job → `retry` → `dead` after cap, never silent
 
-**Demo exit:** Same UI, sync and async share the polling contract. Deploy note: file bytes stay on local disk (`UPLOAD_DIR`, ephemeral `/tmp/uploads` on Render); the MySQL row (`data` JSON) is the source of truth and is what persists in MySQL cloud.
+**Demo exit:** Same UI, sync and async share the polling contract. Deploy note: file bytes stay on local disk (`UPLOAD_DIR`, ephemeral `/tmp/uploads` on Render); the MySQL row (`data` JSON) is the source of truth and is what persists in the MySQL-compatible DB.
 
 ### Phase2 → Phase3 delta — MySQL cloud (RDS t3.micro dropped, use managed MySQL)
 
-- [ ] Point `DB_HOST/PORT/USER/PASSWORD/DB_NAME` at MySQL cloud (Clever Cloud/Railway) in `backend/.env`; keep `DB_SSL` semantics from `config.ts`
+- [ ] Point `DB_HOST/PORT/USER/PASSWORD/DB_NAME` at any MySQL-compatible DB (TiDB Cloud Starter recommended) in `backend/.env`; keep `DB_SSL` semantics from `config.ts`
 - [ ] Verify persistence: rows + `data` JSON survive `docker compose down` and container restarts (file bytes on ephemeral disk are re-extractable, not the source of truth)
 
-**Demo exit:** Render + MySQL cloud + Vercel (see §5).
+**Demo exit:** Render + any MySQL-compatible DB (TiDB Cloud Starter recommended) + Vercel (see §5).
 
 ### Phase3 — Tiered + Observability (PRD §7.3 — shipped)
 
@@ -424,9 +424,9 @@ Flagged per PRD §12 instruction — no scope added without flag:
 
 ## 8. Open Questions (Resolved)
 
-- PDF text: `pdf-parse` now, `pdftotext` (poppler) fallback. (`pdfjs-dist` was considered 2026-09-08 but never installed — its raster path in `ocr.service.ts` is inactive.)
+- PDF text: `pdfjs-dist` (legacy Node build) now, `pdftotext` (poppler) fallback. (`pdf-parse` was replaced 2026-09-27.)
 - Module: ESM (confirmed 2026-09-08).
-- Deploy: Render backend + MySQL cloud + Vercel frontend (§5); `docker-compose` local MySQL is source of truth for dev.
+- Deploy: Render backend + any MySQL-compatible DB (TiDB Cloud Starter recommended) + Vercel frontend (§5); `docker-compose` local MySQL is source of truth for dev.
 
 ---
 
@@ -445,7 +445,7 @@ Flagged per PRD §12 instruction — no scope added without flag:
 | Decision | Choice (locked 2026-09-14) | Why / trade-off |
 |----------|----------------------------|-----------------|
 | **AWS/S3/SQS/Lambda** | **Remove entirely.** Delete `backend/src/lambda/handler.ts` `backend/src/worker.ts` `backend/src/services/queue.service.ts` `backend/infra/localstack-init.sh` + `@aws-sdk/*`, `docker-compose` worker/localstack entries, and `S3_BUCKET`/`SQS_QUEUE_URL`/`AWS_REGION`/`EXTRACTION_MODE` config branches; `storage.service.ts` reduced to local `fs.readFile` only | No AWS account available and free tier required payment verification. Keeps `upload → extract → view` fully functional on `mysql2`. For deploy, Render `/tmp/uploads` ephemeral is acceptable because the row `data` JSON in cloud MySQL is the source of truth; file bytes after extraction are not re-used. Dropping S3 removes bucket/queue/DLQ/IAM/Lambda-zip setup that blocked the demo. |
-| **DB for online deploy** | **MySQL cloud `Clever Cloud Free` (primary) or `Railway Free MySQL` (alt)** via `DB_HOST/PORT/USER/PASSWORD/DB_NAME` `config.ts:14` | Both are `MySQL 8` wire-protocol compatible with `mysql2/promise` — zero code change except env. Free tier covers `<100 docs/mo` `data JSON ~2KB` `Clever Cloud ~256MB` / `Railway $5 credit`. `Neon/Supabase/Turso` are `Postgres/libSQL` — would require rewriting `mysql2` queries. `Render` ephemeral disk avoided; `RDS t3.micro` deferred to later `Phase 3` as user moved `RDS → Phase 3` then asked to finish without cloud. |
+| **DB for online deploy** | **any MySQL-compatible database (TiDB Cloud Starter recommended)** via `DB_HOST/PORT/USER/PASSWORD/DB_NAME` `config.ts:14` | `TiDB Serverless Starter` (MySQL 8 wire protocol, free tier) covers `<100 docs/mo` with `data JSON ~2KB`; set `DB_SSL=true`. Other MySQL-compatible hosts work with zero code change — only env differs. `Neon/Supabase/Turso` are `Postgres/libSQL` — would require rewriting `mysql2` queries. `Render` ephemeral disk avoided; `RDS t3.micro` deferred to later `Phase 3`. |
 | **Auth** | **`JWT HttpOnly cookie` + `bcryptjs`** (`jsonwebtoken@9`, `cookie-parser`) — per-user server isolation `documents.user_id FK→users.id`, `WHERE user_id=?` on all document queries | PRD non-goal "no auth" lifted for multi-user demo. JWT HttpOnly is stateless (no `express-session` store, works on Render free without Redis). `bcryptjs` is pure JS and avoids native builds on `node:20-alpine`. Cookies (not `localStorage`) mitigate XSS theft. |
 | **Password hashing** | **`bcryptjs` 10 rounds** | `argon2` stronger but needs native `node-gyp` which fails on `alpine`. `bcryptjs` sufficient for freelancing. |
 | **Email verification + reset** | **`Resend` free `100/day 1 domain` via `nodemailer` SMTP `smtp.resend.com 465`** — verification link `uuid 1d expiry` `users.verification_token/expires_at`, reset `password_reset_tokens` `1h` expiry | Simplest free option (single verified domain; `from noreply@resend.dev` for dev). Gmail SMTP needs an app password. When `SMTP_HOST` is empty, registration auto-marks `email_verified=TRUE` (dev fallback); reset still requires Resend. Production guard is exactly that env check — leaving `SMTP_HOST` empty in production self-verifies all accounts. |
@@ -455,7 +455,7 @@ Flagged per PRD §12 instruction — no scope added without flag:
 | **Download** | **CSV + PDF data exports** via `pdfkit`: `GET /api/documents/summary/export?format=pdf\|csv` — two buttons, `Download Summarized CSV` + `Download Summarized PDF`; the PDF holds summarized tables only, no chart image | `pdfkit` is light vs `puppeteer/html2canvas` on Render free. `Content-Disposition: attachment; filename=parsetrail-summary-YYYY-MM-DD.pdf`. (A client-side PNG graph snapshot exists separately in the UI; it is not a data export.) |
 | **File delete after 30d** | **Yes — `uploads/<uuid>-safe` `fs.unlink` in `cleanup.ts`** (`resolveFilename`, `middleware/upload.ts`) | Prevents `Render /tmp` fill. After an ephemeral-disk restart the bytes are gone: `POST /:id/reprocess` then marks the document `failed` (missing file), and refine retries age to `dead` — both graceful, never silent. |
 
-**Consequence for deploy:** Freelancing build is `Render` `node:20-alpine` `npm run build && node dist/index.js` `PORT=10000` `UPLOAD_DIR=/tmp/uploads` `JWT_SECRET` `RETENTION_DAYS=30` `AI_API_KEY` + `Clever Cloud MySQL` `DB_HOST` → `Vercel` `VITE_BACKEND_URL`. `lambda/infra/S3/SQS` code deleted; `EXTRACTION_MODE` flag removed.
+**Consequence for deploy:** Freelancing build is `Render` `node:20-alpine` `npm run build && node dist/index.js` `PORT=10000` `UPLOAD_DIR=/tmp/uploads` `JWT_SECRET` `RETENTION_DAYS=30` `AI_API_KEY` + `TiDB Cloud Starter MySQL` `DB_HOST` → `Vercel` `VITE_BACKEND_URL`. `lambda/infra/S3/SQS` code deleted; `EXTRACTION_MODE` flag removed.
 
 ---
 

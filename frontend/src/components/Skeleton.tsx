@@ -2,7 +2,7 @@
  * @fileoverview Skeleton — shimmer placeholder bars for loading states.
  */
 
-import styles from "./Skeleton.module.scss";
+import styles from './Skeleton.module.scss';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -15,22 +15,16 @@ import styles from "./Skeleton.module.scss";
  * @returns Skeleton element
  * @example <Skeleton lines={4} />
  */
-export function Skeleton({
-  lines = 3,
-  className,
-}: {
-  lines?: number;
-  className?: string;
-}) {
+export function Skeleton({ lines = 3, className }: { lines?: number; className?: string }) {
   return (
     <div
-      className={[styles.skeleton, className].filter(Boolean).join(" ")}
+      className={[styles.skeleton, className].filter(Boolean).join(' ')}
       role="status"
       aria-busy="true"
       aria-label="Loading"
     >
       {Array.from({ length: lines }).map((_, i) => (
-        <span key={i} className={styles["skeleton-bar"]} aria-hidden />
+        <span key={i} className={styles['skeleton-bar']} aria-hidden />
       ))}
     </div>
   );

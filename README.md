@@ -2,8 +2,7 @@
 
 ParseTrail extracts structured fields from uploaded financial documents using rules, local Flan-T5 inference, and queued cloud refinement.
 
-**Live demo:** [clarity-docs-psi.vercel.app](https://clarity-docs-psi.vercel.app/)
-<!-- TODO: Update the live demo URL after the Vercel project is renamed. -->
+**Live demo:** TODO: insert the deployed Render/Vercel URL (set `VITE_BACKEND_URL` to your Render backend).
 
 ## Screenshots
 
@@ -50,17 +49,42 @@ flowchart TD
 
 Uploads run the local stages synchronously. A MySQL-backed worker performs a cloud pass only when required fields are missing or stages disagree; cloud results fill missing stored fields.
 
+## AI provider privacy
+
+Document text is sent to the configured third-party AI providers (Gemini by default; provider is configurable via `AI_PROVIDERS`). If a provider fails or its result is incomplete, the pipeline may fall through to the next configured provider. OpenRouter free models may log prompts — do not upload documents containing sensitive personal data unless you are comfortable with that.
+
+## AI provider keys file (secrets)
+
+AI provider keys and order can be loaded from a secrets JSON file instead of environment variables. Resolution order:
+
+1. `AI_KEYS_FILE` env var (absolute path to the JSON file)
+2. `/etc/secrets/ai-keys.json` (Render Secret File mount — create a secret file named `ai-keys.json` and mount it at `/etc/secrets/`)
+3. `backend/secrets/ai-keys.json` (local dev, gitignored)
+
+File format:
+
+```json
+{
+  "providers": [
+    { "name": "gemini", "apiKey": "...", "model": "gemini-flash-latest" },
+    { "name": "groq", "apiKey": "...", "model": "llama-3.3-70b-versatile" }
+  ]
+}
+```
+
+Max 5 providers, no duplicate names. If a secrets file is found it takes precedence over `AI_PROVIDERS` env vars. Invalid files throw at startup without logging key values.
+
 ## Tech stack
 
 - **Backend:** Node.js, Express, TypeScript
 - **Frontend:** React, TypeScript, Vite
 - **Database and jobs:** MySQL 8, `mysql2`, in-process polling worker
 - **Schema and files:** backend creates/updates MySQL tables at startup; uploaded files stay under `backend/uploads`
-- **Extraction:** `pdf-parse`, `pdftotext` fallback, Tesseract.js OCR, regex rules, Transformers.js with `Xenova/LaMini-Flan-T5-77M`
+- **Extraction:** `pdfjs-dist` (legacy Node build), `pdftotext` fallback, Tesseract.js OCR, regex rules, Transformers.js with `Xenova/LaMini-Flan-T5-77M`
 - **Cloud refinement:** Google Gemini by default; provider is configurable
 - **Local database:** MySQL database `parsetrail`
 
-Project docs: [PRD](docs/ParseTrail-PRD.md) · [Technical spec](docs/TECHNICAL_SPEC.md) · [Test plan](docs/TEST_PLAN.md)
+Project docs: [PRD](docs/ParseTrail-PRD.md) · [Technical spec](docs/TECHNICAL_SPEC.md) · [Architecture](docs/ARCHITECTURE.md) · [Test plan](docs/TEST_PLAN.md)
 
 ## Quick start
 
@@ -114,6 +138,6 @@ On backend startup, `ensureSchema()` creates or migrates the application tables 
 ## Roadmap
 
 - **Planned — Phase 3:** move the database to AWS RDS.
-- **Planned:** add a dedicated dead-letter queue and dead-job reprocessing flow.
-- **Planned:** calculate provider usage costs instead of recording zero estimates.
-- **Planned:** add S3/SQS/Lambda infrastructure; these services are not used by the current code.
+- **✓ Built:** dead-letter queue (`refine_jobs` `dead` status) and dead-job reprocessing (`POST /documents/:id/refinement/retry`).
+- **✓ Done:** real provider token usage recorded per extraction attempt (no longer zero estimates).
+- **Not used (dropped):** S3/SQS/Lambda — extraction runs on local disk + the MySQL jobs table; no AWS infrastructure is required.

@@ -2,12 +2,13 @@
  * services/ocr.service.ts — OCR via Tesseract and PDF rasterization.
  */
 
-import { execFile } from "child_process";
-import { promisify } from "util";
-import fs from "fs/promises";
-import os from "os";
-import path from "path";
-import { logger } from "../config/logger.js";
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { config } from '../config.js';
+import { logger } from '../config/logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -17,9 +18,18 @@ export interface OcrResult {
   pages: number;
 }
 
-let tesseractWorker: Awaited<
-  ReturnType<(typeof import("tesseract.js"))["createWorker"]>
-> | null = null;
+let tesseractWorker: Awaited<ReturnType<(typeof import('tesseract.js'))['createWorker']>> | null =
+  null;
+let workerQueue = Promise.resolve();
+
+async function serializeWorker<T>(operation: () => Promise<T>): Promise<T> {
+  const result = workerQueue.then(operation);
+  workerQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
 
 /**
  * Gets or creates Tesseract worker.
@@ -30,14 +40,18 @@ async function getWorker(lang: string) {
   if (tesseractWorker) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const curLangs: string = (tesseractWorker as any)._langs ?? "";
+      const curLangs: string = (tesseractWorker as any)._langs ?? '';
       if (curLangs.includes(lang)) return tesseractWorker;
       await tesseractWorker.terminate();
-    } catch {}
+    } catch (error) {
+      logger.warn('Tesseract worker termination failed', {
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
     tesseractWorker = null;
   }
-  const { createWorker } = await import("tesseract.js");
-  const langs = lang === "eng" ? "eng" : `eng+${lang}`;
+  const { createWorker } = await import('tesseract.js');
+  const langs = lang === 'eng' ? 'eng' : `eng+${lang}`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const worker: any = await createWorker(langs, 1, {
     langPath: process.cwd(),
@@ -55,7 +69,7 @@ async function getWorker(lang: string) {
  */
 async function preprocessWithSharp(input: Buffer): Promise<Buffer> {
   try {
-    const sharpMod = await import("sharp");
+    const sharpMod = await import('sharp');
     const sharp = sharpMod.default ?? sharpMod;
     const meta = await sharp(input).metadata();
     let s = sharp(input);
@@ -63,12 +77,12 @@ async function preprocessWithSharp(input: Buffer): Promise<Buffer> {
       s = s.resize({
         width: 1800,
         withoutEnlargement: false,
-        kernel: "lanczos3",
+        kernel: 'lanczos3',
       });
     s = s.grayscale().normalize().sharpen({ sigma: 1.2 }).linear(1.1, -10);
     return await s.png().toBuffer();
   } catch (e) {
-    logger.warn("sharp preprocess failed, using raw", {
+    logger.warn('sharp preprocess failed, using raw', {
       error: (e as Error).message,
     });
     return input;
@@ -81,25 +95,24 @@ async function preprocessWithSharp(input: Buffer): Promise<Buffer> {
  * @param hintLang Language hint
  * @returns OCR result
  */
-async function ocrImageBuffer(
-  imageBuffer: Buffer,
-  hintLang: string,
-): Promise<OcrResult> {
-  const lang = hintLang || "eng";
+async function ocrImageBuffer(imageBuffer: Buffer, hintLang: string): Promise<OcrResult> {
+  const lang = hintLang || 'eng';
   const preprocessed = await preprocessWithSharp(imageBuffer);
-  const worker = await getWorker(lang);
-  const { data } = await worker.recognize(preprocessed, {}, {
-    text: true,
-  } as never);
-  const text = (data.text as string) || "";
-  const confidence = typeof data.confidence === "number" ? data.confidence : 0;
-  logger.debug("tesseract ocrImage", {
-    lang,
-    confidence,
-    pages: 1,
-    textSnippet: text.slice(0, 400),
+  return serializeWorker(async () => {
+    const worker = await getWorker(lang);
+    const { data } = await worker.recognize(preprocessed, {}, {
+      text: true,
+    } as never);
+    const text = (data.text as string) || '';
+    const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
+    logger.debug('tesseract ocrImage', {
+      lang,
+      confidence,
+      pages: 1,
+      textLength: text.length,
+    });
+    return { text, confidence, pages: 1 };
   });
-  return { text, confidence, pages: 1 };
 }
 
 /**
@@ -108,67 +121,39 @@ async function ocrImageBuffer(
  * @returns PNG buffers
  */
 async function rasterizePdfToPngs(pdfBuffer: Buffer): Promise<Buffer[]> {
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "clarity-raster-"));
-  const tmpPdf = path.join(tmpDir, "input.pdf");
-  const tmpPrefix = path.join(tmpDir, "page");
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'parsetrail-raster-'));
+  const tmpPdf = path.join(tmpDir, 'input.pdf');
+  const tmpPrefix = path.join(tmpDir, 'page');
   try {
     await fs.writeFile(tmpPdf, pdfBuffer);
     try {
-      await execFileAsync("pdftoppm", ["-png", "-r", "300", tmpPdf, tmpPrefix]);
+      await execFileAsync(
+        'pdftoppm',
+        ['-f', '1', '-l', String(config.ocrMaxPages), '-png', '-r', '200', tmpPdf, tmpPrefix],
+        { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }
+      );
       const files = await fs.readdir(tmpDir);
-      const pngs = files
-        .filter((f) => f.startsWith("page") && f.endsWith(".png"))
-        .sort();
+      const pngs = files.filter(f => f.startsWith('page') && f.endsWith('.png')).sort();
       const buffers: Buffer[] = [];
-      for (const f of pngs)
-        buffers.push(await fs.readFile(path.join(tmpDir, f)));
+      for (const f of pngs) buffers.push(await fs.readFile(path.join(tmpDir, f)));
       if (buffers.length > 0) {
-        logger.debug("pdftoppm rasterized", { pages: buffers.length });
+        logger.debug('pdftoppm rasterized', { pages: buffers.length });
         return buffers;
       }
     } catch (e) {
-      logger.warn("pdftoppm failed, falling back to pdfjs-dist", {
+      logger.warn('PDF rasterization failed', {
         error: (e as Error).message,
       });
     }
-    try {
-      const pngs = await rasterizeWithPdfJs(pdfBuffer);
-      if (pngs.length) return pngs;
-    } catch (e) {
-      logger.warn("pdfjs rasterize failed", { error: (e as Error).message });
-    }
     return [];
   } finally {
-    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-/**
- * Fallback rasterization via pdfjs-dist.
- * @param pdfBuffer PDF buffer
- * @returns PNG buffers
- */
-async function rasterizeWithPdfJs(pdfBuffer: Buffer): Promise<Buffer[]> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    // @ts-ignore - optional peer deps
-    const pdfjs: any = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    // @ts-ignore - optional
-    const { createCanvas } = await import("canvas");
-    const loadingTask = pdfjs.getDocument({ data: new Uint8Array(pdfBuffer) });
-    const pdf = await loadingTask.promise;
-    const out: Buffer[] = [];
-    for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
-      const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 2.0 });
-      const canvas = createCanvas(viewport.width, viewport.height);
-      const ctx = canvas.getContext("2d");
-      await page.render({ canvasContext: ctx as never, viewport }).promise;
-      out.push(canvas.toBuffer("image/png"));
+    try {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    } catch (error) {
+      logger.warn('Raster temp directory cleanup failed', {
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+      });
     }
-    return out;
-  } catch {
-    return [];
   }
 }
 
@@ -182,48 +167,45 @@ async function rasterizeWithPdfJs(pdfBuffer: Buffer): Promise<Buffer[]> {
 export async function ocrBuffer(
   buffer: Buffer,
   mime: string,
-  hintLang?: string,
+  hintLang?: string
 ): Promise<OcrResult> {
-  const isPdf =
-    mime === "application/pdf" || buffer.subarray(0, 4).toString() === "%PDF";
+  const isPdf = mime === 'application/pdf' || buffer.subarray(0, 4).toString() === '%PDF';
   if (!isPdf) {
-    const actualLang = hintLang ?? "eng";
+    const actualLang = hintLang ?? 'eng';
     return ocrImageBuffer(buffer, actualLang);
   }
   const pngs = await rasterizePdfToPngs(buffer);
   if (pngs.length === 0) {
-    logger.warn(
-      "rasterize returned 0 pages, trying direct tesseract on PDF buffer",
-    );
+    logger.warn('rasterize returned 0 pages, trying direct tesseract on PDF buffer');
     try {
-      return await ocrImageBuffer(buffer, hintLang ?? "eng");
+      return await ocrImageBuffer(buffer, hintLang ?? 'eng');
     } catch (e) {
-      logger.warn("direct pdf tesseract failed", {
+      logger.warn('direct pdf tesseract failed', {
         error: (e as Error).message,
       });
-      return { text: "", confidence: 0, pages: 0 };
+      return { text: '', confidence: 0, pages: 0 };
     }
   }
-  let combined = "";
+  let combined = '';
   let totalConf = 0;
   let pagesDone = 0;
-  const toOcr = pngs.slice(0, 3);
-  const langHint = hintLang ?? "eng";
+  const toOcr = pngs.slice(0, config.ocrMaxPages);
+  const langHint = hintLang ?? 'eng';
   for (const png of toOcr) {
     try {
       const r = await ocrImageBuffer(png, langHint);
-      combined += (combined ? "\n\n" : "") + r.text;
+      combined += (combined ? '\n\n' : '') + r.text;
       totalConf += r.confidence;
       pagesDone++;
     } catch (e) {
-      logger.warn("page ocr failed", { error: (e as Error).message });
+      logger.warn('page ocr failed', { error: (e as Error).message });
     }
   }
   const meanConf = pagesDone ? totalConf / pagesDone : 0;
-  logger.info("pdf ocr combined", {
+  logger.info('pdf ocr combined', {
     pages: pagesDone,
     confidence: meanConf,
-    textSnippet: combined.slice(0, 600),
+    textLength: combined.length,
   });
   return { text: combined, confidence: meanConf, pages: pagesDone };
 }
@@ -233,10 +215,10 @@ export async function ocrBuffer(
  * @returns void
  */
 export async function terminateOcr(): Promise<void> {
-  if (tesseractWorker) {
-    try {
+  await serializeWorker(async () => {
+    if (tesseractWorker) {
       await tesseractWorker.terminate();
-    } catch {}
-    tesseractWorker = null;
-  }
+      tesseractWorker = null;
+    }
+  });
 }

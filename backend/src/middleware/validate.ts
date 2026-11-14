@@ -2,19 +2,18 @@
  * middleware/validate.ts — Request validation schemas and middleware.
  */
 
-import { z } from "zod";
-import type { Request, Response, NextFunction } from "express";
-import { isSuspicious } from "../utils/security.js";
+import { z } from 'zod';
+import type { Request, Response, NextFunction } from 'express';
 
 const documentTypeValues = [
-  "invoice",
-  "receipt",
-  "payment",
-  "bill",
-  "payslip",
-  "settlement_slip",
-  "other",
-  "unknown",
+  'invoice',
+  'receipt',
+  'payment',
+  'bill',
+  'payslip',
+  'settlement_slip',
+  'other',
+  'unknown',
 ] as const;
 
 export const listQuerySchema = z.object({
@@ -22,16 +21,16 @@ export const listQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
   q: z.string().trim().max(100).optional(),
   document_type: z.preprocess(
-    (v) => {
+    v => {
       if (v === undefined || v === null) return undefined;
-      const list = (Array.isArray(v) ? v : String(v).split(","))
-        .map((s) => String(s).trim())
+      const list = (Array.isArray(v) ? v : String(v).split(','))
+        .map(s => String(s).trim())
         .filter(Boolean);
       return list.length ? list : undefined;
     },
-    z.array(z.enum(documentTypeValues)).optional(),
+    z.array(z.enum(documentTypeValues)).optional()
   ),
-  document_category: z.enum(["financial", "unknown"]).optional(),
+  document_category: z.enum(['financial', 'unknown']).optional(),
 });
 
 /**
@@ -41,32 +40,36 @@ export const listQuerySchema = z.object({
  * @param next Next middleware
  * @returns void
  */
-export function validatePagination(
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-) {
-  const rawQ = (req.query.q as string) || "";
-  if (rawQ && isSuspicious(rawQ)) {
-    next({
-      status: 400,
-      message: "Suspicious input detected in search — not saved",
-      code: "SUSPICIOUS_INPUT",
-    });
-    return;
-  }
+export function validatePagination(req: Request, _res: Response, next: NextFunction) {
   const parsed = listQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     const err: unknown = parsed.error;
     next({
       status: 400,
-      message: "Invalid pagination",
+      message: 'Invalid pagination',
       details: (err as Error).message,
     });
     return;
   }
-  (req as unknown as Record<string, unknown>)._pagination = parsed.data;
+  req._pagination = parsed.data;
   next();
 }
 
 export const uuidSchema = z.string().uuid();
+
+/**
+ * Validates the :id URL parameter is a UUID and stores the parsed value on req.parsedId.
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
+export function validateIdParam(req: Request, res: Response, next: NextFunction): void {
+  const parsed = uuidSchema.safeParse(req.params.id);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid document id' });
+    return;
+  }
+  req.parsedId = parsed.data;
+  next();
+}

@@ -3,25 +3,17 @@
  * Renders a portal-like container via ToastContainer.
  */
 
-import {
-  createContext,
-  useContext,
-  useCallback,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-import {
-  ToastContainer,
-  type ToastKind,
-  type ToastItem,
-} from "../components/Toast";
+import { createContext, useContext, useCallback, useMemo, useState, type ReactNode } from 'react';
+import { ToastContainer, type ToastKind, type ToastItem } from '../components/Toast';
 
 // ---------------------------------------------------------------------------
 // Types & Context
 // ---------------------------------------------------------------------------
 
-type ToastContextValue = { show: (kind: ToastKind, message: string) => void };
+type ToastContextValue = {
+  show: (kind: ToastKind, message: string) => void;
+  dismiss: (id: string) => void;
+};
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
@@ -31,14 +23,13 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 
 /**
  * Consume toast context to display notifications.
- * @returns Toast context value with show method
+ * @returns Toast context value with show and dismiss methods
  * @throws When used outside ToastProvider
- * @example const { show } = useToastContext(); show("success", "Saved!");
+ * @example const { show, dismiss } = useToastContext(); show("success", "Saved!");
  */
 export function useToastContext(): ToastContextValue {
   const ctx = useContext(ToastContext);
-  if (!ctx)
-    throw new Error("useToastContext must be used within ToastProvider");
+  if (!ctx) throw new Error('useToastContext must be used within ToastProvider');
   return ctx;
 }
 
@@ -49,10 +40,10 @@ export function useToastContext(): ToastContextValue {
  * @example kindFromStatus(404) // "warning"
  */
 export function kindFromStatus(status: number): ToastKind {
-  if (status >= 500) return "error";
-  if (status >= 400) return "warning";
-  if (status >= 200) return "success";
-  return "error";
+  if (status >= 500) return 'error';
+  if (status >= 400) return 'warning';
+  if (status >= 200) return 'success';
+  return 'error';
 }
 
 // ---------------------------------------------------------------------------
@@ -67,24 +58,31 @@ export function kindFromStatus(status: number): ToastKind {
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [pausedId, setPausedId] = useState<string | null>(null);
 
   const show = useCallback((kind: ToastKind, message: string) => {
     const id = crypto.randomUUID();
-    setToasts((t) => [...t, { id, kind, message }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
+    setToasts(t => [...t, { id, kind, message }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000);
   }, []);
 
-  const dismiss = useCallback(
-    (id: string) => setToasts((t) => t.filter((x) => x.id !== id)),
-    [],
-  );
+  const dismiss = useCallback((id: string) => setToasts(t => t.filter(x => x.id !== id)), []);
 
-  const value = useMemo(() => ({ show }), [show]);
+  const handleMouseEnter = useCallback((id: string) => setPausedId(id), []);
+  const handleMouseLeave = useCallback(() => setPausedId(null), []);
+
+  const value = useMemo(() => ({ show, dismiss }), [show, dismiss]);
 
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+      <ToastContainer
+        toasts={toasts}
+        pausedId={pausedId}
+        onDismiss={dismiss}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      />
     </ToastContext.Provider>
   );
 }

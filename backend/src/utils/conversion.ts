@@ -4,8 +4,8 @@
  * Caches rates for a configurable TTL to avoid hammering the APIs.
  */
 
-import { config } from "../config.js";
-import { logger } from "../config/logger.js";
+import { config } from '../config.js';
+import { logger } from '../config/logger.js';
 
 interface RateCacheEntry {
   rate: number;
@@ -18,24 +18,28 @@ const rateCache = new Map<string, RateCacheEntry>();
 const inflight = new Map<string, Promise<number>>();
 
 async function fetchFrankfurterRate(from: string, to: string): Promise<number> {
-  const base = config.currencyConversion.url.replace(/\/$/, "");
+  const base = config.currencyConversion.url.replace(/\/$/, '');
   const url = `${base}/latest?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(config.currencyConversion.timeoutMs) });
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(config.currencyConversion.timeoutMs),
+  });
   if (!res.ok) throw new Error(`Frankfurter HTTP ${res.status}`);
   const payload = (await res.json()) as { rates?: Record<string, number> };
   const rate = payload.rates?.[to];
-  if (typeof rate !== "number" || !isFinite(rate)) throw new Error("Invalid Frankfurter rate");
+  if (typeof rate !== 'number' || !isFinite(rate)) throw new Error('Invalid Frankfurter rate');
   return rate;
 }
 
 async function fetchErApiRate(from: string, to: string): Promise<number> {
-  const base = config.currencyConversion.fallbackUrl.replace(/\/$/, "");
+  const base = config.currencyConversion.fallbackUrl.replace(/\/$/, '');
   const url = `${base}/${encodeURIComponent(from)}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(config.currencyConversion.timeoutMs) });
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(config.currencyConversion.timeoutMs),
+  });
   if (!res.ok) throw new Error(`ER-API HTTP ${res.status}`);
   const payload = (await res.json()) as { rates?: Record<string, number> };
   const rate = payload.rates?.[to];
-  if (typeof rate !== "number" || !isFinite(rate)) throw new Error("Invalid ER-API rate");
+  if (typeof rate !== 'number' || !isFinite(rate)) throw new Error('Invalid ER-API rate');
   return rate;
 }
 
@@ -54,10 +58,10 @@ export interface ConversionOutcome {
 export async function convertWithMeta(
   amount: number,
   from: string,
-  to: string,
+  to: string
 ): Promise<ConversionOutcome | null> {
-  if (typeof amount !== "number" || !isFinite(amount)) return null;
-  if (typeof from !== "string" || typeof to !== "string") return null;
+  if (typeof amount !== 'number' || !isFinite(amount)) return null;
+  if (typeof from !== 'string' || typeof to !== 'string') return null;
   if (amount === 0) return { converted: 0, rate: 1 };
   const fromNorm = from.trim().toUpperCase();
   const toNorm = to.trim().toUpperCase();
@@ -82,7 +86,7 @@ export async function convertWithMeta(
     try {
       return await fetchFrankfurterRate(fromNorm, toNorm);
     } catch (e) {
-      logger.warn("Frankfurter failed, trying ER-API fallback", { error: (e as Error).message });
+      logger.warn('Frankfurter failed, trying ER-API fallback', { error: (e as Error).message });
       return fetchErApiRate(fromNorm, toNorm);
     }
   })();
@@ -92,7 +96,7 @@ export async function convertWithMeta(
     rateCache.set(cacheKey, { rate, timestamp: Date.now() });
     return { converted: amount * rate, rate };
   } catch (err) {
-    logger.warn("Currency conversion failed", {
+    logger.warn('Currency conversion failed', {
       from: fromNorm,
       to: toNorm,
       amount,
@@ -122,9 +126,9 @@ export interface ConvertibleData {
  */
 export async function applyConversion(
   data: ConvertibleData,
-  target: string = config.currencyConversion.targetCurrency,
+  target: string = config.currencyConversion.targetCurrency
 ): Promise<void> {
-  if (typeof data.totalAmount !== "number" || typeof data.currency !== "string" || !data.currency) {
+  if (typeof data.totalAmount !== 'number' || typeof data.currency !== 'string' || !data.currency) {
     return;
   }
   const to = target.trim().toUpperCase();
