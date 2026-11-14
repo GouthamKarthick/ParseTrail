@@ -212,4 +212,49 @@ describe('ai.service — extractWithAI / tryAI', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(result.data.vendor).toBe('Example Co');
   });
+
+  it('validateAndNormalize allows only safe keys, skips __proto__/constructor/prototype, caps at 20 keys', async () => {
+    const hostile: Record<string, unknown> = {};
+    hostile['__proto__'] = { polluted: 'yes' };
+    hostile['constructor'] = { polluted: 'yes' };
+    hostile['prototype'] = { polluted: 'yes' };
+    hostile['valid_key'] = 'allowed';
+    hostile['another_key'] = 42;
+    hostile['bad-key!'] = 'should be skipped';
+    hostile['123start'] = 'should be skipped';
+    for (let i = 0; i < 25; i++) {
+      hostile[`key${i}`] = `value${i}`;
+    }
+
+    const { extractWithAI } = await import('./ai.service.js');
+    const part = { text: JSON.stringify(hostile) };
+    const parts = [part];
+    const content = { parts };
+    const candidate = { content };
+    const responseData = { candidates: [candidate] };
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => responseData,
+    } as any);
+
+    const result = await extractWithAI('invoice text');
+
+    // Dangerous keys must NOT appear as own properties
+    expect(Object.keys(result.data)).not.toContain('__proto__');
+    expect(Object.keys(result.data)).not.toContain('constructor');
+    expect(Object.keys(result.data)).not.toContain('prototype');
+    // Skipped keys (bad-key!, 123start) must NOT appear
+    expect(result.data['bad-key!']).toBeUndefined();
+    expect(result.data['123start']).toBeUndefined();
+    // Allowed keys SHOULD appear
+    expect(result.data.valid_key).toBe('allowed');
+    expect(result.data.another_key).toBe(42);
+    // Key cap: only the first 20 valid keys should be present
+    // (valid_key + another_key = 2, so key0 through key17 fit)
+    const validKeys = Object.keys(result.data).filter(k => k.startsWith('key'));
+    expect(validKeys.length).toBe(18);
+    expect(result.data.key0).toBe('value0');
+    expect(result.data.key17).toBe('value17');
+    expect(result.data.key18).toBeUndefined();
+  });
 });

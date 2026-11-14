@@ -80,11 +80,16 @@ function validateAndNormalize(raw: unknown): {
   const cur = normalizeCurrency(r.currency);
   if (cur) data.currency = cur;
   if (Object.keys(data).length === 0) {
+    let keyCount = 0;
     for (const [k, v] of Object.entries(r)) {
+      if (keyCount >= 20) break;
       if (['confidence', 'documentType', 'document_type', 'notes'].includes(k)) continue;
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k)) continue;
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
       if (typeof v === 'string' && v.trim())
         (data as Record<string, unknown>)[k] = v.trim().slice(0, 500);
       else if (typeof v === 'number' && !isNaN(v)) (data as Record<string, unknown>)[k] = v;
+      keyCount++;
     }
   }
   let confidence = 0;

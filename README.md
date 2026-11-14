@@ -49,6 +49,10 @@ flowchart TD
 
 Uploads run the local stages synchronously. A MySQL-backed worker performs a cloud pass only when required fields are missing or stages disagree; cloud results fill missing stored fields.
 
+## AI provider privacy
+
+Document text is sent to the configured third-party AI providers (Gemini by default; provider is configurable via `AI_PROVIDERS`). If a provider fails or its result is incomplete, the pipeline may fall through to the next configured provider. OpenRouter free models may log prompts — do not upload documents containing sensitive personal data unless you are comfortable with that.
+
 ## Tech stack
 
 - **Backend:** Node.js, Express, TypeScript
