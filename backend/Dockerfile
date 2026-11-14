@@ -6,6 +6,7 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
+RUN npm prune --omit=dev
 
 # Stage 2: run the app as a non-root user
 FROM node:20-alpine
@@ -17,10 +18,14 @@ COPY --from=build /app/package.json ./
 
 # Tesseract trained data is gitignored in the repo, so fetch it at build time
 # so OCR works inside the image without bundling large binary blobs.
-RUN curl -fsSL -o eng.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata && \
-    curl -fsSL -o deu.traineddata https://github.com/tesseract-ocr/tessdata/raw/main/deu.traineddata
+# Pinned to tesseract-ocr/tessdata v5.5.0 with sha256 verification.
+RUN curl -fsSL -o eng.traineddata https://github.com/tesseract-ocr/tessdata/raw/v5.5.0/eng.traineddata && \
+    echo "4cd26ef5e03857b50bb104835aad26b17161d723f3978c894ed55fe05d8315bf  eng.traineddata" | sha256sum -c - && \
+    curl -fsSL -o deu.traineddata https://github.com/tesseract-ocr/tessdata/raw/v5.5.0/deu.traineddata && \
+    echo "22122b0ec84c2174d32363b8617800b4a59c9f5700faafe99eb5fe43c809eca0  deu.traineddata" | sha256sum -c -
 
 ENV NODE_ENV=production
+RUN mkdir -p /app/uploads /app/logs && chown -R node:node /app/uploads /app/logs
 USER node
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
