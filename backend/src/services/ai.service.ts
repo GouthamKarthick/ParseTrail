@@ -246,8 +246,8 @@ async function callCompatibleProvider(
   if (!key) throw new Error(`${provider} API key is not configured`);
   const model =
     provider === 'groq'
-      ? process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
-      : process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
+      ? config.ai.groqModel || 'llama-3.3-70b-versatile'
+      : config.ai.openRouterModel || 'meta-llama/llama-3.3-70b-instruct:free';
   const url =
     provider === 'groq'
       ? 'https://api.groq.com/openai/v1/chat/completions'

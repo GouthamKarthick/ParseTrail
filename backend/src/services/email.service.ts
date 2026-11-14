@@ -11,7 +11,7 @@ import { logger } from '../config/logger.js';
  * @returns Frontend base URL
  */
 function appUrl(): string {
-  return process.env.FRONTEND_URL || process.env.APP_URL || `http://localhost:${config.port}`;
+  return config.frontendUrl || `http://localhost:${config.port}`;
 }
 
 /**
@@ -20,8 +20,7 @@ function appUrl(): string {
  */
 function getTransport() {
   if (!config.smtp.host) {
-    if (process.env.NODE_ENV === 'production')
-      throw new Error('SMTP_HOST is required to send email in production');
+    if (config.isProduction) throw new Error('SMTP_HOST is required to send email in production');
     return null;
   }
   return nodemailer.createTransport({
