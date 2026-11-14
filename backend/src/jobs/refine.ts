@@ -11,6 +11,7 @@
 import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import { pool } from '../db/pool.js';
+import type { PoolConnection } from 'mysql2/promise';
 import { config } from '../config.js';
 import { logger } from '../config/logger.js';
 import { extract, extractFromText, recordAttempts } from '../services/extraction.service.js';
@@ -78,14 +79,16 @@ export async function reserveRefineQuota(): Promise<boolean> {
 export async function enqueueRefineJob(
   documentId: string,
   userId: string,
-  reason: string
+  reason: string,
+  conn?: PoolConnection
 ): Promise<boolean> {
-  const [rows] = await pool.query(
+  const query = conn ? conn.query.bind(conn) : pool.query;
+  const [rows] = await query(
     "SELECT id FROM refine_jobs WHERE document_id=? AND status IN ('queued','working') LIMIT 1",
     [documentId]
   );
   if ((rows as Array<unknown>)[0]) return false;
-  await pool.query(
+  await query(
     "INSERT INTO refine_jobs (id, document_id, user_id, status, next_retry_at, error) VALUES (?, ?, ?, 'queued', NOW(), ?)",
     [randomUUID(), documentId, userId, reason]
   );
