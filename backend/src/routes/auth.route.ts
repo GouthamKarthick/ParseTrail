@@ -16,6 +16,10 @@ import { logger } from '../config/logger.js';
 
 const router = Router();
 
+// Dummy bcrypt hash used when the email is not found, so bcrypt.compare always
+// runs and response time does not reveal whether the email exists.
+const DUMMY_HASH = bcrypt.hashSync('never-used-dummy-password', 12);
+
 const passwordSchema = z
   .string()
   .min(8, 'Password must be at least 8 characters')
@@ -190,7 +194,9 @@ router.post('/login', async (req, res) => {
       email_verified: number;
     }>
   )[0];
-  if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+  const hash = user ? user.password_hash : DUMMY_HASH;
+  const match = await bcrypt.compare(password, hash);
+  if (!user || !match) {
     res.status(401).json({ error: 'Invalid credentials' });
     return;
   }
