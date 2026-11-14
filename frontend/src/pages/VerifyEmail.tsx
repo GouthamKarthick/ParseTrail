@@ -23,7 +23,9 @@ export default function VerifyEmail() {
   const { refresh } = useAuth();
   const token = params.get('token') || '';
   const presetEmail = params.get('email') || '';
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>(() =>
+    token ? 'loading' : 'idle'
+  );
   const [msg, setMsg] = useState('');
   const [email, setEmail] = useState(presetEmail);
   const [code, setCode] = useState('');
@@ -33,7 +35,6 @@ export default function VerifyEmail() {
 
   useEffect(() => {
     if (!token) return;
-    setStatus('loading');
     fetch(
       `${import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || ''}/api/auth/verify-email`,
       {
