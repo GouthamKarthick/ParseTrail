@@ -22,6 +22,10 @@ export const upload = multer({
   }),
   limits: { fileSize: config.maxFileSize },
   fileFilter(_req, file, cb) {
+    if (file.size === 0) {
+      cb(new Error('Empty file not allowed'));
+      return;
+    }
     if (!allowedMimes.has(file.mimetype)) {
       cb(new Error(`Invalid file type. Allowed: pdf, png, jpg`));
       return;

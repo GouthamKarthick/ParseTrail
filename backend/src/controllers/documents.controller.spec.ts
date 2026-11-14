@@ -3,7 +3,34 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('fs/promises', () => ({
   default: { readFile: vi.fn(), unlink: vi.fn() },
 }));
-vi.mock('../db/pool.js', () => ({ pool: { query: vi.fn() } }));
+vi.mock('../db/pool.js', () => {
+  const conn = {
+    query: vi.fn(),
+    beginTransaction: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue(undefined),
+    rollback: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn(),
+  };
+  return {
+    pool: {
+      query: vi.fn(),
+      getConnection: vi.fn().mockResolvedValue(conn),
+    },
+    withTransaction: vi.fn(async fn => {
+      await conn.beginTransaction();
+      try {
+        const result = await fn(conn);
+        await conn.commit();
+        return result;
+      } catch (e) {
+        await conn.rollback();
+        throw e;
+      } finally {
+        conn.release();
+      }
+    }),
+  };
+});
 vi.mock('../services/extraction.service.js', () => ({
   extract: vi.fn(),
   recordAttempts: vi.fn(),
@@ -59,10 +86,13 @@ describe('controller — uploadDocument', () => {
 
   it('queues extraction and returns 202 without extracting inline', async () => {
     const mockQuery = vi.mocked(pool.query);
-    // INSERT pending, SELECT created_at, UPDATE processing, enqueue: SELECT refine jobs, INSERT refine job
+    // INSERT pending, SELECT created_at (via pool.query); UPDATE processing +
+    // enqueue SELECT/INSERT (via connection query inside withTransaction)
     mockQuery
       .mockResolvedValueOnce([[]] as any) // INSERT documents
-      .mockResolvedValueOnce([[{ created_at: new Date().toISOString() }]] as any) // SELECT created_at
+      .mockResolvedValueOnce([[{ created_at: new Date().toISOString() }]] as any); // SELECT created_at
+    const conn = await pool.getConnection();
+    vi.mocked(conn.query)
       .mockResolvedValueOnce([[]] as any) // UPDATE processing
       .mockResolvedValueOnce([[]] as any) // enqueue: SELECT existing refine jobs
       .mockResolvedValueOnce([[]] as any); // enqueue: INSERT refine job
@@ -154,6 +184,98 @@ describe('controller — uploadDocument', () => {
         data: { totalAmount: 10 },
       })
     );
+  });
+
+  it('mismatched magic-byte signature returns 400 and unlinks the file', async () => {
+    vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('not-a-pdf-contents') as any);
+    const req: any = {
+      user: { id: 'test-user', email: 'test@example.com' },
+      file: {
+        filename: 'bad.pdf',
+        originalname: 'bad.pdf',
+        path: '/tmp/bad',
+        mimetype: 'application/pdf',
+      },
+    };
+    const res = mockRes();
+    await uploadDocument(req, res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'INVALID_FILE_CONTENT' })
+    );
+    expect(extract).not.toHaveBeenCalled();
+    expect(fs.unlink).toHaveBeenCalledWith('/tmp/bad');
+  });
+
+  it('empty file returns 400 and unlinks', async () => {
+    vi.mocked(fs.readFile).mockResolvedValue(Buffer.alloc(0) as any);
+    const req: any = {
+      user: { id: 'test-user', email: 'test@example.com' },
+      file: {
+        filename: 'empty.pdf',
+        originalname: 'empty.pdf',
+        path: '/tmp/empty',
+        mimetype: 'application/pdf',
+      },
+    };
+    const res = mockRes();
+    await uploadDocument(req, res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(extract).not.toHaveBeenCalled();
+    expect(fs.unlink).toHaveBeenCalledWith('/tmp/empty');
+  });
+
+  it('unlinks the file when the DB insert fails', async () => {
+    vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('%PDF-1.4\nstub') as any);
+    vi.mocked(findDuplicateByContent).mockResolvedValue({ duplicate: false } as any);
+    const mockQuery = vi.mocked(pool.query);
+    mockQuery.mockRejectedValueOnce(new Error('disk full')); // INSERT fails
+    const conn = await pool.getConnection();
+    vi.mocked(conn.query).mockResolvedValue([[]] as any); // not reached, but safe
+    const next = vi.fn();
+    const req: any = {
+      user: { id: 'test-user', email: 'test@example.com' },
+      file: {
+        filename: 'boom.pdf',
+        originalname: 'boom.pdf',
+        path: '/tmp/boom',
+        mimetype: 'application/pdf',
+      },
+    };
+    const res = mockRes();
+    await uploadDocument(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(extract).not.toHaveBeenCalled();
+    expect(fs.unlink).toHaveBeenCalledWith('/tmp/boom');
+  });
+
+  it('rolls back and unlinks when enqueueRefineJob fails', async () => {
+    vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('%PDF-1.4\nstub') as any);
+    vi.mocked(findDuplicateByContent).mockResolvedValue({ duplicate: false } as any);
+    const mockQuery = vi.mocked(pool.query);
+    mockQuery
+      .mockResolvedValueOnce([[]] as any) // INSERT documents
+      .mockResolvedValueOnce([[{ created_at: new Date().toISOString() }]] as any); // SELECT created_at
+    const conn = await pool.getConnection();
+    vi.mocked(conn.query)
+      .mockResolvedValueOnce([[]] as any) // UPDATE processing
+      .mockResolvedValueOnce([[]] as any) // enqueue: SELECT existing refine jobs
+      .mockRejectedValueOnce(new Error('enqueue failed')); // enqueue: INSERT fails → rollback
+    const next = vi.fn();
+    const req: any = {
+      user: { id: 'test-user', email: 'test@example.com' },
+      file: {
+        filename: 'boom2.pdf',
+        originalname: 'boom2.pdf',
+        path: '/tmp/boom2',
+        mimetype: 'application/pdf',
+      },
+    };
+    const res = mockRes();
+    await uploadDocument(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(extract).not.toHaveBeenCalled();
+    expect(fs.unlink).toHaveBeenCalledWith('/tmp/boom2');
   });
 });
 

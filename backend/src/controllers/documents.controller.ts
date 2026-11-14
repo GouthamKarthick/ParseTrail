@@ -5,8 +5,9 @@
 import type { Request, Response, NextFunction } from 'express';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs/promises';
-import { pool } from '../db/pool.js';
+import { pool, withTransaction } from '../db/pool.js';
 import { logger } from '../config/logger.js';
+import { isSuspicious } from '../utils/security.js';
 import { extract, recordAttempts } from '../services/extraction.service.js';
 import { needsRefinement, isValidDate } from '../services/confidence.service.js';
 import { normalizeCurrency } from '../utils/currency.js';
@@ -159,26 +160,33 @@ function respondDuplicate(
  * @returns void
  */
 export async function uploadDocument(req: Request, res: Response, next: NextFunction) {
+  const user = getUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  const file = (req as unknown as { file?: Express.Multer.File }).file;
+  if (!file) {
+    res.status(400).json({ error: "No file uploaded. Field name must be 'file'." });
+    return;
+  }
+  if (isSuspicious(file.originalname)) {
+    // Multer already wrote the file to disk; remove it before rejecting.
+    try {
+      await fs.unlink(file.path);
+    } catch {
+      // ignore - file may already be gone
+    }
+    res.status(400).json({
+      error: 'Suspicious file name detected — not saved',
+      code: 'SUSPICIOUS_INPUT',
+    });
+    return;
+  }
+
+  const filePath = file.path;
+  let uploadSucceeded = false;
   try {
-    const user = getUser(req);
-    if (!user) {
-      res.status(401).json({ error: 'Not authenticated' });
-      return;
-    }
-    const file = (req as unknown as { file?: Express.Multer.File }).file;
-    if (!file) {
-      res.status(400).json({ error: "No file uploaded. Field name must be 'file'." });
-      return;
-    }
-    const { isSuspicious } = await import('../utils/security.js');
-    if (isSuspicious(file.originalname)) {
-      res.status(400).json({
-        error: 'Suspicious file name detected — not saved',
-        code: 'SUSPICIOUS_INPUT',
-      });
-      return;
-    }
-    const filePath = file.path;
     const buffer = await fs.readFile(filePath);
     const header = buffer.subarray(0, 8);
     const isPdf = header.subarray(0, 4).toString('latin1') === '%PDF';
@@ -189,8 +197,8 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
       (expectedType === 'application/pdf' && isPdf) ||
       (expectedType === 'image/png' && isPng) ||
       ((expectedType === 'image/jpeg' || expectedType === 'image/jpg') && isJpeg);
-    if (header.length > 0 && !signatureMatches) {
-      await fs.unlink(filePath);
+    // Always require the magic-byte signature to match (no empty-header bypass).
+    if (!signatureMatches) {
       res.status(400).json({
         error: 'File contents do not match the uploaded file type',
         code: 'INVALID_FILE_CONTENT',
@@ -206,7 +214,6 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
       { contentHash }
     );
     if (exactDuplicate.duplicate && exactDuplicate.duplicateOf) {
-      await fs.unlink(filePath);
       respondDuplicate(res, exactDuplicate);
       return;
     }
@@ -225,7 +232,6 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
           { contentHash }
         );
         if (duplicate.duplicate && duplicate.duplicateOf) {
-          await fs.unlink(filePath);
           respondDuplicate(res, duplicate);
           return;
         }
@@ -240,13 +246,19 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
       name: file.originalname,
       path: filePath,
     });
-    await pool.query("UPDATE documents SET status='processing' WHERE id=?", [id]);
+
+    // Mark processing and enqueue the refine job atomically so a crash cannot
+    // leave a 'processing' row with no background job.
+    await withTransaction(async conn => {
+      await conn.query("UPDATE documents SET status='processing' WHERE id=?", [id]);
+      await enqueueRefineJob(id, user.id, 'initial extraction', conn);
+    });
     logger.info('Extraction queued', { docId: id });
 
     // Extraction runs in the background worker so uploads stay fast even for
     // large scanned PDFs. The frontend polls /api/documents/:id until the
     // status reaches done / failed / dead.
-    await enqueueRefineJob(id, user.id, 'initial extraction');
+    uploadSucceeded = true;
     res.status(202).json({
       id,
       name: file.originalname,
@@ -259,6 +271,21 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
       stack: (err as Error).stack,
     });
     next(err);
+  } finally {
+    // Multer wrote the file to disk; remove it on every failed path so a
+    // rejected or errored upload never leaves an orphan file behind.
+    if (!uploadSucceeded) {
+      try {
+        await fs.unlink(filePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          logger.warn('Failed to unlink uploaded file on error path', {
+            path: filePath,
+            error: (error as Error).message,
+          });
+        }
+      }
+    }
   }
 }
 
