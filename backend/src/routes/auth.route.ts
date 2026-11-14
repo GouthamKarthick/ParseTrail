@@ -26,7 +26,8 @@ const passwordSchema = z
   .max(128)
   .regex(/[A-Z]/, 'Password must contain at least 1 uppercase letter')
   .regex(/\d/, 'Password must contain at least 1 number')
-  .regex(/[^A-Za-z0-9]/, 'Password must contain at least 1 special character');
+  .regex(/[^A-Za-z0-9]/, 'Password must contain at least 1 special character')
+  .refine(pwd => Buffer.byteLength(pwd) <= 72, 'Password must be at most 72 bytes (bcrypt limit)');
 const nameSchema = z.string().trim().min(1, 'Required').max(50);
 const registerSchema = z.object({
   first_name: nameSchema,
@@ -103,7 +104,7 @@ router.post('/register', async (req, res) => {
     });
     return;
   }
-  const hash = await bcrypt.hash(password, 10);
+  const hash = await bcrypt.hash(password, 12);
   const id = randomUUID();
   const verificationToken = randomUUID();
   const verificationTokenHash = hashResetToken(verificationToken);
