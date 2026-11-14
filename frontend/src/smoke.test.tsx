@@ -19,6 +19,19 @@ import { AuthProvider } from './context/AuthContext.tsx';
 import { ToastProvider } from './context/ToastContext.tsx';
 import { login, uploadDocument, getDocument, deleteDocument, listDocuments } from './api/client.ts';
 
+const NodeRequest = globalThis.Request;
+globalThis.Request = class extends NodeRequest {
+  constructor(input: RequestInfo | URL, init?: RequestInit) {
+    if (init?.signal) {
+      const rest = { ...init };
+      delete rest.signal;
+      super(input, rest);
+    } else {
+      super(input, init);
+    }
+  }
+} as typeof Request;
+
 vi.mock('./api/client.ts', () => ({
   getDocument: vi.fn(),
   login: vi.fn(),
