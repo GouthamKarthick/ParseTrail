@@ -36,7 +36,7 @@ vi.mock('../services/extraction.service.js', () => ({
   recordAttempts: vi.fn(),
 }));
 vi.mock('../services/dedup.service.js', () => ({
-  findDuplicateByContent: vi.fn(),
+  findDuplicateByHash: vi.fn(),
   createContentFingerprint: vi.fn(() => 'fingerprint'),
 }));
 vi.mock('../utils/conversion.js', () => ({
@@ -48,7 +48,7 @@ vi.mock('../utils/conversion.js', () => ({
 import { pool } from '../db/pool.js';
 import fs from 'fs/promises';
 import { extract } from '../services/extraction.service.js';
-import { findDuplicateByContent } from '../services/dedup.service.js';
+import { findDuplicateByHash } from '../services/dedup.service.js';
 import {
   uploadDocument,
   listDocuments,
@@ -72,6 +72,7 @@ describe('controller — uploadDocument', () => {
     vi.clearAllMocks();
     vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('%PDF-1.4\nstub') as any);
     vi.mocked(fs.unlink).mockResolvedValue(undefined);
+    vi.mocked(findDuplicateByHash).mockResolvedValue({ duplicate: false } as any);
   });
 
   it('400 when no file', async () => {
@@ -96,9 +97,6 @@ describe('controller — uploadDocument', () => {
       .mockResolvedValueOnce([[]] as any) // UPDATE processing
       .mockResolvedValueOnce([[]] as any) // enqueue: SELECT existing refine jobs
       .mockResolvedValueOnce([[]] as any); // enqueue: INSERT refine job
-    vi.mocked(findDuplicateByContent).mockResolvedValue({
-      duplicate: false,
-    } as any);
 
     const req: any = {
       user: { id: 'test-user', email: 'test@example.com' },
@@ -117,12 +115,11 @@ describe('controller — uploadDocument', () => {
     );
     expect(extract).not.toHaveBeenCalled();
     expect(fs.readFile).toHaveBeenCalledOnce();
-    expect(findDuplicateByContent).toHaveBeenCalledTimes(1);
+    expect(findDuplicateByHash).toHaveBeenCalledTimes(1);
   });
 
   it('exact-hash duplicate short-circuits before insert, returns 409', async () => {
-    const mockQuery = vi.mocked(pool.query);
-    vi.mocked(findDuplicateByContent).mockResolvedValue({
+    vi.mocked(findDuplicateByHash).mockResolvedValue({
       duplicate: true,
       duplicateOf: 'existing-id',
       matchedDocumentType: 'invoice',
@@ -148,12 +145,12 @@ describe('controller — uploadDocument', () => {
       })
     );
     expect(extract).not.toHaveBeenCalled();
-    expect(mockQuery).not.toHaveBeenCalled();
+    expect(pool.query).not.toHaveBeenCalled();
     expect(fs.unlink).toHaveBeenCalledWith('/tmp/dup');
   });
 
   it('short-circuits exact byte duplicates before extraction', async () => {
-    vi.mocked(findDuplicateByContent).mockResolvedValue({
+    vi.mocked(findDuplicateByHash).mockResolvedValue({
       duplicate: true,
       duplicateOf: 'existing-id',
       matchedDocumentType: 'invoice',
@@ -227,7 +224,6 @@ describe('controller — uploadDocument', () => {
 
   it('unlinks the file when the DB insert fails', async () => {
     vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('%PDF-1.4\nstub') as any);
-    vi.mocked(findDuplicateByContent).mockResolvedValue({ duplicate: false } as any);
     const mockQuery = vi.mocked(pool.query);
     mockQuery.mockRejectedValueOnce(new Error('disk full')); // INSERT fails
     const conn = await pool.getConnection();
@@ -251,7 +247,6 @@ describe('controller — uploadDocument', () => {
 
   it('rolls back and unlinks when enqueueRefineJob fails', async () => {
     vi.mocked(fs.readFile).mockResolvedValue(Buffer.from('%PDF-1.4\nstub') as any);
-    vi.mocked(findDuplicateByContent).mockResolvedValue({ duplicate: false } as any);
     const mockQuery = vi.mocked(pool.query);
     mockQuery
       .mockResolvedValueOnce([[]] as any) // INSERT documents
