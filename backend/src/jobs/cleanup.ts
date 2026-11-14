@@ -3,6 +3,7 @@
  */
 
 import fs from 'fs/promises';
+import os from 'os';
 import type { Dirent } from 'node:fs';
 import path from 'path';
 import { pool } from '../db/pool.js';
@@ -10,6 +11,13 @@ import { config } from '../config.js';
 import { logger } from '../config/logger.js';
 
 const PURGE_BATCH_SIZE = 500;
+
+// Only files written by multer carry a UUID-v4 prefix followed by a dash.
+// Anything else (e.g. stray dotfiles, unrelated uploads) is left alone.
+const ORPHAN_NAME_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/;
+// Only consider files older than 1 hour as orphans; give recently written
+// files a grace period in case a concurrent upload is still in progress.
+const ORPHAN_MAX_AGE_MS = 60 * 60 * 1000;
 
 /**
  * Deletes all expired documents and old unverified accounts.
@@ -59,6 +67,17 @@ async function removeOrphanFiles(): Promise<number> {
   const [rows] = await pool.query('SELECT path FROM documents');
   const referenced = new Set((rows as Array<{ path: string }>).map(row => path.resolve(row.path)));
   const uploadDir = path.resolve(config.uploadDir);
+
+  // Refuse to sweep dangerous directories — an accidental UPLOAD_DIR=/,
+  // $HOME, or cwd would wipe unrelated files.
+  const home = os.homedir();
+  if (uploadDir === '/' || uploadDir === home || uploadDir === process.cwd()) {
+    logger.error('Refusing to run orphan cleanup on a dangerous upload dir', {
+      uploadDir,
+    });
+    return 0;
+  }
+
   let entries: Dirent[];
   try {
     entries = await fs.readdir(uploadDir, { withFileTypes: true });
@@ -68,9 +87,20 @@ async function removeOrphanFiles(): Promise<number> {
   }
 
   let removed = 0;
+  const now = Date.now();
   for (const entry of entries) {
     if (!entry.isFile()) continue;
+    // Only multer-written uploads carry a UUID-v4 prefix + dash.
+    if (!ORPHAN_NAME_RE.test(entry.name)) continue;
     const filePath = path.resolve(uploadDir, entry.name);
+    // Only consider files older than 1 hour (grace period for in-flight uploads).
+    let stat: Awaited<ReturnType<typeof fs.stat>>;
+    try {
+      stat = await fs.stat(filePath);
+    } catch {
+      continue; // race: file disappeared
+    }
+    if (now - stat.mtimeMs < ORPHAN_MAX_AGE_MS) continue;
     if (referenced.has(filePath)) continue;
     try {
       await fs.unlink(filePath);
