@@ -15,7 +15,7 @@ import { parseAmount } from '../utils/amount.js';
 import { applyConversion, clearConversion } from '../utils/conversion.js';
 import { parseJsonColumn } from '../utils/json.js';
 import { enqueueRefineJob, retryRefineJobNow } from '../jobs/refine.js';
-import { findDuplicateByContent } from '../services/dedup.service.js';
+import { findDuplicateByContent, findDuplicateByHash } from '../services/dedup.service.js';
 import { uuidSchema } from '../middleware/validate.js';
 import { getUser } from '../middleware/auth.js';
 import { getSummary as getSummaryData } from '../services/summary.service.js';
@@ -138,10 +138,13 @@ type ExtractOutcome = NonNullable<Awaited<ReturnType<typeof extract>>>;
 function respondDuplicate(
   res: Response,
   duplicate: Awaited<ReturnType<typeof findDuplicateByContent>>,
-  result?: ExtractOutcome
+  result?: ExtractOutcome,
+  updated = false
 ): void {
   res.status(409).json({
-    error: 'Duplicate document — updated existing record',
+    error: updated
+      ? 'Duplicate document — updated existing record'
+      : 'Duplicate document — already exists',
     code: 'DUPLICATE_UPDATED',
     duplicateOf: duplicate.duplicateOf,
     document_type: result?.documentType ?? duplicate.matchedDocumentType ?? 'unknown',
@@ -207,12 +210,7 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
     }
     const id = randomUUID();
     const contentHash = createHash('sha256').update(buffer).digest('hex');
-    const exactDuplicate = await findDuplicateByContent(
-      {} as ExtractOutcome['data'],
-      user.id,
-      undefined,
-      { contentHash }
-    );
+    const exactDuplicate = await findDuplicateByHash(user.id, contentHash);
     if (exactDuplicate.duplicate && exactDuplicate.duplicateOf) {
       respondDuplicate(res, exactDuplicate);
       return;
@@ -225,12 +223,7 @@ export async function uploadDocument(req: Request, res: Response, next: NextFunc
       );
     } catch (error) {
       if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
-        const duplicate = await findDuplicateByContent(
-          {} as ExtractOutcome['data'],
-          user.id,
-          undefined,
-          { contentHash }
-        );
+        const duplicate = await findDuplicateByHash(user.id, contentHash);
         if (duplicate.duplicate && duplicate.duplicateOf) {
           respondDuplicate(res, duplicate);
           return;

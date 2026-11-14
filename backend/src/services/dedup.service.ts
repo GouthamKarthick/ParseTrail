@@ -87,15 +87,53 @@ function isDuplicateContent(a: ExtractedData, b: ExtractedData): boolean {
 }
 
 /**
+ * Returns the first row whose parsed data matches newData, skipping rows
+ * whose data column is not valid JSON.
+ * @param newData New extracted data to compare against
+ * @param rows DB rows with id, data, document_type, document_category
+ * @returns Matching row info or undefined
+ */
+function findMatchInRows(
+  newData: ExtractedData,
+  rows: Array<{
+    id: string;
+    data: string | null;
+    document_type: string;
+    document_category: string;
+  }>
+):
+  | {
+      id: string;
+      data: ExtractedData;
+      document_type: string;
+      document_category: string;
+    }
+  | undefined {
+  for (const r2 of rows) {
+    const d = parseJsonColumn<ExtractedData | null>(r2.data as string, null);
+    if (!d) continue;
+    if (isDuplicateContent(newData, d))
+      return {
+        id: r2.id,
+        data: d,
+        document_type: r2.document_type,
+        document_category: r2.document_category,
+      };
+  }
+  return undefined;
+}
+
+/**
  * Finds duplicate document by content for a user/type.
  * @param newData New extracted data
- * @param userId Optional user id
+ * @param userId User id (required; scopes match to one owner so cross-tenant
+ *   matches are never returned)
  * @param docTypeHint Optional type hint
  * @returns Duplicate result
  */
 export async function findDuplicateByContent(
   newData: ExtractedData,
-  userId?: string,
+  userId: string,
   docTypeHint?: string,
   options?: { contentHash?: string; excludeDocumentId?: string }
 ): Promise<{
@@ -105,68 +143,20 @@ export async function findDuplicateByContent(
   matchedDocumentType?: string;
   matchedCategory?: string;
 }> {
+  if (!userId) {
+    throw new Error('userId is required for findDuplicateByContent');
+  }
   const type =
     (docTypeHint || (newData as Record<string, unknown>).documentType || '')
       .toString()
       .toLowerCase() || 'invoice';
-  const ownerClause = userId ? 'user_id=? AND ' : '';
-  const ownerParams = userId ? [userId] : [];
+  const ownerClause = 'user_id=? AND ';
+  const ownerParams = [userId];
   const excludeClause = options?.excludeDocumentId ? 'AND id<>? ' : '';
   const excludeParams = options?.excludeDocumentId ? [options.excludeDocumentId] : [];
-  /**
-   * Returns the first row whose parsed data matches newData, skipping rows
-   * whose data column is not valid JSON.
-   */
-  function findMatchInRows(
-    rows: Array<{
-      id: string;
-      data: string | null;
-      document_type: string;
-      document_category: string;
-    }>
-  ):
-    | {
-        id: string;
-        data: ExtractedData;
-        document_type: string;
-        document_category: string;
-      }
-    | undefined {
-    for (const r2 of rows) {
-      const d = parseJsonColumn<ExtractedData | null>(r2.data as string, null);
-      if (!d) continue;
-      if (isDuplicateContent(newData, d))
-        return {
-          id: r2.id,
-          data: d,
-          document_type: r2.document_type,
-          document_category: r2.document_category,
-        };
-    }
-    return undefined;
-  }
 
   if (options?.contentHash) {
-    const [hashRows] = await pool.query(
-      `SELECT id, data, document_type, document_category FROM documents WHERE ${ownerClause}content_hash=? AND status IN ('pending','processing','done') AND expires_at > NOW() ${excludeClause}ORDER BY created_at DESC, id DESC LIMIT 1`,
-      [...ownerParams, options.contentHash, ...excludeParams]
-    );
-    const match = findMatchInRows(
-      hashRows as Array<{
-        id: string;
-        data: string | null;
-        document_type: string;
-        document_category: string;
-      }>
-    );
-    if (match)
-      return {
-        duplicate: true,
-        duplicateOf: match.id,
-        matchedData: match.data,
-        matchedDocumentType: match.document_type,
-        matchedCategory: match.document_category,
-      };
+    return findDuplicateByHash(userId, options.contentHash, options.excludeDocumentId);
   }
 
   const fingerprint = createContentFingerprint(newData, type);
@@ -176,6 +166,7 @@ export async function findDuplicateByContent(
       [...ownerParams, fingerprint, type, ...excludeParams]
     );
     const match = findMatchInRows(
+      newData,
       fingerprintRows as Array<{
         id: string;
         data: string | null;
@@ -199,10 +190,9 @@ export async function findDuplicateByContent(
   const at = normTotal(r.totalAmount as number | undefined);
   const ac = normCurrency(r.currency as string | undefined);
   if (!av || !ai || at == null || !ac) return { duplicate: false };
-  const where = userId
-    ? "WHERE status='done' AND data IS NOT NULL AND user_id=? AND document_type=? AND expires_at > NOW()"
-    : "WHERE status='done' AND data IS NOT NULL AND document_type=? AND expires_at > NOW()";
-  const params = userId ? [userId, type] : [type];
+  const where =
+    "WHERE status='done' AND data IS NOT NULL AND user_id=? AND document_type=? AND expires_at > NOW()";
+  const params = [userId, type];
   const excludeIdFilter = options?.excludeDocumentId ? ' AND id<>?' : '';
   if (options?.excludeDocumentId) params.push(options.excludeDocumentId);
   const [rows] = await pool.query(
@@ -210,6 +200,7 @@ export async function findDuplicateByContent(
     params
   );
   const match = findMatchInRows(
+    newData,
     rows as Array<{
       id: string;
       data: string | null;
@@ -226,4 +217,52 @@ export async function findDuplicateByContent(
       matchedCategory: match.document_category,
     };
   return { duplicate: false };
+}
+
+/**
+ * Finds an exact-content-hash duplicate for a single owner.
+ * Used by the upload path so a re-upload of the same file bytes is detected
+ * without scanning every row or relying on extracted content fields.
+ * @param userId User id (required)
+ * @param contentHash SHA-256 of the uploaded file bytes
+ * @param excludeDocumentId Optional id to exclude (e.g. the doc being retried)
+ * @returns Duplicate result
+ */
+export async function findDuplicateByHash(
+  userId: string,
+  contentHash: string,
+  excludeDocumentId?: string
+): Promise<{
+  duplicate: boolean;
+  duplicateOf?: string;
+  matchedData?: ExtractedData;
+  matchedDocumentType?: string;
+  matchedCategory?: string;
+}> {
+  if (!userId) {
+    throw new Error('userId is required for findDuplicateByHash');
+  }
+  const excludeClause = excludeDocumentId ? 'AND id<>? ' : '';
+  const excludeParams = excludeDocumentId ? [excludeDocumentId] : [];
+  const [rows] = await pool.query(
+    `SELECT id, data, document_type, document_category FROM documents WHERE user_id=? AND content_hash=? AND status IN ('pending','processing','done') AND expires_at > NOW() ${excludeClause}ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [userId, contentHash, ...excludeParams]
+  );
+  const row = (
+    rows as Array<{
+      id: string;
+      data: string | null;
+      document_type: string;
+      document_category: string;
+    }>
+  )[0];
+  if (!row) return { duplicate: false };
+  const data = parseJsonColumn<ExtractedData | null>(row.data as string, null);
+  return {
+    duplicate: true,
+    duplicateOf: row.id,
+    matchedData: data ?? {},
+    matchedDocumentType: row.document_type,
+    matchedCategory: row.document_category,
+  };
 }
