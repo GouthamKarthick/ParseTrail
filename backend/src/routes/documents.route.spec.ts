@@ -68,4 +68,32 @@ describe('routes — documents', () => {
     const res = await request(app).post('/api/documents/bad-id/refinement/retry').set(authHeader());
     expect(res.status).toBe(400);
   });
+
+  it('POST /api/documents/:id/reprocess returns 429 when rate limited', async () => {
+    const app = createApp();
+    (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+      if (String(sql).includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+        return [[{ id: 'test-user', password_changed_at: null }]];
+      }
+      if (
+        String(sql).includes(
+          'SELECT id, path FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()'
+        )
+      ) {
+        return [[{ id: 'test-doc', path: '/tmp/test.pdf' }]];
+      }
+      return [[]];
+    });
+
+    let status429 = false;
+    for (let i = 0; i < 11; i++) {
+      const res = await request(app).post('/api/documents/test-doc/reprocess').set(authHeader());
+      if (res.status === 429) {
+        status429 = true;
+        expect(res.body.code).toBe('RATE_LIMITED');
+        break;
+      }
+    }
+    expect(status429).toBe(true);
+  });
 });
