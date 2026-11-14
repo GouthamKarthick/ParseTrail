@@ -118,6 +118,16 @@ export function createApp() {
     }
   });
 
+  app.get('/health/ready', async (_req, res) => {
+    try {
+      const { pool } = await import('./db/pool.js');
+      await pool.query('SELECT 1 as ok');
+      res.json({ status: 'ready' });
+    } catch {
+      res.status(503).json({ status: 'not ready' });
+    }
+  });
+
   app.use('/api/auth', authRouter);
   app.use('/api', authenticate, documentsRouter);
   app.use(errorHandler);
