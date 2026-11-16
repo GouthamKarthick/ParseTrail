@@ -308,6 +308,67 @@ describe('ai.service — extractWithAI / tryAI', () => {
     vi.useRealTimers();
   });
 
+  it('404 from provider 1 skips it for 10 minutes, then provider 2 is used', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+
+    mockAiConfig.providers = ['gemini', 'groq'];
+    mockAiConfig.providerKeys = {
+      gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
+      groq: { apiKey: 'groq-key', model: 'llama-3.3-70b-versatile' },
+    };
+
+    // Call 1: gemini 404 -> skipped, groq succeeds
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: false, status: 404, text: async () => 'model not found' } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  vendor: 'Groq Co',
+                  confidence: 0.8,
+                  documentType: 'invoice',
+                }),
+              },
+            },
+          ],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+      } as any);
+
+    const { extractWithAI } = await import('./ai.service.js');
+    let r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co');
+
+    // Call 2 immediately: gemini skipped (404 cooldown), groq again
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                vendor: 'Groq Co 2',
+                confidence: 0.8,
+                documentType: 'invoice',
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+    } as any);
+    r = await extractWithAI('invoice text');
+    expect(r.data.vendor).toBe('Groq Co 2');
+    expect(fetch).toHaveBeenCalledTimes(3); // call1: 2 fetches, call2: 1 fetch
+
+    vi.useRealTimers();
+  });
+
   it('three consecutive 429s trigger 2-minute cooldown, success resets counter', async () => {
     vi.useFakeTimers();
     const now = Date.now();

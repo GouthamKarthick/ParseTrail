@@ -336,7 +336,7 @@ async function callCompatibleProvider(
   if (!key) throw new Error(`${provider} API key is not configured`);
   const model =
     provider === 'groq'
-      ? providerModel('groq') || 'llama-3.3-70b-versatile'
+      ? providerModel('groq') || 'openai/gpt-oss-120b'
       : providerModel('openrouter') || 'meta-llama/llama-3.3-70b-instruct:free';
   const url =
     provider === 'groq'
@@ -429,7 +429,7 @@ export async function extractWithAI(
     } catch (error) {
       if (error instanceof ProviderError) {
         const status = error.status;
-        if (status === 401 || status === 403) {
+        if (status === 401 || status === 403 || status === 404) {
           skipProvider(candidate, SKIP_401_MS);
           errors.push(`${candidate} auth failed (status ${status})`);
           continue;
