@@ -17,6 +17,7 @@ import Upload from './pages/Upload.tsx';
 import List from './pages/List.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { ToastProvider } from './context/ToastContext.tsx';
+import { Text } from './components/ui/Text.tsx';
 import { login, uploadDocument, getDocument, deleteDocument, listDocuments } from './api/client.ts';
 
 const NodeRequest = globalThis.Request;
@@ -450,5 +451,27 @@ describe('utils — password policy (72 byte bcrypt limit)', () => {
     expect(getPasswordError('NoNumbers!')).toContain('number');
     expect(getPasswordError('NoSpecial1')).toContain('special');
     expect(getPasswordError('short1!')).toContain('at least 8 characters');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Text component
+// ---------------------------------------------------------------------------
+
+describe('Text component', () => {
+  it('renders variant muted as p without heading role', () => {
+    render(<Text variant="muted">hello</Text>);
+    expect(screen.queryByRole('heading')).toBeNull();
+    expect(screen.getByText('hello').tagName).toBe('P');
+  });
+
+  it('renders level={1} as h1 heading', () => {
+    render(<Text level={1}>title</Text>);
+    expect(screen.getByRole('heading', { level: 1 })).toBeTruthy();
+  });
+
+  it('renders as="span" as a SPAN', () => {
+    render(<Text as="span">x</Text>);
+    expect(screen.getByText('x').tagName).toBe('SPAN');
   });
 });
