@@ -144,6 +144,21 @@ export default function Detail() {
     }
   }
 
+  function handleCorrectFirstField() {
+    if (!doc || !doc.data || Object.keys(doc.data).length === 0) return;
+    const field = Object.keys(doc.data).find(k => CORRECTABLE.includes(k)) ?? 'vendor';
+    setEditing({ field, draft: '' });
+  }
+
+  function handleConfirmDelete() {
+    setConfirmDeleteId(null);
+    void deleteDoc();
+  }
+
+  function handleDelete() {
+    if (id) setConfirmDeleteId(id);
+  }
+
   useEffect(() => {
     if (error) {
       const isNotFound = error.toLowerCase().includes('not found') || error.includes('404');
@@ -197,12 +212,7 @@ export default function Detail() {
                 {retrying ? 'Retrying…' : 'Retry AI'}
               </Button>
             )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => id && setConfirmDeleteId(id)}
-            disabled={deleting}
-          >
+          <Button variant="ghost" size="sm" onClick={handleDelete} disabled={deleting}>
             {deleting ? 'Deleting…' : 'Delete'}
           </Button>
           <span className={styles['detail-date']}>
@@ -354,12 +364,7 @@ export default function Detail() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() =>
-                setEditing({
-                  field: Object.keys(doc.data ?? {}).find(k => CORRECTABLE.includes(k)) ?? 'vendor',
-                  draft: '',
-                })
-              }
+              onClick={handleCorrectFirstField}
               disabled={!doc.data || Object.keys(doc.data).length === 0}
             >
               Correct fields manually
@@ -400,15 +405,7 @@ export default function Detail() {
               <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)}>
                 Cancel
               </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => {
-                  setConfirmDeleteId(null);
-                  void deleteDoc();
-                }}
-                disabled={deleting}
-              >
+              <Button variant="danger" size="sm" onClick={handleConfirmDelete} disabled={deleting}>
                 {deleting ? 'Deleting…' : 'Delete'}
               </Button>
             </div>

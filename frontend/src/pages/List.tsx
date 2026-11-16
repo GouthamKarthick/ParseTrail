@@ -132,6 +132,21 @@ export default function List() {
     []
   );
 
+  const handleRowKeyDown = useCallback(
+    (event: React.KeyboardEvent, id: string) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        navigate(`/documents/${id}`);
+      }
+    },
+    [navigate]
+  );
+
+  const handleRowDelete = useCallback((e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setConfirmDeleteId(id);
+  }, []);
+
   async function deleteDoc(id: string) {
     setDeletingId(id);
     try {
@@ -145,6 +160,13 @@ export default function List() {
       show('error', (e as Error).message || 'Delete failed');
     }
   }
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!confirmDeleteId) return;
+    setConfirmDeleteId(null);
+    void deleteDoc(confirmDeleteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmDeleteId]);
 
   const hasFilters = Boolean(qParam || selectedTypes.length);
 
@@ -235,12 +257,7 @@ export default function List() {
                       role="link"
                       aria-label={`Open ${d.name}`}
                       onClick={() => navigate(`/documents/${d.id}`)}
-                      onKeyDown={event => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          navigate(`/documents/${d.id}`);
-                        }
-                      }}
+                      onKeyDown={event => handleRowKeyDown(event, d.id)}
                     >
                       <td>
                         <span className={styles['list-document-name']}>{d.name}</span>
@@ -275,10 +292,7 @@ export default function List() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setConfirmDeleteId(d.id);
-                          }}
+                          onClick={e => handleRowDelete(e, d.id)}
                           disabled={deletingId === d.id}
                         >
                           Delete
@@ -320,10 +334,7 @@ export default function List() {
               <Button
                 variant="danger"
                 size="sm"
-                onClick={() => {
-                  setConfirmDeleteId(null);
-                  void deleteDoc(confirmDeleteId);
-                }}
+                onClick={handleConfirmDelete}
                 disabled={deletingId === confirmDeleteId}
               >
                 {deletingId === confirmDeleteId ? 'Deleting…' : 'Delete'}
