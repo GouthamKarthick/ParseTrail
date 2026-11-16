@@ -4,6 +4,7 @@ uploads/*
 !uploads/.gitkeep
 logs/*
 !logs/.gitkeep
+tessdata/
 .env
 ca.pem
 *.pem

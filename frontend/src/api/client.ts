@@ -42,10 +42,11 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): P
  * @throws {ApiError} on non-ok responses or network errors
  */
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const isFormData = body instanceof FormData;
   const res = await fetchWithTimeout(`${API_BASE}${path}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
+    headers: body && !isFormData ? { 'Content-Type': 'application/json' } : {},
+    body: isFormData ? body : body ? JSON.stringify(body) : undefined,
     credentials: 'include',
   });
   if (!res.ok) {

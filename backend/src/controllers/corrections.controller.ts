@@ -9,9 +9,9 @@ import { pool, withTransaction } from '../db/pool.js';
 import { logger } from '../config/logger.js';
 import { isValidDate } from '../services/confidence.service.js';
 import { parseJsonColumn } from '../utils/json.js';
-import { normalizeCurrency } from '../utils/currency.js';
+import { standardizeCurrency } from '../utils/currency.js';
 import { parseAmount } from '../utils/amount.js';
-import { applyConversion, clearConversion } from '../utils/conversion.js';
+import { applyCurrencyConversion, clearConversion } from '../utils/conversion.js';
 import { findDocumentByIdAndUser } from './documents.controller.js';
 
 // Converted fields are derived, never directly correctable.
@@ -47,7 +47,7 @@ function normalizeCorrection(field: string, value: unknown): string | number | n
     const s = String(value ?? '').trim();
     return isValidDate(s) ? s : null;
   }
-  if (field === 'currency') return normalizeCurrency(value);
+  if (field === 'currency') return standardizeCurrency(value);
   const s = String(value ?? '')
     .trim()
     .slice(0, 500);
@@ -100,7 +100,7 @@ export async function correctField(req: Request, res: Response, next: NextFuncti
     if (field === 'totalAmount' || field === 'currency') {
       clearConversion(data);
       try {
-        await applyConversion(data);
+        await applyCurrencyConversion(data);
       } catch {
         logger.warn('Correction FX recompute failed, leaving unconverted', {
           docId: id,

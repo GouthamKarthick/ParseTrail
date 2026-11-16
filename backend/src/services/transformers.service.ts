@@ -8,7 +8,7 @@
 import { logger } from '../config/logger.js';
 import { config } from '../config.js';
 import { stripJsonFence } from '../utils/json.js';
-import { normalizeCurrency } from '../utils/currency.js';
+import { standardizeCurrency } from '../utils/currency.js';
 import { normalizeDateISO } from '../utils/date.js';
 import { parseAmount } from '../utils/amount.js';
 import {
@@ -20,7 +20,7 @@ import {
   extractInvoiceNumberFallback,
   firstVendorLine,
 } from '../utils/regex-utils.js';
-import { getStrategy, buildLocalFlanPrompt } from './strategies.js';
+import { getDocumentTypeStrategy, buildLocalModelPrompt } from './strategies.js';
 import { localLlmConfidence, ruleBasedConfidence } from '../utils/confidence.js';
 
 type Text2TextPipeline = (
@@ -113,8 +113,8 @@ export async function runLocalLLMExtraction(
   text: string,
   documentType: string
 ): Promise<{ data: Record<string, unknown>; confidence: number; documentType: string }> {
-  const ex = getStrategy(documentType).localExample;
-  const prompt = buildLocalFlanPrompt(text, `${ex.text}\nJSON: ${ex.json}`);
+  const ex = getDocumentTypeStrategy(documentType).localExample;
+  const prompt = buildLocalModelPrompt(text, `${ex.text}\nJSON: ${ex.json}`);
   try {
     const pipe = await getLocalLLM();
     if (!pipe) return { data: {}, confidence: 0, documentType };
@@ -158,7 +158,7 @@ export async function runLocalLLMExtraction(
       data.invoiceDate = normalizeDateISO(parsed.invoiceDate);
     const amt = parseAmount(parsed.totalAmount);
     if (amt != null) data.totalAmount = amt;
-    const cur = normalizeCurrency(parsed.currency);
+    const cur = standardizeCurrency(parsed.currency);
     if (cur) data.currency = cur;
     if (
       !data.vendor ||
