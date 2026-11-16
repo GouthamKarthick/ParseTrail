@@ -8,10 +8,14 @@ const CODE_TO_CURRENCY: Record<string, string> = {
   USD: 'USD',
   EUR: 'EUR',
   GBP: 'GBP',
+  AUD: 'AUD',
+  SGD: 'SGD',
+  AED: 'AED',
+  CAD: 'CAD',
 };
 
 /**
- * Normalizes a currency code or symbol to INR/USD/EUR/GBP.
+ * Normalizes a currency code or symbol to ISO-4217.
  * @param raw Raw value
  * @returns Currency code or null
  */
@@ -21,6 +25,10 @@ export function normalizeCurrency(raw: unknown): string | null {
   if (!c) return null;
   if (CODE_TO_CURRENCY[c]) return c;
   if (c.includes('₹') || c.includes('RS')) return 'INR';
+  if (c.includes('A$')) return 'AUD';
+  if (c.includes('S$')) return 'SGD';
+  if (c.includes('AED')) return 'AED';
+  if (c.includes('CAD')) return 'CAD';
   if (c.includes('$')) return 'USD';
   if (c.includes('€')) return 'EUR';
   if (c.includes('£')) return 'GBP';
@@ -34,6 +42,10 @@ export function normalizeCurrency(raw: unknown): string | null {
  */
 export function detectCurrencyFromText(text: string): string | null {
   if (text.includes('₹') || /Rs\.?/.test(text)) return 'INR';
+  if (/\bA\$\b|AUD/.test(text)) return 'AUD';
+  if (/\bS\$\b|SGD/.test(text)) return 'SGD';
+  if (text.includes('AED')) return 'AED';
+  if (text.includes('CAD')) return 'CAD';
   if (text.includes('$')) return 'USD';
   if (text.includes('€')) return 'EUR';
   if (text.includes('£')) return 'GBP';

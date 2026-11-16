@@ -65,7 +65,8 @@ export const uuidSchema = z.string().uuid();
  * @returns void
  */
 export function validateIdParam(req: Request, res: Response, next: NextFunction): void {
-  const parsed = uuidSchema.safeParse(req.params.id);
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const parsed = uuidSchema.safeParse(id);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid document id' });
     return;

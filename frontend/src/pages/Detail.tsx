@@ -14,7 +14,6 @@ import {
   listCorrections,
 } from '../api/client';
 import type { ExtractionAttempt, Correction } from '../types';
-import { Heading } from '../components/ui/Heading';
 import { Text } from '../components/ui/Text';
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -172,7 +171,7 @@ export default function Detail() {
         <Link to="/documents" className={styles['detail-back']}>
           <i className="bi bi-arrow-left" aria-hidden /> Back to list
         </Link>
-        <Heading level={1}>{doc.name}</Heading>
+        <Text level={1}>{doc.name}</Text>
         <div key={doc.updated_at} className={`${styles['detail-meta']} fade-swap`}>
           {statusBadges(doc.status, displayRefineStatus).map((b, i) => (
             <span
@@ -305,7 +304,7 @@ export default function Detail() {
 
       {attempts.length > 0 && (
         <div className={styles['detail-card']}>
-          <Heading level={2}>Recent extraction attempts</Heading>
+          <Text level={2}>Recent extraction attempts</Text>
           <ol className={styles['detail-timeline']}>
             {visibleAttempts.map((a, i) => (
               <li key={i} className={styles['detail-attempt']}>
@@ -371,7 +370,7 @@ export default function Detail() {
 
       {history.length > 0 && (
         <div className={styles['detail-card']}>
-          <Heading level={2}>Correction history</Heading>
+          <Text level={2}>Correction history</Text>
           <ul className={styles['detail-history']}>
             {history.map((c, i) => (
               <li key={i}>
@@ -392,7 +391,7 @@ export default function Detail() {
           onCancel={() => setConfirmDeleteId(null)}
         >
           <div className={styles['detail-confirm-panel']}>
-            <Heading level={3}>Delete document?</Heading>
+            <Text level={3}>Delete document?</Text>
             <Text variant="muted">
               This permanently removes the file, all extraction attempts, and correction history.
               This cannot be undone.

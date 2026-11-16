@@ -14,6 +14,7 @@ import { logger } from '../config/logger.js';
 import { pool } from '../db/pool.js';
 import type {
   AttemptRecord,
+  DocumentType,
   ExtractionCascadeResult,
   ExtractionOrder,
   ExtractionResult,
@@ -22,7 +23,9 @@ import type {
 import { tryAI } from './ai.service.js';
 import { ocrBuffer } from './ocr.service.js';
 import { extractRulesOnly, runLocalLLMExtraction } from './transformers.service.js';
-import { getCategory, getPromptForType } from './registry.js';
+import { getCategory } from './registry.js';
+import { buildCloudExtractionPrompt } from './strategies.js';
+import { REQUIRED_FIELDS } from './confidence.service.js';
 import { applyConversion } from '../utils/conversion.js';
 
 const execFileAsync = promisify(execFile);
@@ -553,7 +556,30 @@ async function runCloudStage(args: {
   const t0 = Date.now();
   try {
     const guessedType = localType || lightType.type;
-    const prompt = getPromptForType(guessedType);
+    const required = REQUIRED_FIELDS[guessedType] ?? REQUIRED_FIELDS.unknown;
+    const missingFields = required.filter(k => {
+      const v = localData?.[k];
+      if (k === 'totalAmount') return !(typeof v === 'number' && isFinite(v) && v >= 0);
+      if (k === 'invoiceDate') return typeof v !== 'string' || v.trim().length === 0;
+      return v == null;
+    });
+    const conflictMap: Record<
+      string,
+      { rulesValue: string | number | null; localLlmValue: string | number | null }
+    > = {};
+    for (const f of conflictFields) {
+      conflictMap[f] = { rulesValue: null, localLlmValue: null };
+    }
+    const prompt = buildCloudExtractionPrompt({
+      predictedType: guessedType as DocumentType,
+      missingFields:
+        missingFields.length > 0
+          ? (missingFields as Array<
+              'vendor' | 'invoiceNumber' | 'invoiceDate' | 'totalAmount' | 'currency'
+            >)
+          : undefined,
+      conflicts: Object.keys(conflictMap).length > 0 ? conflictMap : undefined,
+    });
     const imageBase64 = isImage || isScannedPdf ? buffer!.toString('base64') : undefined;
     const imageMime = isScannedPdf ? 'application/pdf' : getImageMime(buffer!);
     const aiText = hasText
@@ -901,10 +927,33 @@ export async function extract(
  * Runs cloud extraction over previously extracted text without reopening or
  * OCRing the original upload.
  */
-export async function extractFromText(text: string): Promise<ExtractionCascadeResult> {
+export async function extractFromText(
+  text: string,
+  ctx?: {
+    predictedType?: DocumentType;
+    missingFields?: string[];
+    conflicts?: Record<
+      string,
+      { rulesValue: string | number | null; localLlmValue: string | number | null }
+    >;
+  }
+): Promise<ExtractionCascadeResult> {
   const started = Date.now();
   const detected = detectDocTypeLight(text);
-  const result = await tryAI(text, undefined, undefined, getPromptForType(detected.type));
+  const result = await tryAI(
+    text,
+    undefined,
+    undefined,
+    buildCloudExtractionPrompt({
+      predictedType: (ctx?.predictedType ?? detected.type) as DocumentType,
+      missingFields: ctx?.missingFields?.length
+        ? (ctx.missingFields as Array<
+            'vendor' | 'invoiceNumber' | 'invoiceDate' | 'totalAmount' | 'currency'
+          >)
+        : undefined,
+      conflicts: ctx?.conflicts,
+    })
+  );
   const attempts: AttemptRecord[] = [
     {
       method: 'llm',

@@ -19,9 +19,8 @@ import {
   Legend,
 } from 'recharts';
 import { getSummary, exportSummary } from '../api/client';
-import { Heading } from '../components/ui/Heading';
-import { Button } from '../components/ui/Button';
 import { Text } from '../components/ui/Text';
+import { Button } from '../components/ui/Button';
 import { useTheme } from '../context/ThemeContext';
 import { useToastContext } from '../context/ToastContext';
 import { useApi } from '../hooks/useApi';
@@ -106,7 +105,7 @@ export default function Dashboard() {
     return (
       <div className="page">
         <div className={styles['dashboard-header']}>
-          <Heading level={1}>30-Day Summary</Heading>
+          <Text level={1}>30-Day Summary</Text>
         </div>
         <div className={styles['dashboard-stats']} aria-busy="true">
           <Skeleton lines={3} />
@@ -125,7 +124,7 @@ export default function Dashboard() {
   return (
     <div className="page">
       <div className={styles['dashboard-header']}>
-        <Heading level={1}>30-Day Summary</Heading>
+        <Text level={1}>30-Day Summary</Text>
         <div className={styles['dashboard-actions']}>
           <Button
             variant="secondary"

@@ -137,7 +137,12 @@ describe('jobs/refine — worker', () => {
       typeVotes: ['invoice'],
     } as any);
     expect(await processOneRefineJob()).toBe('done');
-    expect(extractFromText).toHaveBeenCalledWith('Invoice amount 99');
+    expect(extractFromText).toHaveBeenCalledWith(
+      'Invoice amount 99',
+      expect.objectContaining({
+        missingFields: ['invoiceNumber', 'invoiceDate', 'totalAmount', 'currency'],
+      })
+    );
     const updateCall = mockQuery().mock.calls.find(c =>
       String(c[0]).includes('UPDATE documents SET data=')
     );

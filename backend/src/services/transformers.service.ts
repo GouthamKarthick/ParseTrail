@@ -20,7 +20,7 @@ import {
   extractInvoiceNumberFallback,
   firstVendorLine,
 } from '../utils/regex-utils.js';
-import { getStrategy } from './strategies.js';
+import { getStrategy, buildLocalFlanPrompt } from './strategies.js';
 import { localLlmConfidence, ruleBasedConfidence } from '../utils/confidence.js';
 
 type Text2TextPipeline = (
@@ -105,10 +105,7 @@ export async function runLocalLLMExtraction(
   documentType: string
 ): Promise<{ data: Record<string, unknown>; confidence: number; documentType: string }> {
   const ex = getStrategy(documentType).localExample;
-  const prompt =
-    `Task: extract ${documentType} as JSON only.\n` +
-    `Example:\nText: "${ex.text}"\nJSON: ${ex.json}\n\n` +
-    `Text: "${text.slice(0, 800).replace(/\n/g, ' ')}"\nJSON:`;
+  const prompt = buildLocalFlanPrompt(text, `${ex.text}\nJSON: ${ex.json}`);
   try {
     const pipe = await getLocalLLM();
     if (!pipe) return { data: {}, confidence: 0, documentType };

@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import { pool } from '../db/pool.js';
 import type { PoolConnection } from 'mysql2/promise';
+import type { DocumentType } from '../types/index.js';
 import { config } from '../config.js';
 import { logger } from '../config/logger.js';
 import { extract, extractFromText, recordAttempts } from '../services/extraction.service.js';
@@ -345,10 +346,22 @@ async function processRefineJob(): Promise<Outcome> {
       doc.data as string,
       {}
     );
+    const coreFields = [
+      'vendor',
+      'invoiceNumber',
+      'invoiceDate',
+      'totalAmount',
+      'currency',
+    ] as const;
+    const missingFields = coreFields.filter(k => stored[k] == null);
     let r: Awaited<ReturnType<typeof extract>>;
     try {
       r = hasCachedText
-        ? await extractFromText(doc.extracted_text as string)
+        ? await extractFromText(doc.extracted_text as string, {
+            predictedType: (stored.documentType ?? stored.document_type) as
+              DocumentType | undefined,
+            missingFields: missingFields.length > 0 ? missingFields : undefined,
+          })
         : await extract(doc.path, { cloudOnly: true });
     } catch (error) {
       if (!hasCachedText && (error as NodeJS.ErrnoException).code === 'ENOENT') {

@@ -1,21 +1,25 @@
 /**
- * prompts/financial.ts — Extraction prompt for financial documents.
+ * prompts/financial.ts — Base extraction prompt for financial documents (cloud tier).
+ *
+ * Split from the old flat FINANCIAL_PROMPT: this is the shared schema + global rules
+ * that every cloud prompt starts with. Per-type focus is appended by strategies.ts
+ * via buildCloudExtractionPrompt; the local Flan-T5 tier gets its own ultra-short
+ * prompt via buildLocalFlanPrompt.
  */
 
-export const FINANCIAL_PROMPT = `You are a generic parser for financial documents (invoice/receipt/payslip/payment/bill/settlement_slip). Decide documentType from heading/layout.
+export const FINANCIAL_BASE_PROMPT = `You are a strict financial document extractor. Classify documentType and extract fields from OCR/PDF text.
 
-Return ONLY JSON, no markdown:
+Return ONLY valid JSON (no markdown, no prose):
 {"vendor":string|null,"invoiceNumber":string|null,"invoiceDate":string|null,"totalAmount":number|null,"currency":string|null,"confidence":number,"notes":string|null,"documentType":"invoice|receipt|payment|bill|payslip|settlement_slip|other|unknown"}
 
-Extraction rules:
-- vendor: Return only the actual seller, merchant, service provider, utility, employer, or payment sender that issued this document. Use a clearly identified business name/logo or an explicit Seller/From/Merchant/Provider label. Do not guess from nearby text.
-- vendor: Never return document section headings, field labels, payment methods/options, account/payment instructions, bank details, invoice/receipt/bill titles, customer/bill-to names, addresses, or amounts. In particular, text such as "5. PAYMENT OPTIONS" is a heading, not a vendor. If the issuer cannot be distinguished confidently, return null.
-- invoiceNumber: Invoice No/#, Ref, Bill No, Receipt No, Transaction ID. Null if none.
-- invoiceDate: Invoice/Date/Bill Date. Normalize to YYYY-MM-DD.
-- totalAmount: FINAL due, not subtotal/tax. Pick LAST footer value; ignore Subtotal/Net/VAT. Strip ₹/Rs./€/$/,.
-- currency: ₹/Rs.->INR, €->EUR, $->USD
-- documentType: invoice (INVOICE/RECHNUNG), receipt (Bill No/GRAND TOTAL narrow), payment (Payment Status), bill, payslip, settlement_slip, other/unknown. Infer from heading/layout; never hallucinate.
-
-Rules: Null when evidence is missing or ambiguous; never choose the nearest plausible text just to fill a field. totalAmount is a number; confidence is 0-1 for the extraction as a whole.
-
-Text follows:`;
+Global rules:
+1. Evidence & Null Policy: Extract ONLY from explicit evidence in the text. Never guess from nearby text to fill a field. Return null if missing or ambiguous. If the document is NOT financial (e.g. resume, article, letter), set documentType="other" and all extracted fields to null.
+2. vendor: Extract ONLY the issuing seller, merchant, service provider, utility, employer, or payment platform/sender—identified by header/logo/brand or explicit "From/Seller/Merchant/Provider/Employer" labels. NEVER extract:
+   - Section headings or numbered titles (e.g. "5. PAYMENT OPTIONS", "TERMS", "INVOICE", "RECEIPT")
+   - Payment instructions, bank/IBAN/IFSC/UPI details, or payment methods
+   - Customer / "Bill To" / "Ship To" / "Employee" names, addresses, or contact lines
+3. invoiceDate: Normalize to YYYY-MM-DD. Prefer Issue/Transaction/Bill/Pay Date over Due Date or print timestamps. Resolve DD/MM vs MM/DD using document locale (e.g. INR/GSTIN/UK/AU -> DD/MM; US ZIP/state -> MM/DD). Return null if unparseable.
+4. totalAmount: JSON number only (strip currency symbols and thousand separators; use "." for decimals). Must be the final payable/paid/net total—ignore subtotals, taxes, discounts, tendered cash, change due, or YTD totals unless no final total exists.
+5. currency: 3-letter ISO-4217 code (e.g. ₹/Rs.->INR, €->EUR, £->GBP, $->USD unless locale cues like ABN/GST/AUD or UEN/SGD indicate AUD/SGD/CAD). Return null if no currency evidence exists.
+6. confidence: 0.0 to 1.0 reflecting overall extraction reliability.
+7. notes: Brief ambiguity/conflict note if any, else null.`;
