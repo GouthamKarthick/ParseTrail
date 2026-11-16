@@ -19,7 +19,7 @@ import {
   Legend,
 } from 'recharts';
 import { getSummary, exportSummary } from '../api/client';
-import { Text } from '../components/ui/Text';
+import { TextBlock } from '../components/ui/Text';
 import { Button } from '../components/ui/Button';
 import { useTheme } from '../context/ThemeContext';
 import { useToastContext } from '../context/ToastContext';
@@ -115,7 +115,7 @@ export default function Dashboard() {
     return (
       <div className="page">
         <div className={styles['dashboard-header']}>
-          <Text level={1}>30-Day Summary</Text>
+          <TextBlock headingLevel={1}>30-Day Summary</TextBlock>
         </div>
         <div className={styles['dashboard-stats']} aria-busy="true">
           <Skeleton lines={3} />
@@ -134,7 +134,7 @@ export default function Dashboard() {
   return (
     <div className="page">
       <div className={styles['dashboard-header']}>
-        <Text level={1}>30-Day Summary</Text>
+        <TextBlock headingLevel={1}>30-Day Summary</TextBlock>
         <div className={styles['dashboard-actions']}>
           <Button
             variant="secondary"
@@ -186,7 +186,7 @@ export default function Dashboard() {
         <div className={styles['dashboard-card']}>
           <div className={styles['dashboard-card-title']}>By Type — Count</div>
           {data.byType.length === 0 ? (
-            <Text variant="muted">No data</Text>
+            <TextBlock textStyle="muted">No data</TextBlock>
           ) : (
             <div className={styles['dashboard-chart']}>
               <ResponsiveContainer width="100%" height={230}>
@@ -234,7 +234,7 @@ export default function Dashboard() {
         <div className={styles['dashboard-card']}>
           <div className={styles['dashboard-card-title']}>By Type — Sum</div>
           {data.byType.length === 0 ? (
-            <Text variant="muted">No data</Text>
+            <TextBlock textStyle="muted">No data</TextBlock>
           ) : (
             <div className={styles['dashboard-chart']}>
               <ResponsiveContainer width="100%" height={250}>
@@ -280,7 +280,7 @@ export default function Dashboard() {
       <div className={styles['dashboard-card']}>
         <div className={styles['dashboard-card-title']}>Daily Trend (30 days)</div>
         {data.trend.length === 0 ? (
-          <Text variant="muted">No data</Text>
+          <TextBlock textStyle="muted">No data</TextBlock>
         ) : (
           <div className={styles['dashboard-chart']}>
             <ResponsiveContainer width="100%" height={220}>
@@ -337,7 +337,7 @@ export default function Dashboard() {
       <div className={styles['dashboard-card']}>
         <div className={styles['dashboard-card-title']}>Top Vendors</div>
         {data.topVendors.length === 0 ? (
-          <Text variant="muted">No data</Text>
+          <TextBlock textStyle="muted">No data</TextBlock>
         ) : (
           <table className={styles['dashboard-table']}>
             <thead>

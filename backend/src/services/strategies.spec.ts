@@ -1,32 +1,32 @@
 import { describe, it, expect } from 'vitest';
 import {
-  getStrategy,
-  buildPromptForType,
+  getDocumentTypeStrategy,
+  buildCloudPrompt,
   buildCloudExtractionPrompt,
-  buildLocalFlanPrompt,
-  CLOUD_TYPE_FOCUS,
+  buildLocalModelPrompt,
+  DOCUMENT_TYPE_FOCUS,
 } from './strategies.js';
 import { FINANCIAL_BASE_PROMPT } from '../prompts/financial.js';
 import { getPromptForType } from './registry.js';
 import type { DocumentType } from '../types/index.js';
 
 describe('strategies — per-type prompts and examples', () => {
-  it('invoice returns the historical prompt verbatim', () => {
-    expect(buildPromptForType('invoice')).toBe(FINANCIAL_BASE_PROMPT);
+  it('invoice returns the base prompt verbatim', () => {
+    expect(buildCloudPrompt('invoice')).toBe(FINANCIAL_BASE_PROMPT);
     expect(getPromptForType('invoice')).toBe(FINANCIAL_BASE_PROMPT);
   });
   it('unknown types fall back to generic behavior', () => {
-    expect(buildPromptForType('other')).toBe(FINANCIAL_BASE_PROMPT);
-    expect(buildPromptForType('whatever')).toBe(FINANCIAL_BASE_PROMPT);
-    expect(getStrategy('whatever').localExample.json).toContain('INV-123');
+    expect(buildCloudPrompt('other')).toBe(FINANCIAL_BASE_PROMPT);
+    expect(buildCloudPrompt('whatever')).toBe(FINANCIAL_BASE_PROMPT);
+    expect(getDocumentTypeStrategy('whatever').localExample.json).toContain('INV-123');
   });
   it('each financial type carries a focus line and a valid example', () => {
     for (const t of ['receipt', 'payment', 'bill', 'payslip', 'settlement_slip']) {
-      const s = getStrategy(t);
-      expect(s.promptFocus.length).toBeGreaterThan(20);
+      const s = getDocumentTypeStrategy(t);
+      expect(s.cloudPromptFocus.length).toBeGreaterThan(20);
       expect(() => JSON.parse(s.localExample.json)).not.toThrow();
-      expect(buildPromptForType(t)).toContain('Focus:');
-      expect(buildPromptForType(t)).toContain('Return ONLY valid JSON');
+      expect(buildCloudPrompt(t)).toContain('Focus:');
+      expect(buildCloudPrompt(t)).toContain('Return ONLY valid JSON');
     }
   });
   it('registry routes prompts through strategies', () => {
@@ -46,8 +46,8 @@ describe('strategies — per-type prompts and examples', () => {
     const prompt = buildCloudExtractionPrompt({
       predictedType: 'invoice',
       conflicts: {
-        totalAmount: { rulesValue: 100, localLlmValue: 99 },
-        currency: { rulesValue: 'USD', localLlmValue: null },
+        totalAmount: { rulesValue: 100, localModelValue: 99 },
+        currency: { rulesValue: 'USD', localModelValue: null },
       },
     });
     expect(prompt).toContain('Arbitration context');
@@ -60,18 +60,16 @@ describe('strategies — per-type prompts and examples', () => {
       predictedType: 'invoice',
       missingFields: ['invoiceNumber', 'totalAmount'],
     });
-    expect(prompt).toContain(
-      'Priority missing fields to inspect carefully: invoiceNumber, totalAmount.'
-    );
+    expect(prompt).toContain('Priority missing fields to check: invoiceNumber, totalAmount.');
   });
 
   it('buildCloudExtractionPrompt does not add type note for unknown', () => {
     const prompt = buildCloudExtractionPrompt({ predictedType: 'unknown' });
-    expect(prompt).not.toContain('Upstream heuristic suggested');
+    expect(prompt).not.toContain('System suggested');
     expect(prompt).toContain('Classification guide');
   });
 
-  it('CLOUD_TYPE_FOCUS covers all DocumentType values', () => {
+  it('DOCUMENT_TYPE_FOCUS covers all DocumentType values', () => {
     const types: DocumentType[] = [
       'invoice',
       'receipt',
@@ -83,13 +81,13 @@ describe('strategies — per-type prompts and examples', () => {
       'unknown',
     ];
     for (const t of types) {
-      expect(CLOUD_TYPE_FOCUS[t]).toBeDefined();
-      expect(CLOUD_TYPE_FOCUS[t]!.length).toBeGreaterThan(0);
+      expect(DOCUMENT_TYPE_FOCUS[t]).toBeDefined();
+      expect(DOCUMENT_TYPE_FOCUS[t]!.length).toBeGreaterThan(0);
     }
   });
 
-  it('buildLocalFlanPrompt is compact and includes 1-shot example', () => {
-    const prompt = buildLocalFlanPrompt(
+  it('buildLocalModelPrompt is compact and includes example', () => {
+    const prompt = buildLocalModelPrompt(
       'Acme Corp Invoice INV-123 Date 2024-02-01 Total $1300 USD',
       'Text: Acme Corp\nInvoice No: INV-123\nDate: 2024-02-01\nTotal: $1300 USD\nJSON: {"vendor":"Acme Corp","invoiceNumber":"INV-123","invoiceDate":"2024-02-01","totalAmount":1300,"currency":"USD"}'
     );
@@ -97,13 +95,13 @@ describe('strategies — per-type prompts and examples', () => {
     expect(prompt).toContain('JSON: {"vendor":"Acme Corp"');
     expect(prompt).toContain('Text: Acme Corp Invoice INV-123');
     expect(prompt).toContain('JSON:');
-    // Under token budget for Flan-T5 (1400 chars max)
+    // Under token budget for local model (1400 chars max)
     expect(prompt.length).toBeLessThan(2000);
   });
 
-  it('buildLocalFlanPrompt truncates long text', () => {
+  it('buildLocalModelPrompt truncates long text', () => {
     const longText = 'x'.repeat(5000);
-    const prompt = buildLocalFlanPrompt(longText, 'Text: ex\nJSON: {}');
+    const prompt = buildLocalModelPrompt(longText, 'Text: ex\nJSON: {}');
     const textParts = prompt.split('Text:');
     const snippet = textParts[textParts.length - 1]?.split('\nJSON:')[0]?.replace(/\n$/, '') ?? '';
     expect(snippet.length).toBeLessThan(2000);

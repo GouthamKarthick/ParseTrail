@@ -7,7 +7,7 @@
  * the rules are testable and importable without pulling in the model loader.
  */
 
-import { detectCurrencyFromText } from './currency.js';
+import { findCurrencyInText } from './currency.js';
 
 const MONTH_RE =
   'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec';
@@ -241,5 +241,5 @@ export function extractInvoiceNumberFallback(text: string): string | null {
  * @returns Currency code or null
  */
 export function extractCurrencyFallback(text: string): string | null {
-  return detectCurrencyFromText(text);
+  return findCurrencyInText(text);
 }

@@ -17,7 +17,7 @@ import Upload from './pages/Upload.tsx';
 import List from './pages/List.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { ToastProvider } from './context/ToastContext.tsx';
-import { Text } from './components/ui/Text.tsx';
+import { TextBlock } from './components/ui/Text.tsx';
 import { login, uploadDocument, getDocument, deleteDocument, listDocuments } from './api/client.ts';
 
 const NodeRequest = globalThis.Request;
@@ -460,18 +460,18 @@ describe('utils — password policy (72 byte bcrypt limit)', () => {
 
 describe('Text component', () => {
   it('renders variant muted as p without heading role', () => {
-    render(<Text variant="muted">hello</Text>);
+    render(<TextBlock textStyle="muted">hello</TextBlock>);
     expect(screen.queryByRole('heading')).toBeNull();
     expect(screen.getByText('hello').tagName).toBe('P');
   });
 
   it('renders level={1} as h1 heading', () => {
-    render(<Text level={1}>title</Text>);
+    render(<TextBlock headingLevel={1}>title</TextBlock>);
     expect(screen.getByRole('heading', { level: 1 })).toBeTruthy();
   });
 
   it('renders as="span" as a SPAN', () => {
-    render(<Text as="span">x</Text>);
+    render(<TextBlock htmlTag="span">x</TextBlock>);
     expect(screen.getByText('x').tagName).toBe('SPAN');
   });
 });

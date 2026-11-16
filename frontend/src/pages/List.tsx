@@ -7,7 +7,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { listDocuments, deleteDocument, ApiError } from '../api/client';
 import type { Document } from '../types';
 import { useToastContext, kindFromStatus } from '../context/ToastContext';
-import { Text } from '../components/ui/Text';
+import { TextBlock } from '../components/ui/Text';
 import { Input } from '../components/ui/Input';
 import { Skeleton } from '../components/Skeleton';
 import { EmptyState } from '../components/Feedback';
@@ -173,9 +173,9 @@ export default function List() {
   return (
     <div className="page">
       <div className={styles['list-header']}>
-        <Text level={1} muted={`${total} total`}>
+        <TextBlock headingLevel={1} mutedText={`${total} total`}>
           Documents
-        </Text>
+        </TextBlock>
         <div className={styles['list-view-toggle']} role="tablist" aria-label="View mode">
           <button
             role="tab"
@@ -322,11 +322,11 @@ export default function List() {
           onCancel={() => setConfirmDeleteId(null)}
         >
           <div className={styles['list-confirm-panel']}>
-            <Text level={3}>Delete document?</Text>
-            <Text variant="muted">
+            <TextBlock headingLevel={3}>Delete document?</TextBlock>
+            <TextBlock textStyle="muted">
               This permanently removes the file, all extraction attempts, and correction history.
               This cannot be undone.
-            </Text>
+            </TextBlock>
             <div className={styles['list-confirm-actions']}>
               <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)}>
                 Cancel

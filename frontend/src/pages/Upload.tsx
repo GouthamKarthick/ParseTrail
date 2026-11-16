@@ -8,7 +8,7 @@ import { uploadDocument, ApiError } from '../api/client';
 import { useToastContext, kindFromStatus } from '../context/ToastContext';
 import { validateUploadFile } from '../utils/security';
 import { Button } from '../components/ui/Button';
-import { Text } from '../components/ui/Text';
+import { TextBlock } from '../components/ui/Text';
 import styles from './Upload.module.scss';
 
 // ---------------------------------------------------------------------------
@@ -121,20 +121,20 @@ export default function Upload() {
   return (
     <div className="page">
       <div className={styles['upload-card']}>
-        <Text level={1}>Upload document</Text>
-        <Text variant="muted">
+        <TextBlock headingLevel={1}>Upload document</TextBlock>
+        <TextBlock textStyle="muted">
           PDF, PNG, JPG — max 10MB. Scanned images are OCR&apos;d automatically.
-        </Text>
+        </TextBlock>
 
         {uploadError && (
-          <Text variant="small" className={styles['upload-error']}>
+          <TextBlock textStyle="small" extraClass={styles['upload-error']}>
             {uploadError}
-          </Text>
+          </TextBlock>
         )}
 
         {isQueued && uploadedDoc && (
           <div className={styles['upload-queued']}>
-            <Text variant="muted">Uploaded {uploadedDoc.name} — extracting…</Text>
+            <TextBlock textStyle="muted">Uploaded {uploadedDoc.name} — extracting…</TextBlock>
             <Button
               type="button"
               variant="ghost"
@@ -178,10 +178,10 @@ export default function Upload() {
               <option value="kn">Kannada</option>
               <option value="te">Telugu</option>
             </select>
-            <Text variant="small" className={styles['upload-language-hint']}>
+            <TextBlock textStyle="small" extraClass={styles['upload-language-hint']}>
               Auto-detects the language. For scanned non-English documents pick the language
               explicitly.
-            </Text>
+            </TextBlock>
           </label>
 
           <div className={styles['upload-actions']}>

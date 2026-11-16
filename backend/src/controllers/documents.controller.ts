@@ -11,7 +11,8 @@ import { createHash, randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import { pool, withTransaction } from '../db/pool.js';
 import { logger } from '../config/logger.js';
-import { extract } from '../services/extraction.service.js';
+import { parseJsonColumn } from '../utils/json.js';
+import { extractDocumentData } from '../services/extraction.service.js';
 import { enqueueRefineJob } from '../jobs/refine.js';
 import { findDuplicateByContent, findDuplicateByHash } from '../services/dedup.service.js';
 
@@ -28,17 +29,13 @@ export { getSummary, exportSummary } from './summary.controller.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Parses JSON data field from DB row.
- * @param row DB row with data string
+ * Parses JSON data field from DB row. Handles both string (raw JSON text)
+ * and object (already parsed by mysql2 JSON column type) cases.
+ * @param row DB row with data field
  * @returns Parsed data or null
  */
-function parseDataField(row: { data: string | null }) {
-  if (!row.data) return null;
-  try {
-    return JSON.parse(row.data);
-  } catch {
-    return null;
-  }
+function parseDataField(row: { data: string | null | Record<string, unknown> }) {
+  return parseJsonColumn<Record<string, unknown> | null>(row.data, null);
 }
 
 /**
@@ -91,7 +88,7 @@ async function latestRefineStatus(
 // Document handlers
 // ---------------------------------------------------------------------------
 
-type ExtractOutcome = NonNullable<Awaited<ReturnType<typeof extract>>>;
+type ExtractOutcome = NonNullable<Awaited<ReturnType<typeof extractDocumentData>>>;
 
 function respondDuplicate(
   res: Response,

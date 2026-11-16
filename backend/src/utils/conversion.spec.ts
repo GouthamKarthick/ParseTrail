@@ -82,11 +82,11 @@ describe('utils/conversion', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('applyConversion stamps same-currency docs with rate 1', async () => {
+  it('applyCurrencyConversion stamps same-currency docs with rate 1', async () => {
     vi.stubGlobal('fetch', vi.fn());
-    const { applyConversion } = await import('./conversion.js');
+    const { applyCurrencyConversion } = await import('./conversion.js');
     const d: Record<string, unknown> = { totalAmount: 50, currency: 'INR' };
-    await applyConversion(d, 'INR');
+    await applyCurrencyConversion(d, 'INR');
     expect(d).toMatchObject({
       totalAmountConverted: 50,
       currencyConverted: 'INR',
@@ -95,12 +95,12 @@ describe('utils/conversion', () => {
     expect(typeof d.conversionAt).toBe('string');
   });
 
-  it('applyConversion is a no-op without amount/currency', async () => {
+  it('applyCurrencyConversion is a no-op without amount/currency', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const { applyConversion } = await import('./conversion.js');
+    const { applyCurrencyConversion } = await import('./conversion.js');
     const d: Record<string, unknown> = { vendor: 'V' };
-    await applyConversion(d, 'INR');
+    await applyCurrencyConversion(d, 'INR');
     expect(d.totalAmountConverted).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
   });

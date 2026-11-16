@@ -14,7 +14,7 @@ import {
   listCorrections,
 } from '../api/client';
 import type { ExtractionAttempt, Correction } from '../types';
-import { Text } from '../components/ui/Text';
+import { TextBlock } from '../components/ui/Text';
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Input } from '../components/ui/Input';
@@ -54,7 +54,12 @@ export default function Detail() {
     latestLlmAttempt && !latestLlmAttempt.succeeded && latestLlmAttempt.fallback_reason
       ? latestLlmAttempt
       : null;
-  const extractedFields = doc?.data && Object.keys(doc.data).length > 0 ? doc.data : null;
+  const baseFields = doc?.data ?? {};
+  const editingField = editing?.field;
+  const extractedFields =
+    Object.keys(baseFields).length > 0 || editingField
+      ? { ...baseFields, ...(editingField && !(editingField in baseFields) ? { [editingField]: null } : {}) }
+      : {};
   const visibleAttempts = attempts.slice(-5);
   const displayRefineStatus =
     doc?.refine_status === 'queued' || doc?.refine_status === 'working'
@@ -145,8 +150,9 @@ export default function Detail() {
   }
 
   function handleCorrectFirstField() {
-    if (!doc || !doc.data || Object.keys(doc.data).length === 0) return;
-    const field = Object.keys(doc.data).find(k => CORRECTABLE.includes(k)) ?? 'vendor';
+    if (!doc) return;
+    const field =
+      Object.keys(doc.data ?? {}).find(k => CORRECTABLE.includes(k)) ?? 'vendor';
     setEditing({ field, draft: '' });
   }
 
@@ -176,7 +182,7 @@ export default function Detail() {
   if (!doc)
     return (
       <div className="page">
-        <Text variant="muted">Loading…</Text>
+        <TextBlock textStyle="muted">Loading…</TextBlock>
       </div>
     );
 
@@ -186,7 +192,7 @@ export default function Detail() {
         <Link to="/documents" className={styles['detail-back']}>
           <i className="bi bi-arrow-left" aria-hidden /> Back to list
         </Link>
-        <Text level={1}>{doc.name}</Text>
+        <TextBlock headingLevel={1}>{doc.name}</TextBlock>
         <div key={doc.updated_at} className={`${styles['detail-meta']} fade-swap`}>
           {statusBadges(doc.status, displayRefineStatus).map((b, i) => (
             <span
@@ -222,15 +228,15 @@ export default function Detail() {
       </div>
 
       <div className={styles['detail-card']}>
-        {doc.status === 'pending' && <Text variant="muted">Queued</Text>}
-        {doc.status === 'processing' && <Text variant="muted">Extracting…</Text>}
+        {doc.status === 'pending' && <TextBlock textStyle="muted">Queued</TextBlock>}
+        {doc.status === 'processing' && <TextBlock textStyle="muted">Extracting…</TextBlock>}
         {(doc.refine_status === 'queued' || doc.refine_status === 'working') && (
-          <Text variant="muted">Improving with cloud AI…</Text>
+          <TextBlock textStyle="muted">Improving with cloud AI…</TextBlock>
         )}
         {doc.error && (
-          <Text as="p" variant="small" className={styles['detail-error']}>
+          <TextBlock htmlTag="p" textStyle="small" extraClass={styles['detail-error']}>
             Error: {doc.error}
-          </Text>
+          </TextBlock>
         )}
         {extractedFields && (
           <table className={styles['detail-table']}>
@@ -314,7 +320,7 @@ export default function Detail() {
 
       {attempts.length > 0 && (
         <div className={styles['detail-card']}>
-          <Text level={2}>Recent extraction attempts</Text>
+          <TextBlock headingLevel={2}>Recent extraction attempts</TextBlock>
           <ol className={styles['detail-timeline']}>
             {visibleAttempts.map((a, i) => (
               <li key={i} className={styles['detail-attempt']}>
@@ -325,14 +331,16 @@ export default function Detail() {
                 >
                   {attemptLabel(a.method)}
                 </span>
-                <Text variant="small">{a.succeeded ? 'Completed' : 'Unable to complete'}</Text>
+                <TextBlock textStyle="small">
+                  {a.succeeded ? 'Completed' : 'Unable to complete'}
+                </TextBlock>
                 {!a.succeeded && a.method === 'llm' && (
-                  <Text variant="small" className={styles['detail-reason']}>
+                  <TextBlock textStyle="small" extraClass={styles['detail-reason']}>
                     <span className={styles['detail-error']}>
                       Enhancement is temporarily unavailable. Existing extracted fields are still
                       saved; please retry later.
                     </span>
-                  </Text>
+                  </TextBlock>
                 )}
               </li>
             ))}
@@ -342,13 +350,13 @@ export default function Detail() {
 
       {doc.status === 'done' && (doc.refine_status === 'dead' || latestLlmFailure) && (
         <div className={styles['detail-dead-state']}>
-          <Text variant="small" className={styles['detail-refinement-note']}>
+          <TextBlock textStyle="small" extraClass={styles['detail-refinement-note']}>
             {doc.refine_error === 'source_unavailable'
               ? 'AI enhancement could not continue because the original file and cached text are unavailable.'
               : doc.refine_error
                 ? `AI enhancement stopped: ${doc.refine_error}`
                 : 'Cloud refinement could not complete — this may be a provider quota limit or a poor scan.'}
-          </Text>
+          </TextBlock>
           <div className={styles['detail-dead-actions']}>
             <Button
               variant="secondary"
@@ -365,7 +373,6 @@ export default function Detail() {
               variant="ghost"
               size="sm"
               onClick={handleCorrectFirstField}
-              disabled={!doc.data || Object.keys(doc.data).length === 0}
             >
               Correct fields manually
             </Button>
@@ -375,14 +382,14 @@ export default function Detail() {
 
       {history.length > 0 && (
         <div className={styles['detail-card']}>
-          <Text level={2}>Correction history</Text>
+          <TextBlock headingLevel={2}>Correction history</TextBlock>
           <ul className={styles['detail-history']}>
             {history.map((c, i) => (
               <li key={i}>
-                <Text variant="small">
+                <TextBlock textStyle="small">
                   <strong>{c.field}</strong>: {c.original_value ?? '—'} → {c.corrected_value ?? '—'}
                   {c.extraction_method && ` (was ${c.extraction_method})`}
-                </Text>
+                </TextBlock>
               </li>
             ))}
           </ul>
@@ -396,11 +403,11 @@ export default function Detail() {
           onCancel={() => setConfirmDeleteId(null)}
         >
           <div className={styles['detail-confirm-panel']}>
-            <Text level={3}>Delete document?</Text>
-            <Text variant="muted">
+            <TextBlock headingLevel={3}>Delete document?</TextBlock>
+            <TextBlock textStyle="muted">
               This permanently removes the file, all extraction attempts, and correction history.
               This cannot be undone.
-            </Text>
+            </TextBlock>
             <div className={styles['detail-confirm-actions']}>
               <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)}>
                 Cancel

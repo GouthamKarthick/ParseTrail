@@ -8,7 +8,7 @@ import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { config } from '../config.js';
 
-const logDir = path.resolve(config.logs.dir);
+const logDir = path.resolve(__dirname, '..', config.logs.dir);
 if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
 const ecsFormat = winston.format.combine(

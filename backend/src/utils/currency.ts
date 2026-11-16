@@ -1,9 +1,9 @@
 /**
- * utils/currency.ts — Single currency normalizer (replaces 5 scattered
- * symbol/code mappers in ai/transformers/dedup/controller).
+ * utils/currency.ts — Converts currency names/symbols to standard codes.
+ * Replaces 5 scattered symbol/code mappers across the codebase.
  */
 
-const CODE_TO_CURRENCY: Record<string, string> = {
+const CURRENCY_CODES: Record<string, string> = {
   INR: 'INR',
   USD: 'USD',
   EUR: 'EUR',
@@ -15,39 +15,39 @@ const CODE_TO_CURRENCY: Record<string, string> = {
 };
 
 /**
- * Normalizes a currency code or symbol to ISO-4217.
- * @param raw Raw value
- * @returns Currency code or null
+ * Converts a currency code or symbol to standard ISO-4217 code.
+ * @param rawValue Raw currency value like "USD", "$", "₹", "Rs."
+ * @returns Standard 3-letter currency code or null if unknown
  */
-export function normalizeCurrency(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const c = raw.trim().toUpperCase();
-  if (!c) return null;
-  if (CODE_TO_CURRENCY[c]) return c;
-  if (c.includes('₹') || c.includes('RS')) return 'INR';
-  if (c.includes('A$')) return 'AUD';
-  if (c.includes('S$')) return 'SGD';
-  if (c.includes('AED')) return 'AED';
-  if (c.includes('CAD')) return 'CAD';
-  if (c.includes('$')) return 'USD';
-  if (c.includes('€')) return 'EUR';
-  if (c.includes('£')) return 'GBP';
+export function standardizeCurrency(rawValue: unknown): string | null {
+  if (typeof rawValue !== 'string') return null;
+  const cleaned = rawValue.trim().toUpperCase();
+  if (!cleaned) return null;
+  if (CURRENCY_CODES[cleaned]) return cleaned;
+  if (cleaned.includes('₹') || cleaned.includes('RS')) return 'INR';
+  if (cleaned.includes('A$')) return 'AUD';
+  if (cleaned.includes('S$')) return 'SGD';
+  if (cleaned.includes('AED')) return 'AED';
+  if (cleaned.includes('CAD')) return 'CAD';
+  if (cleaned.includes('$')) return 'USD';
+  if (cleaned.includes('€')) return 'EUR';
+  if (cleaned.includes('£')) return 'GBP';
   return null;
 }
 
 /**
- * Detects currency from free text by symbol presence.
- * @param text Document text
- * @returns Currency code or null
+ * Finds currency code from document text by looking for symbols/codes.
+ * @param documentText Document text content
+ * @returns Standard 3-letter currency code or null if not found
  */
-export function detectCurrencyFromText(text: string): string | null {
-  if (text.includes('₹') || /Rs\.?/.test(text)) return 'INR';
-  if (/\bAUD\b|\bA\$/.test(text)) return 'AUD';
-  if (/\bSGD\b|\bS\$/.test(text)) return 'SGD';
-  if (/\bAED\b/.test(text)) return 'AED';
-  if (/\bCAD\b/.test(text)) return 'CAD';
-  if (text.includes('$')) return 'USD';
-  if (text.includes('€')) return 'EUR';
-  if (text.includes('£')) return 'GBP';
+export function findCurrencyInText(documentText: string): string | null {
+  if (documentText.includes('₹') || /Rs\.?/.test(documentText)) return 'INR';
+  if (/\bAUD\b|\bA\$/.test(documentText)) return 'AUD';
+  if (/\bSGD\b|\bS\$/.test(documentText)) return 'SGD';
+  if (/\bAED\b/.test(documentText)) return 'AED';
+  if (/\bCAD\b/.test(documentText)) return 'CAD';
+  if (documentText.includes('$')) return 'USD';
+  if (documentText.includes('€')) return 'EUR';
+  if (documentText.includes('£')) return 'GBP';
   return null;
 }

@@ -1,5 +1,5 @@
 /**
- * services/extraction.service.ts — Orchestrates PDF parsing, OCR, and LLM extraction.
+ * services/extraction.service.ts — Orchestrates document text parsing, OCR, and LLM extraction.
  */
 
 import fs from 'fs/promises';
@@ -20,36 +20,36 @@ import type {
   ExtractionResult,
   ExtractedData,
 } from '../types/index.js';
-import { tryAI } from './ai.service.js';
+import { extractWithAI } from './ai.service.js';
 import { ocrBuffer } from './ocr.service.js';
 import { extractRulesOnly, runLocalLLMExtraction } from './transformers.service.js';
-import { getCategory } from './registry.js';
+import { getDocumentTypeCategory } from './registry.js';
 import { buildCloudExtractionPrompt } from './strategies.js';
 import { REQUIRED_FIELDS } from './confidence.service.js';
-import { applyConversion } from '../utils/conversion.js';
+import { applyCurrencyConversion } from '../utils/conversion.js';
 
 const execFileAsync = promisify(execFile);
 
 /**
- * Augments extracted data with a converted amount (e.g., EUR → INR) using a real‑time API.
- * Called only when both totalAmount and currency are present and conversion is needed.
- * @param data The extracted data (may be mutated)
- * @returns Promise that resolves when enrichment attempt finishes (data may be unchanged on failure)
+ * Adds converted currency amount (e.g., EUR → INR) using a real-time API.
+ * Called only when both totalAmount and currency are present.
+ * @param extractedData The extracted data (may be updated)
+ * @returns Promise that resolves when enrichment finishes
  */
-async function enrichWithConversion(data: ExtractedData): Promise<void> {
+async function addCurrencyConversion(extractedData: ExtractedData): Promise<void> {
   try {
-    await applyConversion(data);
+    await applyCurrencyConversion(extractedData);
   } catch {
-    logger.warn('Skipping currency conversion enrichment');
+    logger.warn('Skipping currency conversion');
   }
 }
 
 /**
- * Detects image mime from buffer header.
+ * Detects image format from buffer header.
  * @param buffer File buffer
  * @returns Mime type
  */
-function getImageMime(buffer: Buffer): string {
+function getImageFormat(buffer: Buffer): string {
   if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
   return 'image/jpeg';
@@ -63,7 +63,7 @@ function getImageMime(buffer: Buffer): string {
 const MAX_PDF_PAGES = 50;
 const MAX_PDF_SIZE = 10 * 1024 * 1024; // 10 MB
 
-export async function parsePdfWithPdfjs(buffer: Buffer): Promise<string> {
+export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   if (buffer.length > MAX_PDF_SIZE) {
     logger.warn('PDF too large for text extraction', { size: buffer.length });
     return '';
@@ -92,13 +92,13 @@ export async function parsePdfWithPdfjs(buffer: Buffer): Promise<string> {
 }
 
 /**
- * Parses PDF text via pdfjs-dist (legacy Node build) then pdftotext fallback.
+ * Reads text from PDF via pdfjs-dist then pdftotext fallback.
  * @param buffer PDF buffer
  * @returns Extracted text
  */
-export async function parsePdf(buffer: Buffer): Promise<string> {
+export async function readPdfText(buffer: Buffer): Promise<string> {
   try {
-    return await parsePdfWithPdfjs(buffer);
+    return await extractTextFromPdf(buffer);
   } catch (e) {
     logger.warn('pdfjs-dist failed, trying pdftotext', {
       error: (e as Error).message,
@@ -125,11 +125,11 @@ export async function parsePdf(buffer: Buffer): Promise<string> {
 }
 
 /**
- * Lightweight heuristic document type detection.
+ * Quick heuristic document type detection.
  * @param text Document text
- * @returns Type and confidence
+ * @returns Type and confidence score
  */
-export function detectDocTypeLight(text: string): {
+export function guessDocumentType(text: string): {
   type: string;
   confidence: number;
 } {
@@ -196,14 +196,17 @@ export function detectDocTypeLight(text: string): {
 }
 
 /**
- * Compares deterministic vs model values on conflict-prone fields.
- * Vendor is excluded (formatting variance); numbers/dates/currency/numbers
- * that differ indicate a genuine extraction conflict worth escalating.
- * @param rules Deterministic output
- * @param model Model output
- * @returns Conflicting field names
+ * Finds field conflicts between rules vs model output.
+ * Vendor is excluded (formatting variance); numbers/dates/currency that
+ * differ indicate a genuine extraction conflict worth escalating.
+ * @param rulesResult Deterministic rules output
+ * @param modelResult Local model output
+ * @returns List of conflicting field names
  */
-function fieldsConflict(rules: Record<string, unknown>, model: Record<string, unknown>): string[] {
+function findFieldConflicts(
+  rules: Record<string, unknown>,
+  model: Record<string, unknown>
+): string[] {
   const out: string[] = [];
   const norm = (v: unknown): string | null =>
     typeof v === 'number' ? String(v) : typeof v === 'string' ? v.trim() : null;
@@ -221,7 +224,7 @@ function fieldsConflict(rules: Record<string, unknown>, model: Record<string, un
  * @param attempts Attempt records
  * @returns void
  */
-export async function recordAttempts(
+export async function saveExtractionAttempts(
   documentId: string,
   attempts: AttemptRecord[] | undefined
 ): Promise<void> {
@@ -290,7 +293,7 @@ function hasConfiguredCloudProviderKey(): boolean {
  * @param attempts Mutable attempt ledger
  * @returns Stage output or null when not applicable
  */
-function runRulesStage(
+function runRuleBasedStage(
   text: string,
   hasText: boolean,
   rulesFirst: boolean,
@@ -336,7 +339,7 @@ function runRulesStage(
  * @param typeVotes Mutable type-vote ledger
  * @returns Stage output (fresh=false when Flan yielded nothing)
  */
-async function runLocalStage(
+async function runLocalModelStage(
   text: string,
   hasText: boolean,
   rulesFirst: boolean,
@@ -402,7 +405,7 @@ async function runLocalStage(
         }
       } else if (!rulesFirst && hasText && data) {
         const ruleCheck = extractRulesOnly(text, lightType.type);
-        conflicts = fieldsConflict(ruleCheck.data, localRes.data as Record<string, unknown>);
+        conflicts = findFieldConflicts(ruleCheck.data, localRes.data as Record<string, unknown>);
         for (const k of conflicts) {
           const rv = ruleCheck.data[k];
           if (rv != null) (data as Record<string, unknown>)[k] = rv;
@@ -508,7 +511,7 @@ async function runLocalStage(
  * @param args Stage inputs including local output and ledgers
  * @returns Final result, or null when cloud is skipped/inapplicable
  */
-async function runCloudStage(args: {
+async function runCloudModelStage(args: {
   text: string;
   hasText: boolean;
   isImage: boolean;
@@ -581,11 +584,15 @@ async function runCloudStage(args: {
       conflicts: Object.keys(conflictMap).length > 0 ? conflictMap : undefined,
     });
     const imageBase64 = isImage || isScannedPdf ? buffer!.toString('base64') : undefined;
-    const imageMime = isScannedPdf ? 'application/pdf' : getImageMime(buffer!);
+    const imageMime = isScannedPdf ? 'application/pdf' : getImageFormat(buffer!);
     const aiText = hasText
       ? text
       : `Scanned ${guessedType} with no text layer — extract from image.`;
-    const ai: ExtractionResult = await tryAI(aiText, imageBase64, imageMime, prompt);
+    const ai: ExtractionResult = await extractWithAI(aiText, {
+      imageBase64,
+      mimeType: imageMime,
+      prompt,
+    });
     logger.info('AI extraction', {
       method: ai.method,
       confidence: ai.confidence,
@@ -626,14 +633,14 @@ async function runCloudStage(args: {
           cost: 0,
           succeeded: true,
         });
-        await enrichWithConversion(merged as ExtractedData);
+        await addCurrencyConversion(merged as ExtractedData);
         return {
           data: merged,
           confidence: Math.max(localConf, ai.confidence),
           method: 'local-llm+llm',
           documentType: ai.documentType || (localType as ExtractionResult['documentType']),
           documentTypeConfidence: ai.documentTypeConfidence || localTypeConf,
-          documentCategory: getCategory(ai.documentType || localType),
+          documentCategory: getDocumentTypeCategory(ai.documentType || localType),
           tokenUsage: ai.tokenUsage,
           attempts,
           typeVotes,
@@ -657,14 +664,14 @@ async function runCloudStage(args: {
         inputTokens: ai.tokenUsage?.inputTokens,
         outputTokens: ai.tokenUsage?.outputTokens,
       });
-      await enrichWithConversion(localData as ExtractedData);
+      await addCurrencyConversion(localData as ExtractedData);
       return {
         data: localData,
         confidence: localConf,
         method: 'local-llm',
         documentType: localType as ExtractionResult['documentType'],
         documentTypeConfidence: localTypeConf,
-        documentCategory: getCategory(localType),
+        documentCategory: getDocumentTypeCategory(localType),
         tokenUsage: ai.tokenUsage,
         attempts,
         typeVotes,
@@ -681,14 +688,14 @@ async function runCloudStage(args: {
       outputTokens: ai.tokenUsage?.outputTokens,
       fallbackReason: ai.confidence <= 0 ? 'cloud returned no confidence' : undefined,
     });
-    await enrichWithConversion(ai.data as ExtractedData);
+    await addCurrencyConversion(ai.data as ExtractedData);
     return {
       data: ai.data,
       confidence: ai.confidence,
       method: ai.method,
       documentType: ai.documentType as ExtractionResult['documentType'],
       documentTypeConfidence: ai.documentTypeConfidence,
-      documentCategory: getCategory(ai.documentType as string),
+      documentCategory: getDocumentTypeCategory(ai.documentType as string),
       tokenUsage: ai.tokenUsage,
       attempts,
       typeVotes,
@@ -707,14 +714,14 @@ async function runCloudStage(args: {
       error: (e as Error).message,
     });
     if (localData && Object.keys(localData).length > 0) {
-      await enrichWithConversion(localData as ExtractedData);
+      await addCurrencyConversion(localData as ExtractedData);
       return {
         data: localData,
         confidence: localConf,
         method: 'local-llm',
         documentType: localType as ExtractionResult['documentType'],
         documentTypeConfidence: localTypeConf,
-        documentCategory: getCategory(localType),
+        documentCategory: getDocumentTypeCategory(localType),
         attempts,
         typeVotes,
       };
@@ -724,19 +731,15 @@ async function runCloudStage(args: {
 }
 
 /**
- * Extracts structured data from file path or buffer.
- *
- * Cascade order (see ExtractionCascadeResult docs):
- *   heuristic-detect → rule-based → local-llm → cloud (only when needed)
- * Rules win on any conflict with ML outputs; cloud arbitration is forced
- * on rules/model disagreement. Cloud quota is spent only on successful
- * calls. See PRD deviations #10 and #16.
- *
+ * Extracts structured data from document file or buffer.
+ * Cascade: heuristic-detect → rule-based → local model → cloud (only when needed).
+ * Rules win on conflict with ML outputs; cloud arbitration is forced on
+ * rules/model disagreement. Cloud quota spent only on successful calls.
  * @param filePathOrBuffer File path or buffer
- * @param opts Optional cascade ordering (default rules-first) and cloud flag
- * @returns Extraction result with the full cascade ledger
+ * @param opts Optional cascade ordering and cloud flag
+ * @returns Extraction result with full cascade ledger
  */
-export async function extract(
+export async function extractDocumentData(
   filePathOrBuffer: string | Buffer,
   opts?: {
     order?: ExtractionOrder;
@@ -755,7 +758,7 @@ export async function extract(
       typeof filePathOrBuffer === 'string' ? await fs.readFile(filePathOrBuffer) : filePathOrBuffer;
     const isPdf = buffer.subarray(0, 4).toString() === '%PDF';
     if (isPdf) {
-      text = await parsePdf(buffer);
+      text = await readPdfText(buffer);
       if (text.trim().length < 20) {
         logger.info('Scanned PDF detected, invoking lib OCR', {
           textLen: text.trim().length,
@@ -779,7 +782,7 @@ export async function extract(
         }
       }
     } else {
-      const mime = getImageMime(buffer);
+      const mime = getImageFormat(buffer);
       logger.info('Image detected, invoking lib OCR', {
         mime,
         size: buffer.length,
@@ -812,7 +815,7 @@ export async function extract(
   const hasText = text.trim().length > 5;
   const isImage = buffer ? buffer.subarray(0, 4).toString() !== '%PDF' : false;
   const isScannedPdf = !hasText && buffer ? buffer.subarray(0, 4).toString() === '%PDF' : false;
-  const lightType = detectDocTypeLight(text);
+  const lightType = guessDocumentType(text);
   logger.debug('Light type detection', {
     docType: lightType.type,
     docTypeConfidence: lightType.confidence,
@@ -838,16 +841,18 @@ export async function extract(
   const rulesFirst = (opts?.order ?? 'rules-first') === 'rules-first';
   const allowCloud = opts?.allowCloud !== false;
   const cloudOnly = opts?.cloudOnly === true;
-  const rulesOut = cloudOnly ? null : runRulesStage(text, hasText, rulesFirst, lightType, attempts);
+  const rulesOut = cloudOnly
+    ? null
+    : runRuleBasedStage(text, hasText, rulesFirst, lightType, attempts);
   if (rulesOut?.passed && rulesOut.data) {
-    await enrichWithConversion(rulesOut.data as ExtractedData);
+    await addCurrencyConversion(rulesOut.data as ExtractedData);
     return {
       data: rulesOut.data,
       confidence: rulesOut.conf,
       method: 'rule-based',
       documentType: lightType.type as ExtractionResult['documentType'],
       documentTypeConfidence: lightType.confidence,
-      documentCategory: getCategory(lightType.type),
+      documentCategory: getDocumentTypeCategory(lightType.type),
       attempts,
       typeVotes,
       extractedText,
@@ -857,23 +862,23 @@ export async function extract(
   const seed = rulesOut?.data ? { data: rulesOut.data, conf: rulesOut.conf } : null;
   const local = cloudOnly
     ? null
-    : await runLocalStage(text, hasText, rulesFirst, lightType, seed, attempts, typeVotes);
+    : await runLocalModelStage(text, hasText, rulesFirst, lightType, seed, attempts, typeVotes);
   if (local && local.passed && local.data && Object.keys(local.data).length > 0) {
-    await enrichWithConversion(local.data as ExtractedData);
+    await addCurrencyConversion(local.data as ExtractedData);
     return {
       data: local.data,
       confidence: local.conf,
       method: 'local-llm',
       documentType: local.type as ExtractionResult['documentType'],
       documentTypeConfidence: local.typeConf,
-      documentCategory: getCategory(local.type),
+      documentCategory: getDocumentTypeCategory(local.type),
       attempts,
       typeVotes,
       extractedText,
       conflicts: local.conflicts,
     };
   }
-  const clouded = await runCloudStage({
+  const clouded = await runCloudModelStage({
     text,
     hasText,
     isImage,
@@ -888,14 +893,14 @@ export async function extract(
   });
   if (clouded) return { ...clouded, extractedText, conflicts: local?.conflicts ?? [] };
   if (local && local.data && Object.keys(local.data).length > 0) {
-    await enrichWithConversion(local.data as ExtractedData);
+    await addCurrencyConversion(local.data as ExtractedData);
     return {
       data: local.data,
       confidence: local.conf,
       method: 'local-llm',
       documentType: local.type as ExtractionResult['documentType'],
       documentTypeConfidence: local.typeConf,
-      documentCategory: getCategory(local.type),
+      documentCategory: getDocumentTypeCategory(local.type),
       attempts,
       typeVotes,
       extractedText,
@@ -915,7 +920,7 @@ export async function extract(
     method: 'local-llm',
     documentType: lightType.type as ExtractionResult['documentType'],
     documentTypeConfidence: lightType.confidence,
-    documentCategory: getCategory(lightType.type),
+    documentCategory: getDocumentTypeCategory(lightType.type),
     attempts,
     typeVotes,
     extractedText,
@@ -924,10 +929,12 @@ export async function extract(
 }
 
 /**
- * Runs cloud extraction over previously extracted text without reopening or
- * OCRing the original upload.
+ * Extracts data from previously extracted text without re-OCR.
+ * @param text Document text
+ * @param ctx Optional context with type, missing fields, conflicts
+ * @returns Extraction cascade result
  */
-export async function extractFromText(
+export async function extractDataFromText(
   text: string,
   ctx?: {
     predictedType?: DocumentType;
@@ -939,12 +946,9 @@ export async function extractFromText(
   }
 ): Promise<ExtractionCascadeResult> {
   const started = Date.now();
-  const detected = detectDocTypeLight(text);
-  const result = await tryAI(
-    text,
-    undefined,
-    undefined,
-    buildCloudExtractionPrompt({
+  const detected = guessDocumentType(text);
+  const result = await extractWithAI(text, {
+    prompt: buildCloudExtractionPrompt({
       predictedType: (ctx?.predictedType ?? detected.type) as DocumentType,
       missingFields: ctx?.missingFields?.length
         ? (ctx.missingFields as Array<
@@ -952,8 +956,8 @@ export async function extractFromText(
           >)
         : undefined,
       conflicts: ctx?.conflicts,
-    })
-  );
+    }),
+  });
   const attempts: AttemptRecord[] = [
     {
       method: 'llm',
@@ -966,7 +970,7 @@ export async function extractFromText(
       outputTokens: result.tokenUsage?.outputTokens,
     },
   ];
-  await enrichWithConversion(result.data as ExtractedData);
+  await addCurrencyConversion(result.data as ExtractedData);
   return {
     ...result,
     attempts,

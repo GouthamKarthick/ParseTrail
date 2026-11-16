@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToastContext } from '../context/ToastContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Text } from '../components/ui/Text';
+import { TextBlock } from '../components/ui/Text';
 import styles from './Upload.module.scss';
 import authStyles from './Auth.module.scss';
 
@@ -57,8 +57,8 @@ export default function Login() {
   return (
     <div className="page">
       <div className={styles['upload-card']}>
-        <Text level={1}>Welcome back</Text>
-        <Text variant="muted">Sign in to continue to ParseTrail.</Text>
+        <TextBlock headingLevel={1}>Welcome back</TextBlock>
+        <TextBlock textStyle="muted">Sign in to continue to ParseTrail.</TextBlock>
 
         <form onSubmit={handleSubmit} className={styles['upload-form']}>
           <div className={authStyles['auth-field']}>

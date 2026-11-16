@@ -6,7 +6,7 @@
 
 import { pool } from '../db/pool.js';
 import { logger } from '../config/logger.js';
-import { applyConversion, clearConversion } from '../utils/conversion.js';
+import { applyCurrencyConversion, clearConversion } from '../utils/conversion.js';
 
 /**
  * Re-applies recorded user corrections over freshly extracted data so
@@ -45,7 +45,7 @@ export async function withCorrectionsReapplied(
     if (financialAmountCorrected) {
       clearConversion(merged);
       try {
-        await applyConversion(merged);
+        await applyCurrencyConversion(merged);
       } catch {
         logger.warn('Reapplied-correction FX recompute failed', { docId });
       }
