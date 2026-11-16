@@ -3,7 +3,7 @@
  */
 
 import { Router } from 'express';
-import { rateLimit } from '../middleware/rate-limit.js';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { upload } from '../middleware/upload.js';
 import { validatePagination, validateIdParam } from '../middleware/validate.js';
 import { requireUser } from '../middleware/auth.js';
@@ -33,7 +33,7 @@ const expensiveRouteLimit = rateLimit({
   keyGenerator(req) {
     const userId = (req as { user?: { id?: string } }).user?.id;
     if (userId) return `user:${userId}`;
-    return `ip:${(req as { ip?: string }).ip || 'unknown'}`;
+    return `ip:${ipKeyGenerator(req.ip ?? '')}`;
   },
   handler(_req, res) {
     res.status(429).json({ error: 'Too many requests', code: 'RATE_LIMITED' });
