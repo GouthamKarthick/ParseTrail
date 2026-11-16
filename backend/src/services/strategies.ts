@@ -9,7 +9,7 @@
  */
 
 import type { DocumentType } from '../types/index.js';
-import { FINANCIAL_PROMPT } from '../prompts/financial.js';
+import { FINANCIAL_BASE_PROMPT } from '../prompts/financial.js';
 
 export interface TypeStrategy {
   type: DocumentType | 'other' | 'unknown';
@@ -101,6 +101,111 @@ export function getStrategy(documentType: string): TypeStrategy {
  */
 export function buildPromptForType(documentType: string): string {
   const t = (documentType || 'unknown').toLowerCase();
-  if (t === 'invoice' || !STRATEGIES[t]) return FINANCIAL_PROMPT;
-  return `${FINANCIAL_PROMPT}\n\n${STRATEGIES[t].promptFocus}`;
+  if (t === 'invoice' || !STRATEGIES[t]) return FINANCIAL_BASE_PROMPT;
+  return `${FINANCIAL_BASE_PROMPT}\n\n${STRATEGIES[t].promptFocus}`;
+}
+
+/**
+ * Per-type cloud prompt focus lines, keyed by DocumentType.
+ * Appended to FINANCIAL_BASE_PROMPt when a candidate type is known.
+ */
+export const CLOUD_TYPE_FOCUS: Record<DocumentType, string> = {
+  invoice: STRATEGIES.invoice.promptFocus,
+  receipt: STRATEGIES.receipt.promptFocus,
+  payment: STRATEGIES.payment.promptFocus,
+  bill: STRATEGIES.bill.promptFocus,
+  payslip: STRATEGIES.payslip.promptFocus,
+  settlement_slip: STRATEGIES.settlement_slip.promptFocus,
+  other:
+    'Type focus (other): Not one of the 6 core financial types. Only populate fields if clearly financial; otherwise return nulls and documentType="other".',
+  unknown:
+    'Classification guide (decide documentType from layout/headings):\n' +
+    '- invoice: Formal billing doc ("INVOICE", "TAX INVOICE", "RECHNUNG", GSTIN/VAT, Bill To + line items).\n' +
+    '- receipt: Narrow POS/order slip ("RECEIPT", "Bill No", "GRAND TOTAL", tendered/change).\n' +
+    '- payment: Confirmation of completed transfer ("Payment Successful", "Transaction ID", "UTR", "Paid").\n' +
+    '- bill: Recurring utility/telecom/statement ("Bill Date", "Due Date", "Account No", consumption/meter).\n' +
+    '- payslip: Salary statement ("Payslip", "Net Pay", "Gross Earnings", "Deductions", PF/Tax).\n' +
+    '- settlement_slip: Merchant/broker payout breakdown ("Settlement", "Payout", "Net Settled", fees).\n' +
+    '- other: Non-financial document.',
+};
+
+/**
+ * Context for building a cloud extraction prompt with optional arbitration data.
+ */
+export interface CloudPromptContext {
+  /** Heuristic/model-predicted document type, defaults to "unknown". */
+  predictedType?: DocumentType;
+  /** Fields missing from local extraction that cloud should prioritize. */
+  missingFields?: Array<'vendor' | 'invoiceNumber' | 'invoiceDate' | 'totalAmount' | 'currency'>;
+  /** Fields where rules and local model disagreed, keyed by field name. */
+  conflicts?: Partial<
+    Record<
+      'invoiceNumber' | 'invoiceDate' | 'totalAmount' | 'currency',
+      {
+        rulesValue: string | number | null;
+        localLlmValue: string | number | null;
+      }
+    >
+  >;
+}
+
+/**
+ * Builds the cloud extraction prompt for a given context.
+ * Combines FINANCIAL_BASE_PROMPT with per-type focus lines and optional
+ * arbitration context (conflicts / missing fields) for refine_jobs Phase 2.
+ * Invoice returns the base prompt verbatim (no behavior change).
+ * @param ctx Optional context with predictedType, missingFields, conflicts
+ * @returns Prompt text
+ */
+export function buildCloudExtractionPrompt(ctx: CloudPromptContext = {}): string {
+  const typeKey: DocumentType = ctx.predictedType ?? 'unknown';
+  const parts: string[] = [
+    FINANCIAL_BASE_PROMPT,
+    CLOUD_TYPE_FOCUS[typeKey] ?? CLOUD_TYPE_FOCUS.unknown,
+  ];
+
+  if (typeKey !== 'unknown') {
+    parts.push(
+      `Note: Upstream heuristic suggested "${typeKey}", but verify against the text and change documentType if the text clearly shows another type.`
+    );
+  }
+
+  if (ctx.conflicts && Object.keys(ctx.conflicts).length > 0) {
+    const conflictLines = Object.entries(ctx.conflicts).map(
+      ([field, vals]) =>
+        `- ${field}: rules=${JSON.stringify(vals?.rulesValue ?? null)} vs local_model=${JSON.stringify(vals?.localLlmValue ?? null)}`
+    );
+    parts.push(
+      `Arbitration context (local stages disagreed; verify directly from source text):\n${conflictLines.join('\n')}`
+    );
+  } else if (ctx.missingFields && ctx.missingFields.length > 0) {
+    parts.push(`Priority missing fields to inspect carefully: ${ctx.missingFields.join(', ')}.`);
+  }
+
+  parts.push('Document text:');
+  return parts.join('\n\n');
+}
+
+/**
+ * Builds the ultra-compact local Flan-T5 prompt for the 5 core ExtractedData fields.
+ * Designed for LaMini-Flan-T5-77M's ~512-token input budget: short instruction +
+ * one 1-shot example + truncated text snippet.
+ * @param text Raw document text
+ * @param oneShotExample Compact "Text: ...\nJSON: ..." example for the document type
+ * @param maxChars Max characters of text to include (default 1400)
+ * @returns Prompt text
+ */
+export function buildLocalFlanPrompt(
+  text: string,
+  oneShotExample: string,
+  maxChars = 1400
+): string {
+  const snippet = text.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+  return `Extract vendor, invoiceNumber, invoiceDate (YYYY-MM-DD), totalAmount (number), currency (3-letter code) as JSON. Use null if unknown. Never copy headings or payment labels as vendor.
+
+Example:
+${oneShotExample}
+
+Text: ${snippet}
+JSON:`;
 }

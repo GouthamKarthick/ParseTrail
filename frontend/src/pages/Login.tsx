@@ -8,7 +8,6 @@ import { useAuth } from '../context/AuthContext';
 import { useToastContext } from '../context/ToastContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Heading } from '../components/ui/Heading';
 import { Text } from '../components/ui/Text';
 import styles from './Upload.module.scss';
 import authStyles from './Auth.module.scss';
@@ -58,7 +57,7 @@ export default function Login() {
   return (
     <div className="page">
       <div className={styles['upload-card']}>
-        <Heading level={1}>Welcome back</Heading>
+        <Text level={1}>Welcome back</Text>
         <Text variant="muted">Sign in to continue to ParseTrail.</Text>
 
         <form onSubmit={handleSubmit} className={styles['upload-form']}>

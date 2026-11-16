@@ -327,17 +327,19 @@ describe('controller — listDocuments / getDocument', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ total: 2 }));
   });
 
-  it('getDocument 400 invalid uuid', async () => {
+  it('getDocument uses parsedId from middleware', async () => {
+    vi.mocked(pool.query).mockResolvedValue([[]] as any);
     const res = mockRes();
     await getDocument(
       {
-        params: { id: 'bad' },
+        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
         user: { id: 'test-user', email: 'test@example.com' },
       } as any,
       res,
       vi.fn()
     );
-    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.status).toHaveBeenCalledWith(404);
   });
 
   it('getDocument 404 when not found', async () => {
@@ -346,6 +348,7 @@ describe('controller — listDocuments / getDocument', () => {
     await getDocument(
       {
         params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
         user: { id: 'test-user', email: 'test@example.com' },
       } as any,
       res,
@@ -369,6 +372,7 @@ describe('controller — listDocuments / getDocument', () => {
     await getDocument(
       {
         params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
         user: { id: 'test-user', email: 'test@example.com' },
       } as any,
       res,
@@ -381,17 +385,20 @@ describe('controller — listDocuments / getDocument', () => {
   describe('controller — deleteDocument', () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it('400 invalid uuid', async () => {
+    it('uses parsedId from middleware', async () => {
+      vi.mocked(pool.query).mockResolvedValue([[]] as any);
       const res = mockRes();
       await deleteDocument(
         {
-          params: { id: 'bad' },
+          params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          parsedId: '550e8400-e29b-41d4-a716-446655440000',
           user: { id: 'test-user', email: 'test@example.com' },
         } as any,
         res,
         vi.fn()
       );
-      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(vi.mocked(fs.unlink)).not.toHaveBeenCalled();
     });
 
     it('404 when document not found for user', async () => {
@@ -400,6 +407,7 @@ describe('controller — listDocuments / getDocument', () => {
       await deleteDocument(
         {
           params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          parsedId: '550e8400-e29b-41d4-a716-446655440000',
           user: { id: 'test-user', email: 'test@example.com' },
         } as any,
         res,
@@ -418,6 +426,7 @@ describe('controller — listDocuments / getDocument', () => {
       await deleteDocument(
         {
           params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          parsedId: '550e8400-e29b-41d4-a716-446655440000',
           user: { id: 'test-user', email: 'test@example.com' },
         } as any,
         res,
@@ -437,6 +446,7 @@ describe('controller — listDocuments / getDocument', () => {
       await deleteDocument(
         {
           params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          parsedId: '550e8400-e29b-41d4-a716-446655440000',
           user: { id: 'test-user', email: 'test@example.com' },
         } as any,
         res,
@@ -451,6 +461,7 @@ describe('controller — listDocuments / getDocument', () => {
       await deleteDocument(
         {
           params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+          parsedId: '550e8400-e29b-41d4-a716-446655440000',
           user: { id: 'test-user', email: 'test@example.com' },
         } as any,
         res,
@@ -474,27 +485,19 @@ describe('controller — listDocuments / getDocument', () => {
     });
   });
 
-  it('getAttempts 401 when unauthenticated', async () => {
-    const res = mockRes();
-    await getAttempts(
-      { params: { id: '550e8400-e29b-41d4-a716-446655440000' } } as any,
-      res,
-      vi.fn()
-    );
-    expect(res.status).toHaveBeenCalledWith(401);
-  });
-
-  it('getAttempts 400 invalid uuid', async () => {
+  it('getAttempts uses user and parsedId from middleware', async () => {
+    vi.mocked(pool.query).mockResolvedValue([[]] as any);
     const res = mockRes();
     await getAttempts(
       {
-        params: { id: 'bad' },
+        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
         user: { id: 'test-user', email: 'test@example.com' },
       } as any,
       res,
       vi.fn()
     );
-    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.status).toHaveBeenCalledWith(404);
   });
 
   it('getAttempts 404 when document not found', async () => {
@@ -503,6 +506,7 @@ describe('controller — listDocuments / getDocument', () => {
     await getAttempts(
       {
         params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
         user: { id: 'test-user', email: 'test@example.com' },
       } as any,
       res,
@@ -525,6 +529,7 @@ describe('controller — listDocuments / getDocument', () => {
     await reprocessDocument(
       {
         params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
         user: { id: 'test-user', email: 'test@example.com' },
       } as any,
       res,
@@ -548,6 +553,7 @@ describe('controller — listDocuments / getDocument', () => {
     await reprocessDocument(
       {
         params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
         user: { id: 'test-user', email: 'test@example.com' },
       } as any,
       res,
@@ -778,6 +784,7 @@ describe('controller — listDocuments / getDocument', () => {
     await getAttempts(
       {
         params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
         user: { id: 'test-user', email: 'test@example.com' },
       } as any,
       res,

@@ -8,7 +8,6 @@ import { uploadDocument, ApiError } from '../api/client';
 import { useToastContext, kindFromStatus } from '../context/ToastContext';
 import { validateUploadFile } from '../utils/security';
 import { Button } from '../components/ui/Button';
-import { Heading } from '../components/ui/Heading';
 import { Text } from '../components/ui/Text';
 import styles from './Upload.module.scss';
 
@@ -122,7 +121,7 @@ export default function Upload() {
   return (
     <div className="page">
       <div className={styles['upload-card']}>
-        <Heading level={1}>Upload document</Heading>
+        <Text level={1}>Upload document</Text>
         <Text variant="muted">
           PDF, PNG, JPG — max 10MB. Scanned images are OCR&apos;d automatically.
         </Text>

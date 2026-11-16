@@ -3,23 +3,24 @@
  */
 
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
+import { rateLimit } from '../middleware/rate-limit.js';
 import { upload } from '../middleware/upload.js';
-import { validatePagination } from '../middleware/validate.js';
+import { validatePagination, validateIdParam } from '../middleware/validate.js';
+import { requireUser } from '../middleware/auth.js';
 import {
   uploadDocument,
   listDocuments,
   getDocument,
   deleteDocument,
   getAttempts,
-  reprocessDocument,
-  retryDocumentRefinement,
+} from '../controllers/documents.controller.js';
+import { reprocessDocument, retryDocumentRefinement } from '../controllers/refine.controller.js';
+import {
   correctField,
   listCorrections,
   correctionStats,
-  getSummary,
-  exportSummary,
-} from '../controllers/documents.controller.js';
+} from '../controllers/corrections.controller.js';
+import { getSummary, exportSummary } from '../controllers/summary.controller.js';
 
 const router = Router();
 
@@ -39,17 +40,29 @@ const expensiveRouteLimit = rateLimit({
   },
 });
 
-router.post('/documents/upload', upload.single('file'), uploadDocument);
-router.get('/documents/summary', getSummary);
-router.get('/documents/summary/export', exportSummary);
-router.get('/documents', validatePagination, listDocuments);
-router.get('/documents/:id/attempts', getAttempts);
-router.post('/documents/:id/refinement/retry', expensiveRouteLimit, retryDocumentRefinement);
-router.post('/documents/:id/reprocess', expensiveRouteLimit, reprocessDocument);
-router.post('/documents/:id/corrections', correctField);
-router.get('/documents/:id/corrections', listCorrections);
-router.get('/documents/corrections/stats', correctionStats);
-router.get('/documents/:id', getDocument);
-router.delete('/documents/:id', deleteDocument);
+router.post('/documents/upload', requireUser, upload.single('file'), uploadDocument);
+router.get('/documents/summary', requireUser, getSummary);
+router.get('/documents/summary/export', requireUser, exportSummary);
+router.get('/documents', requireUser, validatePagination, listDocuments);
+router.get('/documents/:id/attempts', requireUser, validateIdParam, getAttempts);
+router.post(
+  '/documents/:id/refinement/retry',
+  requireUser,
+  expensiveRouteLimit,
+  validateIdParam,
+  retryDocumentRefinement
+);
+router.post(
+  '/documents/:id/reprocess',
+  requireUser,
+  expensiveRouteLimit,
+  validateIdParam,
+  reprocessDocument
+);
+router.post('/documents/:id/corrections', requireUser, validateIdParam, correctField);
+router.get('/documents/:id/corrections', requireUser, validateIdParam, listCorrections);
+router.get('/documents/corrections/stats', requireUser, correctionStats);
+router.get('/documents/:id', requireUser, validateIdParam, getDocument);
+router.delete('/documents/:id', requireUser, validateIdParam, deleteDocument);
 
 export default router;
