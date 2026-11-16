@@ -32,6 +32,13 @@ describe('utils — shared extractors', () => {
     expect(detectCurrencyFromText('Total €500')).toBe('EUR');
     expect(detectCurrencyFromText('Total £500')).toBe('GBP');
     expect(detectCurrencyFromText('Total 500')).toBeNull();
+    expect(detectCurrencyFromText('Annual AUDIT report 100')).toBeNull();
+    expect(detectCurrencyFromText('CADENCE services total 50')).toBeNull();
+    expect(detectCurrencyFromText('Total A$ 100')).toBe('AUD');
+    expect(detectCurrencyFromText('Total 100 AUD')).toBe('AUD');
+    expect(detectCurrencyFromText('Total S$100')).toBe('SGD');
+    expect(detectCurrencyFromText('Total 100 CAD')).toBe('CAD');
+    expect(detectCurrencyFromText('Total $100')).toBe('USD');
   });
   it('parseAmount scrubs locale noise', () => {
     expect(parseAmount('Rs. 1,200.00')).toBe(1200);

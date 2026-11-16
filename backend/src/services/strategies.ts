@@ -107,7 +107,7 @@ export function buildPromptForType(documentType: string): string {
 
 /**
  * Per-type cloud prompt focus lines, keyed by DocumentType.
- * Appended to FINANCIAL_BASE_PROMPt when a candidate type is known.
+ * Appended to FINANCIAL_BASE_PROMPT when a candidate type is known.
  */
 export const CLOUD_TYPE_FOCUS: Record<DocumentType, string> = {
   invoice: STRATEGIES.invoice.promptFocus,

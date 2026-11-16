@@ -42,10 +42,10 @@ export function normalizeCurrency(raw: unknown): string | null {
  */
 export function detectCurrencyFromText(text: string): string | null {
   if (text.includes('₹') || /Rs\.?/.test(text)) return 'INR';
-  if (/\bA\$\b|AUD/.test(text)) return 'AUD';
-  if (/\bS\$\b|SGD/.test(text)) return 'SGD';
-  if (text.includes('AED')) return 'AED';
-  if (text.includes('CAD')) return 'CAD';
+  if (/\bAUD\b|\bA\$/.test(text)) return 'AUD';
+  if (/\bSGD\b|\bS\$/.test(text)) return 'SGD';
+  if (/\bAED\b/.test(text)) return 'AED';
+  if (/\bCAD\b/.test(text)) return 'CAD';
   if (text.includes('$')) return 'USD';
   if (text.includes('€')) return 'EUR';
   if (text.includes('£')) return 'GBP';
