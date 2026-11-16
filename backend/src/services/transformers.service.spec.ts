@@ -57,6 +57,8 @@ describe('transformers — local model loading', () => {
 
   it('loads from the named pipeline export when default is absent', async () => {
     const previous = config.localLlmEnabled;
+    const previousEnv = process.env.LOCAL_LLM_ENABLED;
+    process.env.LOCAL_LLM_ENABLED = 'true';
     (config as unknown as { localLlmEnabled: boolean }).localLlmEnabled = true;
     vi.resetModules();
     vi.doMock('@huggingface/transformers', () => ({ pipeline: mockPipeline }));
@@ -83,6 +85,7 @@ describe('transformers — local model loading', () => {
         default: mockPipeline,
         pipeline: mockPipeline,
       }));
+      process.env.LOCAL_LLM_ENABLED = previousEnv;
       (config as unknown as { localLlmEnabled: boolean }).localLlmEnabled = previous;
     }
   });
