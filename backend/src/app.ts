@@ -2,7 +2,7 @@
  * app.ts — Express application factory with middleware, logging, and routes.
  */
 
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -15,6 +15,70 @@ import { errorHandler } from './middleware/error.js';
 import { logger } from './config/logger.js';
 import { config } from './config.js';
 import rateLimit from 'express-rate-limit';
+
+// ---------------------------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------------------------
+
+/**
+ * CSRF origin guard: mutating API requests that authenticate via cookie
+ * (no Bearer token) must send an Origin listed in config.corsOrigins.
+ * GET/HEAD/OPTIONS and Bearer-token requests are unaffected.
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ */
+function csrfOriginGuard(req: Request, res: Response, next: NextFunction) {
+  const method = req.method;
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return next();
+  }
+  if (!req.path.startsWith('/api')) {
+    return next();
+  }
+  if (req.headers.authorization?.startsWith('Bearer ')) {
+    return next();
+  }
+  const origin = req.headers.origin;
+  if (!origin || !config.corsOrigins.includes(origin)) {
+    res.status(403).json({ error: 'CSRF origin check failed', code: 'CSRF_ORIGIN' });
+    return;
+  }
+  next();
+}
+
+/**
+ * Database health check handler.
+ * @param _req Express request
+ * @param res Express response
+ */
+async function healthDb(_req: Request, res: Response) {
+  try {
+    const { pool } = await import('./db/pool.js');
+    await pool.query('SELECT 1 as ok');
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('Database health check failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.status(503).json({ ok: false });
+  }
+}
+
+/**
+ * Readiness check handler.
+ * @param _req Express request
+ * @param res Express response
+ */
+async function healthReady(_req: Request, res: Response) {
+  try {
+    const { pool } = await import('./db/pool.js');
+    await pool.query('SELECT 1 as ok');
+    res.json({ status: 'ready' });
+  } catch {
+    res.status(503).json({ status: 'not ready' });
+  }
+}
 
 /**
  * Creates and configures the Express application.
@@ -38,24 +102,7 @@ export function createApp() {
   // CSRF origin guard: mutating API requests that authenticate via cookie
   // (no Bearer token) must send an Origin listed in config.corsOrigins.
   // GET/HEAD/OPTIONS and Bearer-token requests are unaffected.
-  app.use((req, res, next) => {
-    const method = req.method;
-    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
-      return next();
-    }
-    if (!req.path.startsWith('/api')) {
-      return next();
-    }
-    if (req.headers.authorization?.startsWith('Bearer ')) {
-      return next();
-    }
-    const origin = req.headers.origin;
-    if (!origin || !config.corsOrigins.includes(origin)) {
-      res.status(403).json({ error: 'CSRF origin check failed', code: 'CSRF_ORIGIN' });
-      return;
-    }
-    next();
-  });
+  app.use(csrfOriginGuard);
 
   app.use((req, _res, next) => {
     logger.info(`${req.method} ${req.path}`, {
@@ -105,28 +152,9 @@ export function createApp() {
 
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
-  app.get('/health/db', async (_req, res) => {
-    try {
-      const { pool } = await import('./db/pool.js');
-      await pool.query('SELECT 1 as ok');
-      res.json({ ok: true });
-    } catch (error) {
-      logger.error('Database health check failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(503).json({ ok: false });
-    }
-  });
+  app.get('/health/db', healthDb);
 
-  app.get('/health/ready', async (_req, res) => {
-    try {
-      const { pool } = await import('./db/pool.js');
-      await pool.query('SELECT 1 as ok');
-      res.json({ status: 'ready' });
-    } catch {
-      res.status(503).json({ status: 'not ready' });
-    }
-  });
+  app.get('/health/ready', healthReady);
 
   app.use('/api/auth', authRouter);
   app.use('/api', authenticate, documentsRouter);

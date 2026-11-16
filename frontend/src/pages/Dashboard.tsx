@@ -51,6 +51,16 @@ function formatType(v: string) {
   return v.replace(/_/g, ' ');
 }
 
+/**
+ * Format x-axis tick label for the by-type chart.
+ * Shortens "settlement_slip" to "settle." for readability.
+ * @param value - Raw tick value
+ * @returns Formatted label
+ */
+function formatTickLabel(value: string) {
+  return value === 'settlement_slip' ? 'settle.' : formatType(value);
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -197,12 +207,7 @@ export default function Dashboard() {
                       fill: theme === 'dark' ? '#94a3b8' : '#6b7280',
                     }}
                     interval={0}
-                    tickFormatter={
-                      ((value: string) =>
-                        value === 'settlement_slip' ? 'settle.' : formatType(value)) as unknown as (
-                        v: string
-                      ) => string
-                    }
+                    tickFormatter={formatTickLabel as unknown as (v: string) => string}
                     angle={0}
                     dy={8}
                     height={30}
