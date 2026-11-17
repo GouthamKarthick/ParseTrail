@@ -69,4 +69,7 @@ export interface Document {
   updated_at: string;
   refine_status?: string | null;
   refine_error?: string | null;
+  confidence?: number | null;
+  reviewed_at?: string | null;
+  needs_review?: boolean;
 }

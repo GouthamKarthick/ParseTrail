@@ -1,8 +1,9 @@
 /**
- * @fileoverview Upload page — file selection, suspicious-name guard, client-side validation, and document upload flow.
+ * @fileoverview Upload page — multi-file selection, client-side validation,
+ * and sequential per-file upload with per-file status.
  */
 
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { uploadDocument, ApiError } from '../api/client';
 import { useToastContext, kindFromStatus } from '../context/ToastContext';
@@ -13,151 +14,233 @@ import { Text } from '../components/ui/Text';
 import styles from './Upload.module.scss';
 
 // ---------------------------------------------------------------------------
+// Constants & types
+// ---------------------------------------------------------------------------
+
+const MAX_FILES = 10;
+
+type UploadItemStatus =
+  'waiting' | 'uploading' | 'done' | 'duplicate' | 'failed' | 'skipped' | 'not-sent';
+
+type UploadItem = {
+  id: string;
+  file: File;
+  status: UploadItemStatus;
+  error?: string;
+  docId?: string;
+  docName?: string;
+};
+
+function statusLabel(status: UploadItemStatus): string {
+  switch (status) {
+    case 'waiting':
+      return 'Waiting';
+    case 'uploading':
+      return 'Uploading…';
+    case 'done':
+      return 'Done';
+    case 'duplicate':
+      return 'Duplicate';
+    case 'failed':
+      return 'Failed';
+    case 'skipped':
+      return 'Skipped';
+    case 'not-sent':
+      return 'Not sent';
+    default:
+      return status;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 /**
- * Upload lifecycle state.
- * - idle: no upload in progress
- * - uploading: file sent to backend, awaiting response
- * - queued: backend accepted (202), extraction running in background worker
- */
-type UploadState = 'idle' | 'uploading' | 'queued';
-
-/**
- * Document upload page.
+ * Document upload page. Accepts up to MAX_FILES per selection and uploads them
+ * one after another using the existing single-file upload endpoint.
  * @returns Upload page element
  * @example <Upload />
  */
 export default function Upload() {
-  const [file, setFile] = useState<File | null>(null);
+  const [items, setItems] = useState<UploadItem[]>([]);
   const [language, setLanguage] = useState('auto');
-  const [uploadState, setUploadState] = useState<UploadState>('idle');
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadedDoc, setUploadedDoc] = useState<{ id: string; name: string } | null>(null);
+  const [processing, setProcessing] = useState(false);
   const { show } = useToastContext();
   const nav = useNavigate();
 
+  const waitingItems = items.filter(i => i.status === 'waiting');
+  const hasItems = items.length > 0;
+  const disabled = processing || !hasItems || waitingItems.length === 0;
+
   /**
-   * Handle native file input change with frontend security check.
+   * Handle native file input change with per-file validation.
+   * Invalid files are recorded as "skipped" and are not uploaded.
    * @param e - Input change event
    */
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const f = e.target.files?.[0] ?? null;
-      if (!f) return;
-      const validationError = validateUploadFile(f);
-      if (validationError) {
-        show('warning', validationError);
-        e.target.value = '';
-        return;
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = '';
+      if (files.length === 0) return;
+      const added: UploadItem[] = [];
+      const stamp = Date.now();
+      const errors: string[] = [];
+      for (let i = 0; i < files.length && added.length < MAX_FILES; i++) {
+        const f = files[i];
+        const validationError = validateUploadFile(f);
+        if (validationError) {
+          added.push({ id: `${stamp}-${i}`, file: f, status: 'skipped', error: validationError });
+          errors.push(validationError);
+        } else {
+          added.push({ id: `${stamp}-${i}`, file: f, status: 'waiting' });
+        }
       }
-      setFile(f);
-      setUploadError(null);
-      setUploadedDoc(null);
+      setItems(prev => [...prev, ...added]);
+      if (errors.length > 0) {
+        show('warning', errors.join('; '));
+      }
     },
     [show]
   );
 
   /**
-   * Submit selected file to backend.
-   * @param e - Form submit event
+   * Upload queued files sequentially, never in parallel.
+   * @returns void
    */
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!file) return;
-    const fileToUpload = file;
-    const validationError = validateUploadFile(fileToUpload);
-    if (validationError) {
-      show('warning', validationError);
-      return;
-    }
-    setUploadState('uploading');
-    setUploadError(null);
+  async function processQueue() {
+    const todo = items.filter(i => i.status === 'waiting');
+    if (todo.length === 0) return;
+    setProcessing(true);
     try {
-      const res = await uploadDocument(fileToUpload, language === 'auto' ? undefined : language);
-      // 202 accepted — extraction runs in background worker
-      setUploadState('queued');
-      setUploadedDoc({ id: res.id, name: res.name });
-      show('success', `Uploaded ${res.name} — extracting…`);
-    } catch (e) {
-      setUploadState('idle');
-      const err = e as ApiError;
-      if (
-        err.status === 409 &&
-        (err.code === 'DUPLICATE_CONTENT' || err.code === 'DUPLICATE_UPDATED')
-      ) {
-        show(
-          'warning',
-          err.duplicateOf
-            ? `This looks like a duplicate of an existing document. Open it`
-            : 'This looks like a duplicate of an existing document.'
-        );
-        if (err.duplicateOf) nav(`/documents/${err.duplicateOf}`);
-      } else if (err.code === 'SUSPICIOUS_INPUT') {
-        show('warning', err.message || 'Suspicious input detected — not saved');
-      } else {
-        const kind = err.status ? kindFromStatus(err.status) : 'error';
-        show(kind, err.message || 'Upload failed');
-        setUploadError(err.message || 'Upload failed');
+      for (const item of todo) {
+        setItems(prev => prev.map(i => (i.id === item.id ? { ...i, status: 'uploading' } : i)));
+        try {
+          const res = await uploadDocument(item.file, language === 'auto' ? undefined : language);
+          setItems(prev =>
+            prev.map(i =>
+              i.id === item.id ? { ...i, status: 'done', docId: res.id, docName: res.name } : i
+            )
+          );
+          show('success', `Uploaded ${res.name} — extracting…`);
+        } catch (e) {
+          const err = e as ApiError;
+          if (
+            err.status === 409 &&
+            (err.code === 'DUPLICATE_CONTENT' || err.code === 'DUPLICATE_UPDATED')
+          ) {
+            setItems(prev =>
+              prev.map(i =>
+                i.id === item.id
+                  ? { ...i, status: 'duplicate', error: err.message, docId: err.duplicateOf }
+                  : i
+              )
+            );
+            show(
+              'warning',
+              err.duplicateOf
+                ? 'This looks like a duplicate of an existing document.'
+                : 'This looks like a duplicate of an existing document.'
+            );
+            if (err.duplicateOf) nav(`/documents/${err.duplicateOf}`);
+          } else if (err.status === 429) {
+            // Rate limit hit: stop the queue and mark remaining files not sent.
+            setItems(prev =>
+              prev.map(i => (i.status === 'waiting' ? { ...i, status: 'not-sent' } : i))
+            );
+            show('error', 'Too many uploads, try again in a minute');
+            break;
+          } else {
+            setItems(prev =>
+              prev.map(i =>
+                i.id === item.id
+                  ? { ...i, status: 'failed', error: err.message || 'Upload failed' }
+                  : i
+              )
+            );
+            const kind = err.status ? kindFromStatus(err.status) : 'error';
+            show(kind, err.message || 'Upload failed');
+          }
+        }
       }
+    } finally {
+      setProcessing(false);
     }
   }
 
   /**
-   * Reset the upload form to its initial state.
+   * Reset the upload page to its initial state.
    */
   function resetUpload() {
-    setFile(null);
-    setUploadState('idle');
-    setUploadError(null);
-    setUploadedDoc(null);
+    setItems([]);
+    setProcessing(false);
+    setLanguage('auto');
     const input = document.querySelector('input[type="file"]') as HTMLInputElement | null;
     if (input) input.value = '';
   }
-
-  const isUploading = uploadState === 'uploading';
-  const isQueued = uploadState === 'queued';
 
   return (
     <div className="page">
       <div className={styles['upload-card']}>
         <Heading level={1}>Upload document</Heading>
         <Text variant="muted">
-          PDF, PNG, JPG — max 10MB. Scanned images are OCR&apos;d automatically.
+          PDF, PNG, JPG — max 10MB. Up to {MAX_FILES} files at a time, uploaded one after another.
         </Text>
 
-        {uploadError && (
-          <Text variant="small" className={styles['upload-error']}>
-            {uploadError}
-          </Text>
-        )}
-
-        {isQueued && uploadedDoc && (
-          <div className={styles['upload-queued']}>
-            <Text variant="muted">Uploaded {uploadedDoc.name} — extracting…</Text>
-            <Button
-              type="button"
-              variant="ghost"
-              size="md"
-              onClick={() => nav(`/documents/${uploadedDoc.id}`)}
-            >
-              View document
-            </Button>
+        {items.length > 0 && (
+          <div className={styles['upload-list']}>
+            {items.map(item => (
+              <div key={item.id} className={styles['upload-item']}>
+                <span className={styles['upload-item-name']} title={item.file.name}>
+                  {item.file.name}
+                </span>
+                <span
+                  className={`${styles['upload-item-status']} ${styles[`upload-item-status-${item.status}`]}`}
+                >
+                  {statusLabel(item.status)}
+                </span>
+                {item.status === 'done' && item.docId && (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => nav(`/documents/${item.docId}`)}
+                  >
+                    View document
+                  </Button>
+                )}
+                {item.status === 'duplicate' && item.docId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => nav(`/documents/${item.docId}`)}
+                  >
+                    View existing
+                  </Button>
+                )}
+              </div>
+            ))}
+            {items.some(i => i.status === 'not-sent') && (
+              <Text variant="small" className={styles['upload-error']}>
+                Remaining files were not sent — too many uploads.
+              </Text>
+            )}
           </div>
         )}
 
-        <form onSubmit={onSubmit} className={styles['upload-form']}>
+        <form onSubmit={e => e.preventDefault()} className={styles['upload-form']}>
           <label className={styles['upload-dropzone']}>
             <input
               type="file"
               accept=".pdf,.png,.jpg,.jpeg"
+              multiple
               onChange={handleFileChange}
               className={styles['upload-file-input']}
-              disabled={isUploading || isQueued}
+              disabled={processing}
             />
             <span className={styles['upload-drop-text']}>
-              {file ? file.name : 'Drop file here or click to browse'}
+              {hasItems ? `${items.length} file(s) ready` : 'Drop files here or click to browse'}
             </span>
             <span className={styles['upload-drop-hint']}>Supported: .pdf .png .jpg .jpeg</span>
           </label>
@@ -167,7 +250,7 @@ export default function Upload() {
             <select
               value={language}
               onChange={e => setLanguage(e.target.value)}
-              disabled={isUploading || isQueued}
+              disabled={processing}
             >
               <option value="auto">Auto / English</option>
               <option value="de">German</option>
@@ -188,21 +271,22 @@ export default function Upload() {
           <div className={styles['upload-actions']}>
             <Button
               type="submit"
-              disabled={!file || isUploading || isQueued}
+              disabled={disabled}
               variant="primary"
               size="md"
+              onClick={() => processQueue()}
             >
-              {isUploading ? 'Uploading…' : isQueued ? 'Extracting…' : 'Upload'}
+              {processing ? 'Extracting…' : 'Upload'}
             </Button>
-            {file && (
+            {hasItems && (
               <Button
                 type="button"
                 variant="ghost"
                 size="md"
                 onClick={resetUpload}
-                disabled={isUploading || isQueued}
+                disabled={processing}
               >
-                Clear
+                Clear list
               </Button>
             )}
           </div>

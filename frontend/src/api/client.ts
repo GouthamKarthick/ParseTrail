@@ -208,6 +208,37 @@ export async function exportSummary(format: 'pdf' | 'csv' = 'pdf', category?: st
   return await res.blob();
 }
 
+/**
+ * Export all owned documents as one CSV row per document, filtered by the
+ * same criteria as the document list.
+ * @param filters - List-style filters (q, document_type, document_category, date range)
+ * @returns CSV blob for download
+ * @example const blob = await exportDocuments({ q: "acme", document_type: "invoice" });
+ */
+export async function exportDocuments(filters: {
+  q?: string;
+  document_type?: string;
+  document_category?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<Blob> {
+  const params = new URLSearchParams();
+  if (filters.q) params.set('q', filters.q);
+  if (filters.document_type) params.set('document_type', filters.document_type);
+  if (filters.document_category) params.set('document_category', filters.document_category);
+  if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
+  if (filters.dateTo) params.set('dateTo', filters.dateTo);
+  const qs = params.toString();
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/export${qs ? `?${qs}` : ''}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(body.error || 'Export failed', res.status);
+  }
+  return await res.blob();
+}
+
 // ---------------------------------------------------------------------------
 // Password Reset
 // ---------------------------------------------------------------------------
@@ -363,6 +394,27 @@ export async function getDocument(id: string) {
 }
 
 /**
+ * Fetch a document's original file for preview.
+ * The endpoint is cookie-authenticated (credentials: 'include'), so no extra
+ * headers are needed.
+ * @param id - Document identifier
+ * @returns Blob of the file, or null when the original is no longer available (404)
+ * @throws {ApiError} on other non-ok responses
+ * @example const blob = await getDocumentFileBlob("abc-123");
+ */
+export async function getDocumentFileBlob(id: string): Promise<Blob | null> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}/file`, {
+    credentials: 'include',
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(body.error || 'Preview failed', res.status);
+  }
+  return await res.blob();
+}
+
+/**
  * Re-run local extraction on a document and enqueue cloud refinement.
  * @param id - Document identifier
  * @returns Reprocess outcome
@@ -382,6 +434,21 @@ export async function retryDocumentRefinement(id: string) {
     'POST',
     `/api/documents/${id}/refinement/retry`
   );
+}
+
+/**
+ * Approve a document: marks it as reviewed and clears the needs-review flag.
+ * A later correction clears the approval again.
+ * @param id - Document identifier
+ * @returns Updated document with reviewed_at and needs_review
+ * @example await approveDocument("abc-123");
+ */
+export async function approveDocument(id: string) {
+  return request<{
+    id: string;
+    needs_review: boolean;
+    reviewed_at: string | null;
+  }>('POST', `/api/documents/${id}/approve`);
 }
 
 /**

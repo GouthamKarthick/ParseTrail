@@ -3,7 +3,184 @@
  */
 
 import PDFDocument from 'pdfkit';
+import { pool } from '../db/pool.js';
 import { getSummary } from './summary.service.js';
+import { parseJsonColumn } from '../utils/json.js';
+
+/**
+ * Filters supported by the per-document CSV export (mirrors listDocuments).
+ */
+export interface DocumentExportFilters {
+  type?: string | string[];
+  q?: string;
+  category?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+const BOM = '\uFEFF';
+const CRLF = '\r\n';
+
+/**
+ * Escapes a single CSV cell. Text values starting with =, +, - or @ get a
+ * leading single quote to neutralise CSV formula injection. Real numeric
+ * columns are never prefixed. Fields containing a comma, quote or newline are
+ * wrapped in double quotes with inner quotes doubled.
+ * @param value Cell value
+ * @param isNumeric True for real numeric columns (no formula prefix)
+ * @returns Escaped cell text
+ */
+function docCell(value: string | number | null | undefined, isNumeric: boolean): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return String(value);
+  let s = String(value);
+  if (!isNumeric && /^[=+\-@]/.test(s)) s = `'${s}`;
+  if (/[,"\r\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function formatDate(value: unknown): string {
+  if (value instanceof Date) return value.toISOString().slice(0, 19).replace('T', ' ');
+  return String(value ?? '');
+}
+
+/**
+ * Generates a per-document CSV export: one row per document owned by the
+ * user, filtered by the same query filters as the document list.
+ * @param userId Id of the requesting user (ownership is enforced)
+ * @param filters Optional list-style filters
+ * @returns CSV string with UTF-8 BOM and CRLF line endings
+ */
+export async function generateDocumentsCsv(
+  userId: string,
+  filters: DocumentExportFilters
+): Promise<string> {
+  const where: string[] = ['user_id = ?', 'expires_at > NOW()'];
+  const params: unknown[] = [userId];
+
+  const types = Array.isArray(filters.type) ? filters.type : filters.type ? [filters.type] : [];
+  if (types.length) {
+    where.push(`document_type IN (${types.map(() => '?').join(',')})`);
+    params.push(...types);
+  }
+  if (filters.q) {
+    where.push('name LIKE ?');
+    const escaped = String(filters.q).replace(/[%_\\]/g, '\\$&');
+    params.push(`%${escaped}%`);
+  }
+  if (filters.category && ['financial', 'unknown'].includes(filters.category)) {
+    where.push('document_category = ?');
+    params.push(filters.category);
+  }
+  if (filters.dateFrom) {
+    where.push('created_at >= ?');
+    params.push(filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    where.push('created_at <= ?');
+    params.push(`${filters.dateTo} 23:59:59`);
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const [rows] = await pool.query(
+    `SELECT id, created_at, status, document_type, document_category, data FROM documents ${whereSql} ORDER BY created_at DESC LIMIT 5000`,
+    params
+  );
+  const docs = rows as Array<Record<string, unknown>>;
+  const ids = docs.map(d => d.id);
+
+  // Latest extraction-attempt confidence per document.
+  const confidenceByDoc: Record<string, string> = {};
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(',');
+    const [attempts] = await pool.query(
+      `SELECT document_id, confidence FROM extraction_attempts WHERE document_id IN (${placeholders}) ORDER BY seq DESC`,
+      ids
+    );
+    const seen = new Set<string>();
+    for (const a of attempts as Array<{ document_id: string; confidence: number }>) {
+      if (seen.has(a.document_id)) continue;
+      seen.add(a.document_id);
+      confidenceByDoc[a.document_id] = Number.isFinite(a.confidence) ? String(a.confidence) : '';
+    }
+  }
+
+  // Latest refine status per document.
+  const refineByDoc: Record<string, string> = {};
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(',');
+    const [rrows] = await pool.query(
+      `SELECT r.document_id, r.status FROM refine_jobs r INNER JOIN (SELECT document_id, MAX(created_at) AS mc FROM refine_jobs WHERE document_id IN (${placeholders}) GROUP BY document_id) latest ON latest.document_id = r.document_id AND latest.mc = r.created_at`,
+      ids
+    );
+    for (const r of rrows as Array<{ document_id: string; status: string }>) {
+      refineByDoc[r.document_id] = r.status;
+    }
+  }
+
+  // Documents owned by this user that have at least one correction row.
+  const correctedDocs = new Set<string>();
+  if (ids.length) {
+    const placeholders = ids.map(() => '?').join(',');
+    const [crows] = await pool.query(
+      `SELECT DISTINCT document_id FROM corrections WHERE user_id=? AND document_id IN (${placeholders})`,
+      [userId, ...ids]
+    );
+    for (const c of crows as Array<{ document_id: string }>) {
+      correctedDocs.add(c.document_id);
+    }
+  }
+
+  const parsed = docs.map(d => ({
+    doc: d,
+    data: (parseJsonColumn<Record<string, unknown> | null>(d.data as string | null, null) ??
+      {}) as Record<string, unknown>,
+  }));
+
+  // The totalAmountINR column only exists when at least one document has it.
+  const hasInr = parsed.some(p => Object.prototype.hasOwnProperty.call(p.data, 'totalAmountINR'));
+
+  const header = [
+    'id',
+    'created_at',
+    'document_type',
+    'document_category',
+    'status',
+    'confidence',
+    'vendor',
+    'invoiceNumber',
+    'date',
+    'currency',
+    'totalAmount',
+    ...(hasInr ? ['totalAmountINR'] : []),
+    'corrected',
+    'refine_status',
+  ];
+
+  const lines: string[] = [header.join(',')];
+  for (const { doc, data } of parsed) {
+    const id = String(doc.id ?? '');
+    const row: string[] = [
+      docCell(id, true),
+      docCell(formatDate(doc.created_at), true),
+      docCell(String(doc.document_type ?? ''), true),
+      docCell(String(doc.document_category ?? ''), true),
+      docCell(String(doc.status ?? ''), true),
+      docCell(confidenceByDoc[id] ?? '', true),
+      docCell(String(data.vendor ?? ''), false),
+      docCell(String(data.invoiceNumber ?? ''), false),
+      docCell(String(data.invoiceDate ?? ''), false),
+      docCell(String(data.currency ?? ''), false),
+      docCell(String(data.totalAmount ?? ''), true),
+    ];
+    if (hasInr) row.push(docCell(String(data.totalAmountINR ?? ''), true));
+    row.push(docCell(correctedDocs.has(id) ? 'yes' : 'no', true));
+    row.push(docCell(refineByDoc[id] ?? '', true));
+    lines.push(row.join(','));
+  }
+
+  return BOM + lines.join(CRLF) + CRLF;
+}
 
 /**
  * Generates summary PDF.

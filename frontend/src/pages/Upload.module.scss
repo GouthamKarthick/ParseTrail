@@ -72,6 +72,55 @@
     gap: 0.5rem;
     align-items: center;
   }
+
+  &-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  &-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid $color-border;
+    border-radius: $radius-md;
+    background: $color-surface;
+    font-size: 0.875em;
+  }
+
+  &-item-name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: $color-text;
+  }
+
+  &-item-status {
+    flex: 0 0 auto;
+    font-size: 0.75em;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  &-item-status-waiting,
+  &-item-status-uploading {
+    color: $color-ai;
+  }
+  &-item-status-done {
+    color: $color-success;
+  }
+  &-item-status-duplicate,
+  &-item-status-skipped,
+  &-item-status-not-sent {
+    color: $color-text-muted;
+  }
+  &-item-status-failed {
+    color: $color-error;
+  }
 }
 
 /* Responsive */

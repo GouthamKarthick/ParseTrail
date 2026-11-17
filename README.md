@@ -1,14 +1,16 @@
 # ParseTrail
 
+Drop in your bills, check only the doubtful fields, download one spreadsheet. Free.
+
 ParseTrail extracts structured fields from uploaded financial documents using rules, local Flan-T5 inference, and queued cloud refinement.
 
 **Live demo:** TODO: insert the deployed Render/Vercel URL (set `VITE_BACKEND_URL` to your Render backend).
 
 ## Screenshots
 
-![Dashboard — TODO: add screenshot](docs/screenshots/dashboard.png)
+![Detail page — original shown beside extracted fields](docs/screenshots/detail.png)
 
-![Document details — TODO: add screenshot](docs/screenshots/document-details.png)
+![CSV export — one row per document](docs/screenshots/export.png)
 
 ## Features
 
@@ -22,6 +24,10 @@ ParseTrail extracts structured fields from uploaded financial documents using ru
 - Filters the document list by type.
 - Shows a 30-day dashboard summary and exports it as CSV or PDF.
 - Shows a per-document extraction-attempt timeline (latest attempts in the UI).
+- Reads English and EU languages (French, Spanish, Italian, Dutch, Portuguese) via configurable, bundled OCR languages.
+- Shows the original uploaded file beside the extracted fields on the Detail page (image or PDF preview).
+- Flags documents that need review (low confidence or missing vendor/date/total) and lets you approve them.
+- Exports one row per document as CSV (UTF-8 BOM, Excel-friendly) with the same filters as the document list.
 
 ## How it works
 

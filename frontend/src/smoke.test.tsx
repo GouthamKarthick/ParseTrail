@@ -17,7 +17,16 @@ import Upload from './pages/Upload.tsx';
 import List from './pages/List.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { ToastProvider } from './context/ToastContext.tsx';
-import { login, uploadDocument, getDocument, deleteDocument, listDocuments } from './api/client.ts';
+import {
+  login,
+  uploadDocument,
+  getDocument,
+  deleteDocument,
+  listDocuments,
+  exportDocuments,
+  getDocumentFileBlob,
+  approveDocument,
+} from './api/client.ts';
 
 const NodeRequest = globalThis.Request;
 globalThis.Request = class extends NodeRequest {
@@ -38,6 +47,11 @@ vi.mock('./api/client.ts', () => ({
   uploadDocument: vi.fn(),
   deleteDocument: vi.fn(),
   listDocuments: vi.fn(),
+  exportDocuments: vi.fn().mockResolvedValue(new Blob(['id,name\n'])),
+  getDocumentFileBlob: vi.fn().mockResolvedValue(null),
+  approveDocument: vi
+    .fn()
+    .mockResolvedValue({ id: 'd1', needs_review: false, reviewed_at: '2026-01-02T00:00:00Z' }),
   me: vi.fn().mockResolvedValue({
     id: 'u1',
     email: 'user@example.com',
@@ -55,6 +69,9 @@ const mockUpload = vi.mocked(uploadDocument);
 const mockGetDocument = vi.mocked(getDocument);
 const mockDeleteDocument = vi.mocked(deleteDocument);
 const mockListDocuments = vi.mocked(listDocuments);
+const mockExportDocuments = vi.mocked(exportDocuments);
+const mockGetDocumentFileBlob = vi.mocked(getDocumentFileBlob);
+const mockApproveDocument = vi.mocked(approveDocument);
 
 function providers(children: ReactNode) {
   return (
@@ -206,6 +223,109 @@ describe('Upload page', () => {
     );
     expect(screen.getByRole('button', { name: /view document/i })).toBeTruthy();
   });
+
+  it('uploads three files sequentially in order', async () => {
+    mockUpload.mockClear();
+    mockUpload.mockResolvedValue({
+      id: 'd1',
+      name: 'a.pdf',
+      status: 'pending',
+      created_at: '2026-01-01T00:00:00Z',
+    } as any);
+
+    const { container } = renderAt('/', <Upload />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(['a'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['b'], 'b.pdf', { type: 'application/pdf' }),
+      new File(['c'], 'c.pdf', { type: 'application/pdf' }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    await userEvent.click(screen.getByRole('button', { name: /Upload/i }));
+
+    await vi.waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(3));
+    expect(mockUpload.mock.calls[0][0].name).toBe('a.pdf');
+    expect(mockUpload.mock.calls[1][0].name).toBe('b.pdf');
+    expect(mockUpload.mock.calls[2][0].name).toBe('c.pdf');
+  });
+
+  it('skips one invalid file and uploads the rest', async () => {
+    mockUpload.mockClear();
+    mockUpload.mockResolvedValue({
+      id: 'd1',
+      name: 'ok.pdf',
+      status: 'pending',
+      created_at: '2026-01-01T00:00:00Z',
+    } as any);
+
+    const { container } = renderAt('/', <Upload />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(['a'], 'ok.pdf', { type: 'application/pdf' }),
+      new File(['x'], 'script.exe', { type: 'application/x-msdownload' }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    await userEvent.click(screen.getByRole('button', { name: /Upload/i }));
+
+    await vi.waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
+    expect(mockUpload.mock.calls[0][0].name).toBe('ok.pdf');
+    expect(screen.getByText(/^Skipped$/)).toBeTruthy();
+  });
+
+  it('shows a 409 response as duplicate, not failure', async () => {
+    mockUpload.mockClear();
+    mockUpload.mockRejectedValueOnce({
+      status: 409,
+      code: 'DUPLICATE_CONTENT',
+      message: 'Duplicate document — already exists',
+      duplicateOf: 'dup-id',
+    } as any);
+
+    const { container } = renderAt('/', <Upload />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['a'], 'dup.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await userEvent.click(screen.getByRole('button', { name: /Upload/i }));
+
+    await vi.waitFor(() => expect(screen.getByText(/^Duplicate$/)).toBeTruthy());
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the queue on 429 and marks remaining not sent', async () => {
+    mockUpload.mockClear();
+    mockUpload
+      .mockResolvedValueOnce({
+        id: 'd1',
+        name: 'a.pdf',
+        status: 'pending',
+        created_at: '2026-01-01T00:00:00Z',
+      } as any)
+      .mockRejectedValueOnce({
+        status: 429,
+        code: 'RATE_LIMITED',
+        message: 'Too many requests',
+      } as any);
+
+    const { container } = renderAt('/', <Upload />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(['a'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['b'], 'b.pdf', { type: 'application/pdf' }),
+      new File(['c'], 'c.pdf', { type: 'application/pdf' }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    await userEvent.click(screen.getByRole('button', { name: /Upload/i }));
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/Too many uploads, try again in a minute/i)).toBeTruthy()
+    );
+    expect(mockUpload).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/^Not sent$/)).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -280,6 +400,41 @@ describe('List page', () => {
     const dialogButtons = dialogEl.querySelectorAll('button');
     await userEvent.click(dialogButtons[1]);
     await vi.waitFor(() => expect(mockDeleteDocument).toHaveBeenCalledWith('d1'));
+  });
+
+  it('Export CSV button renders and calls the endpoint with current filters', async () => {
+    renderAt('/', <List />);
+    await waitFor(() => expect(screen.getByText('invoice.pdf')).toBeTruthy());
+    await userEvent.click(screen.getByRole('button', { name: /Export CSV/i }));
+    await vi.waitFor(() => expect(mockExportDocuments).toHaveBeenCalled());
+  });
+
+  it('Needs review badge shows when needs_review is true', async () => {
+    mockListDocuments.mockResolvedValue({
+      documents: [
+        {
+          id: 'd1',
+          name: 'invoice.pdf',
+          status: 'done',
+          document_type: 'invoice',
+          document_category: 'financial',
+          data: { vendor: 'Acme', totalAmount: 100, currency: 'USD' },
+          needs_review: true,
+          refine_status: null,
+          error: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        } as any,
+      ],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    } as any);
+
+    renderAt('/', <List />);
+
+    await waitFor(() => expect(screen.getByText('invoice.pdf')).toBeTruthy());
+    expect(screen.getAllByText(/Needs review/i)).toHaveLength(2);
   });
 });
 
@@ -379,6 +534,96 @@ describe('Detail page', () => {
     expect(screen.getByText(/Upload a clearer file/i)).toBeTruthy();
     expect(screen.getByText(/Correct fields manually/i)).toBeTruthy();
     expect(screen.getByText(/provider quota exceeded/i)).toBeTruthy();
+  });
+
+  it('shows the original file preview for an image doc', async () => {
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'receipt.png',
+        status: 'done',
+        document_type: 'receipt',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 10, currency: 'USD' },
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
+    mockGetDocumentFileBlob.mockResolvedValue(new Blob(['fake-png'], { type: 'image/png' }));
+
+    // jsdom in this vitest setup lacks URL.createObjectURL; real browsers have it.
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    (URL as any).createObjectURL = () => 'mocked-object-url';
+    (URL as any).revokeObjectURL = () => {};
+
+    renderAt('/documents/d1', <Detail />);
+
+    await vi.waitFor(() => expect(screen.getByRole('img')).toBeTruthy());
+    expect(mockGetDocumentFileBlob).toHaveBeenCalledWith('d1');
+
+    (URL as any).createObjectURL = origCreate ?? (() => {});
+    (URL as any).revokeObjectURL = origRevoke ?? (() => {});
+  });
+
+  it('shows the muted fallback when the original file is unavailable (404)', async () => {
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'invoice.pdf',
+        status: 'done',
+        document_type: 'invoice',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 10, currency: 'USD' },
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
+    mockGetDocumentFileBlob.mockResolvedValue(null);
+
+    renderAt('/documents/d1', <Detail />);
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/Original file is no longer available/i)).toBeTruthy()
+    );
+  });
+
+  it('Approve calls the endpoint and the needs-review banner disappears', async () => {
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'invoice.pdf',
+        status: 'done',
+        document_type: 'invoice',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 10, currency: 'USD' },
+        needs_review: true,
+        reviewed_at: null,
+        refine_status: null,
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
+    mockApproveDocument.mockResolvedValue({
+      id: 'd1',
+      needs_review: false,
+      reviewed_at: '2026-01-02T00:00:00Z',
+    });
+
+    renderAt('/documents/d1', <Detail />);
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/Needs review: check the highlighted fields/i)).toBeTruthy()
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Approve/i }));
+    await vi.waitFor(() => expect(mockApproveDocument).toHaveBeenCalledWith('d1'));
+    await vi.waitFor(() =>
+      expect(screen.queryByText(/Needs review: check the highlighted fields/i)).toBeNull()
+    );
+    expect(screen.getByText(/1\/2\/2026/)).toBeTruthy();
   });
 });
 
