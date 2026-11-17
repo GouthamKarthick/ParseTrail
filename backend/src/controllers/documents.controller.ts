@@ -19,7 +19,12 @@ import { findDuplicateByContent, findDuplicateByHash } from '../services/dedup.s
 import { uuidSchema } from '../middleware/validate.js';
 import { getUser } from '../middleware/auth.js';
 import { getSummary as getSummaryData } from '../services/summary.service.js';
-import { generateSummaryPdf, generateSummaryCsv } from '../services/export.service.js';
+import {
+  generateSummaryPdf,
+  generateSummaryCsv,
+  generateDocumentsCsv,
+  type DocumentExportFilters,
+} from '../services/export.service.js';
 
 /**
  * Parses JSON data field from DB row.
@@ -766,6 +771,39 @@ export async function exportSummary(req: Request, res: Response, next: NextFunct
       `attachment; filename=parsetrail-summary-${new Date().toISOString().slice(0, 10)}.pdf`
     );
     res.send(pdf);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Exports one row per owned document as CSV (UTF-8 BOM, CRLF line ends).
+ * Filters mirror the document list (type, q, category, date range).
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
+export async function exportDocuments(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = getUser(req);
+    if (!user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    const filters: DocumentExportFilters = {
+      type: req.query.document_type as string | string[] | undefined,
+      q: req.query.q as string | undefined,
+      category: req.query.document_category as string | undefined,
+      dateFrom: req.query.dateFrom as string | undefined,
+      dateTo: req.query.dateTo as string | undefined,
+    };
+    const csv = await generateDocumentsCsv(user.id, filters);
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="parsetrail-export-${date}.csv"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(csv);
   } catch (err) {
     next(err);
   }

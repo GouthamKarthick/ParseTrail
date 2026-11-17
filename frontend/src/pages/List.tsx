@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { listDocuments, deleteDocument, ApiError } from '../api/client';
+import { listDocuments, deleteDocument, exportDocuments, ApiError } from '../api/client';
 import type { Document } from '../types';
 import { useToastContext, kindFromStatus } from '../context/ToastContext';
 import { Heading } from '../components/ui/Heading';
@@ -147,6 +147,28 @@ export default function List() {
     }
   }
 
+  async function handleExport() {
+    const filters: { q?: string; document_type?: string } = {};
+    if (qParam) filters.q = qParam;
+    if (selectedTypes.length) filters.document_type = selectedTypes.join(',');
+    try {
+      const blob = await exportDocuments(filters);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `parsetrail-export-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const err = e as ApiError | Error;
+      const status = (err as ApiError).status ?? 500;
+      const kind = kindFromStatus(status);
+      show(kind, err.message || 'Export failed');
+    }
+  }
+
   const hasFilters = Boolean(qParam || selectedTypes.length);
 
   return (
@@ -190,6 +212,9 @@ export default function List() {
           active={hasFilters}
           onToggle={toggleType}
         />
+        <Button variant="secondary" size="sm" onClick={handleExport} disabled={loading}>
+          Export CSV
+        </Button>
       </div>
 
       {view === 'list' ? (

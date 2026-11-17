@@ -96,4 +96,55 @@ describe('routes — documents', () => {
     }
     expect(status429).toBe(true);
   });
+
+  it('GET /api/documents/export 200 returns CSV with BOM and header', async () => {
+    const app = createApp();
+    // Use a distinct user id so the shared expensiveRouteLimit (exhausted by
+    // the rate-limit test for 'test-user') does not block this request.
+    const token = jwt.sign(
+      { id: 'export-user', email: 'export@example.com', emailVerified: true },
+      config.jwtSecret,
+      { algorithm: 'HS256' }
+    );
+    const exportAuth = { Authorization: `Bearer ${token}` };
+    (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+      const s = String(sql);
+      if (s.includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+        return [[{ id: 'export-user', password_changed_at: null }]];
+      }
+      if (s.includes('FROM documents')) {
+        return [
+          [
+            {
+              id: 'test-doc',
+              created_at: '2026-11-17 10:00:00',
+              status: 'done',
+              document_type: 'invoice',
+              document_category: 'financial',
+              data: JSON.stringify({ vendor: 'Acme', totalAmount: 1234.56 }),
+            },
+          ],
+        ];
+      }
+      return [[]];
+    });
+
+    const res = await request(app).get('/api/documents/export').set(exportAuth);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    expect(res.headers['content-disposition']).toContain('attachment');
+    expect(res.headers['content-disposition']).toContain('.csv');
+    expect(res.headers['cache-control']).toContain('no-store');
+    expect(res.text.startsWith('\uFEFF')).toBe(true);
+    expect(res.text).toContain(
+      'id,created_at,document_type,document_category,status,confidence,vendor,invoiceNumber,date,currency,totalAmount,corrected,refine_status'
+    );
+    expect(res.text).toContain('Acme');
+  });
+
+  it('GET /api/documents/export 401 without a user', async () => {
+    const app = createApp();
+    const res = await request(app).get('/api/documents/export');
+    expect(res.status).toBe(401);
+  });
 });
