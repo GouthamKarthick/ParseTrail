@@ -3,13 +3,26 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const mockExistsSync = vi.spyOn(fs, 'existsSync');
-const mockReadFileSync = vi.spyOn(fs, 'readFileSync');
+const mockExistsSync = vi.hoisted(() => vi.fn());
+const mockReadFileSync = vi.hoisted(() => vi.fn());
+const realFsHolder = vi.hoisted(() => ({ current: null as typeof import('fs') | null }));
+
+vi.mock('fs', async importOriginal => {
+  realFsHolder.current = await importOriginal();
+  return {
+    ...realFsHolder.current,
+    existsSync: mockExistsSync,
+    readFileSync: mockReadFileSync,
+  };
+});
 
 const originalEnv = { ...process.env };
 
 beforeEach(() => {
-  vi.restoreAllMocks();
+  mockExistsSync.mockImplementation((p: any) => realFsHolder.current!.existsSync(p));
+  mockReadFileSync.mockImplementation((p: any, ...rest: any[]) =>
+    realFsHolder.current!.readFileSync(p, ...rest)
+  );
   for (const key of Object.keys(process.env)) {
     if (!(key in originalEnv)) delete process.env[key];
   }
@@ -17,8 +30,6 @@ beforeEach(() => {
     process.env[key] = value;
   }
   delete process.env.AI_KEYS_FILE;
-  mockExistsSync.mockImplementation((p: any) => fs.existsSync(p));
-  mockReadFileSync.mockImplementation((p: any) => fs.readFileSync(p, 'utf8'));
 });
 
 afterEach(() => {
@@ -29,6 +40,8 @@ afterEach(() => {
     process.env[key] = value;
   }
   delete process.env.AI_KEYS_FILE;
+  mockExistsSync.mockReset();
+  mockReadFileSync.mockReset();
 });
 
 async function importAiKeys(): Promise<typeof import('./aiKeys.js')> {
@@ -38,8 +51,8 @@ async function importAiKeys(): Promise<typeof import('./aiKeys.js')> {
 
 describe('aiKeys — loadAiProviders', () => {
   it('returns null when no secrets file exists', async () => {
-    mockExistsSync.mockReturnValue(false);
     const { loadAiProviders } = await importAiKeys();
+    mockExistsSync.mockImplementation(() => false);
     expect(loadAiProviders()).toBeNull();
   });
 
@@ -161,13 +174,13 @@ describe('aiKeys — loadAiProviders', () => {
   it('honors AI_KEYS_FILE when /etc/secrets file also exists', async () => {
     // /etc/secrets doesn't actually exist; default existsSync handles this.
     // Only override readFileSync for /etc/secrets path (defensive, never hit).
-    mockReadFileSync.mockImplementation(p => {
+    mockReadFileSync.mockImplementation((p: any) => {
       if (String(p) === '/etc/secrets/ai-keys.json') {
         return JSON.stringify({
           providers: [{ name: 'anthropic', apiKey: 'sk-123', model: 'claude-3-haiku' }],
         });
       }
-      return fs.readFileSync(p, 'utf8');
+      return realFsHolder.current!.readFileSync(p, 'utf8');
     });
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-keys-'));
