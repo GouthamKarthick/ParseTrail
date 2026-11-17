@@ -92,6 +92,10 @@
       min-width: 6.5rem;
       max-width: 100%;
     }
+
+    .list-filter-chip {
+      min-width: 6.5rem;
+    }
   }
 
   &-table-wrap {
@@ -171,6 +175,9 @@
     }
     .list-status-error {
       color: $color-error;
+    }
+    .list-status-needs-review {
+      color: $color-warning;
     }
   }
 }

@@ -2,7 +2,7 @@
  * @fileoverview Detail page — polls document status and displays extracted data.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { usePolling } from '../hooks/usePolling';
 import { useToastContext } from '../context/ToastContext';
@@ -13,6 +13,7 @@ import {
   submitCorrection,
   listCorrections,
   getDocumentFileBlob,
+  approveDocument,
 } from '../api/client';
 import type { ExtractionAttempt, Correction } from '../types';
 import { Heading } from '../components/ui/Heading';
@@ -53,6 +54,7 @@ export default function Detail() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
+  const [approvedAt, setApprovedAt] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const latestLlmAttempt = [...attempts].reverse().find(attempt => attempt.method === 'llm');
   const latestLlmFailure =
@@ -93,6 +95,30 @@ export default function Detail() {
     return null;
   })();
 
+  // Fields whose absence triggers the needs-review banner/highlight.
+  const missingReviewFields = useMemo(() => {
+    const data = doc?.data ?? {};
+    const missing: string[] = [];
+    if (data.vendor == null || String(data.vendor).trim() === '') missing.push('vendor');
+    if (
+      (data.invoiceDate ?? data.date) == null ||
+      String(data.invoiceDate ?? data.date).trim() === ''
+    )
+      missing.push('date');
+    if (data.totalAmount == null || String(data.totalAmount).trim() === '') missing.push('total');
+    return missing;
+  }, [doc?.data]);
+
+  const docNeedsReview = doc?.needs_review === true && !approvedAt;
+  const isApproved = !!doc?.reviewed_at || !!approvedAt;
+
+  const isReviewFieldMissing = (k: string): boolean => {
+    if (k === 'vendor') return missingReviewFields.includes('vendor');
+    if (k === 'invoiceDate' || k === 'date') return missingReviewFields.includes('date');
+    if (k === 'totalAmount') return missingReviewFields.includes('total');
+    return false;
+  };
+
   // Extracted-fields content, shared by the single-column and two-column layouts.
   const fieldsContent = (
     <>
@@ -108,7 +134,9 @@ export default function Detail() {
           <tbody>
             {Object.entries(extractedFields).map(([k, v]) => (
               <tr key={k}>
-                <td>{k.replace(/([A-Z])/g, ' $1')}</td>
+                <td className={isReviewFieldMissing(k) ? styles['detail-field-missing'] : ''}>
+                  {k.replace(/([A-Z])/g, ' $1')}
+                </td>
                 <td>
                   {editing?.field === k ? (
                     <span className={styles['detail-edit']}>
@@ -286,6 +314,18 @@ export default function Detail() {
     }
   }
 
+  async function approveDocumentAction() {
+    if (!id) return;
+    try {
+      const r = await approveDocument(id);
+      setApprovedAt(r.reviewed_at ?? new Date().toISOString());
+      show('success', 'Document approved');
+      refresh();
+    } catch (e) {
+      show('error', (e as Error).message || 'Approve failed');
+    }
+  }
+
   useEffect(() => {
     if (error) {
       const isNotFound = error.toLowerCase().includes('not found') || error.includes('404');
@@ -347,6 +387,20 @@ export default function Detail() {
           >
             {deleting ? 'Deleting…' : 'Delete'}
           </Button>
+          {docNeedsReview ? (
+            <Button variant="secondary" size="sm" onClick={approveDocumentAction}>
+              Approve
+            </Button>
+          ) : (
+            isApproved && (
+              <Text variant="muted" className={styles['detail-date']}>
+                Approved:{' '}
+                <time dateTime={approvedAt ?? doc.reviewed_at ?? undefined}>
+                  {new Date(approvedAt || doc.reviewed_at!).toLocaleDateString()}
+                </time>
+              </Text>
+            )
+          )}
           <span className={styles['detail-date']}>
             <FormattedDate iso={doc.updated_at} inline />
           </span>
@@ -363,6 +417,11 @@ export default function Detail() {
           <Text as="p" variant="small" className={styles['detail-error']}>
             Error: {doc.error}
           </Text>
+        )}
+        {docNeedsReview && (
+          <div className={styles['detail-needs-review-banner']}>
+            Needs review: check the highlighted fields
+          </div>
         )}
       </div>
 

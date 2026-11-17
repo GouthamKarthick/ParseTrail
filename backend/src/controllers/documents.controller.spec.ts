@@ -58,6 +58,7 @@ import {
   correctField,
   listCorrections,
   correctionStats,
+  approveDocument,
 } from './documents.controller.js';
 
 function mockRes() {
@@ -282,7 +283,8 @@ describe('controller — listDocuments / getDocument', () => {
     mockQuery
       .mockResolvedValueOnce([[{ cnt: 1 }]] as any)
       .mockResolvedValueOnce([[{ id: 'a', name: 'x', data: null }]] as any)
-      .mockResolvedValueOnce([[]] as any);
+      .mockResolvedValueOnce([[]] as any)
+      .mockResolvedValueOnce([[]] as any); // latest-confidence batch (none)
     const req: any = {
       user: { id: 'test-user', email: 'test@example.com' },
       query: {},
@@ -307,7 +309,8 @@ describe('controller — listDocuments / getDocument', () => {
     mockQuery
       .mockResolvedValueOnce([[{ cnt: 2 }]] as any)
       .mockResolvedValueOnce([[{ id: 'a', name: 'x', data: null }]] as any)
-      .mockResolvedValueOnce([[]] as any);
+      .mockResolvedValueOnce([[]] as any)
+      .mockResolvedValueOnce([[]] as any); // latest-confidence batch (none)
     const req: any = {
       user: { id: 'test-user', email: 'test@example.com' },
       query: {},
@@ -642,6 +645,40 @@ describe('controller — listDocuments / getDocument', () => {
     expect(insertCall).toBeDefined();
   });
 
+  it('correctField clears reviewed_at when a correction is made', async () => {
+    vi.mocked(pool.query).mockResolvedValueOnce([
+      [
+        {
+          id: 'd1',
+          data: JSON.stringify({ vendor: 'V', totalAmount: 1850 }),
+          reviewed_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    ] as any);
+    const conn = await pool.getConnection();
+    const mockConnQuery = vi.mocked(conn.query);
+    mockConnQuery
+      .mockResolvedValueOnce([[]] as any) // UPDATE documents SET data
+      .mockResolvedValueOnce([[]] as any) // UPDATE documents SET reviewed_at = NULL
+      .mockResolvedValueOnce([[{ method: 'local-llm', confidence: 0.7 }]] as any) // attempts SELECT
+      .mockResolvedValueOnce([[]] as any); // INSERT corrections
+    const res: any = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+    await correctField(
+      {
+        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        user: { id: 'u1', email: 't@e.com' },
+        body: { field: 'vendor', value: 'New Vendor' },
+      } as any,
+      res,
+      vi.fn()
+    );
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ changed: true }));
+    const clearCall = mockConnQuery.mock.calls.find(c =>
+      String(c[0]).includes('reviewed_at = NULL')
+    );
+    expect(clearCall).toBeDefined();
+  });
+
   it('correctField reports unchanged when value matches', async () => {
     vi.mocked(pool.query).mockResolvedValueOnce([
       [{ id: 'd1', data: JSON.stringify({ vendor: 'V' }) }],
@@ -788,5 +825,68 @@ describe('controller — listDocuments / getDocument', () => {
         attempts: expect.arrayContaining([expect.objectContaining({ method: 'rule-based' })]),
       })
     );
+  });
+});
+
+describe('controller — approveDocument', () => {
+  const docId = '550e8400-e29b-41d4-a716-446655440000';
+  const updatedRow = {
+    id: docId,
+    name: 'x.pdf',
+    status: 'done',
+    document_type: 'invoice',
+    document_category: 'financial',
+    data: JSON.stringify({ vendor: 'V', totalAmount: 1850 }),
+    error: null,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    reviewed_at: '2026-01-02T00:00:00Z',
+  };
+
+  it('approve 200 sets reviewed_at and returns needs_review false', async () => {
+    vi.mocked(pool.query)
+      .mockResolvedValueOnce([[{ id: docId, reviewed_at: null }]] as any) // ownership SELECT
+      .mockResolvedValueOnce([[]] as any) // UPDATE reviewed_at = NOW()
+      .mockResolvedValueOnce([[updatedRow]] as any) // refetch SELECT
+      .mockResolvedValueOnce([[{ confidence: 0.95 }]] as any) // confidence SELECT
+      .mockResolvedValueOnce([[]] as any); // latestRefineStatus refine_jobs SELECT
+    const res: any = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+    await approveDocument(
+      {
+        params: { id: docId },
+        user: { id: 'u1', email: 't@e.com' },
+        parsedId: docId,
+      } as any,
+      res,
+      vi.fn()
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: docId,
+        needs_review: false,
+        reviewed_at: '2026-01-02T00:00:00Z',
+      })
+    );
+    const updateCall = vi
+      .mocked(pool.query)
+      .mock.calls.find(c => String(c[0]).includes('reviewed_at = NOW()'));
+    expect(updateCall).toBeDefined();
+  });
+
+  it('approve 404 for another user', async () => {
+    vi.mocked(pool.query).mockResolvedValueOnce([[]] as any); // no row for this user
+    const res: any = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+    await approveDocument(
+      {
+        params: { id: docId },
+        user: { id: 'other-user', email: 'o@e.com' },
+        parsedId: docId,
+      } as any,
+      res,
+      vi.fn()
+    );
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: 'Document not found' }));
   });
 });

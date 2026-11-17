@@ -16,6 +16,7 @@ import { normalizeCurrency } from '../utils/currency.js';
 import { parseAmount } from '../utils/amount.js';
 import { applyConversion, clearConversion } from '../utils/conversion.js';
 import { parseJsonColumn } from '../utils/json.js';
+import { needsReview } from '../utils/review.js';
 import { enqueueRefineJob, retryRefineJobNow } from '../jobs/refine.js';
 import { findDuplicateByContent, findDuplicateByHash } from '../services/dedup.service.js';
 import { uuidSchema } from '../middleware/validate.js';
@@ -233,11 +234,12 @@ export async function listDocuments(req: Request, res: Response, next: NextFunct
     );
     const total = (totalRows as Array<{ cnt: number }>)[0]?.cnt ?? 0;
     const [rows] = await pool.query(
-      `SELECT id, name, status, document_type, document_category, data, error, created_at, updated_at, expires_at FROM documents ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      `SELECT id, name, status, document_type, document_category, data, error, created_at, updated_at, expires_at, reviewed_at FROM documents ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
     const list = rows as Array<Record<string, unknown>>;
     const refineByDoc: Record<string, { status: string; error: string | null }> = {};
+    const confidenceByDoc: Record<string, number | null> = {};
     if (list.length > 0) {
       const ids = list.map(r => r.id as string);
       const placeholders = ids.map(() => '?').join(',');
@@ -251,13 +253,38 @@ export async function listDocuments(req: Request, res: Response, next: NextFunct
         error: string | null;
       }>)
         refineByDoc[r.document_id] = { status: r.status, error: r.error };
+      // Latest extraction-attempt confidence per document (single batch query).
+      const [crows] = await pool.query(
+        `SELECT document_id, confidence FROM extraction_attempts WHERE document_id IN (${placeholders}) ORDER BY created_at DESC, id DESC`,
+        ids
+      );
+      const seenConf = new Set<string>();
+      for (const c of crows as Array<{
+        document_id: string;
+        confidence: number;
+      }>) {
+        if (seenConf.has(c.document_id)) continue;
+        seenConf.add(c.document_id);
+        confidenceByDoc[c.document_id] = Number.isFinite(c.confidence) ? c.confidence : null;
+      }
     }
-    const documents = list.map(r => ({
-      ...r,
-      data: parseDataField(r as { data: string | null }),
-      refine_status: refineByDoc[r.id as string]?.status ?? null,
-      refine_error: refineByDoc[r.id as string]?.error ?? null,
-    }));
+    const documents = list.map(r => {
+      const data = parseDataField(r as { data: string | null });
+      return {
+        ...r,
+        data,
+        refine_status: refineByDoc[r.id as string]?.status ?? null,
+        refine_error: refineByDoc[r.id as string]?.error ?? null,
+        confidence: confidenceByDoc[r.id as string] ?? null,
+        reviewed_at: (r.reviewed_at as string | null) ?? null,
+        needs_review: needsReview({
+          reviewed_at: (r.reviewed_at as string | null) ?? null,
+          confidence: confidenceByDoc[r.id as string] ?? null,
+          data,
+          refine_status: refineByDoc[r.id as string]?.status ?? null,
+        }),
+      };
+    });
     res.json({ documents, total, limit, offset });
   } catch (err) {
     next(err);
@@ -285,7 +312,7 @@ export async function getDocument(req: Request, res: Response, next: NextFunctio
       return;
     }
     const [rows] = await pool.query(
-      'SELECT id, name, status, document_type, document_category, data, error, created_at, updated_at, expires_at FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      'SELECT id, name, status, document_type, document_category, data, error, created_at, updated_at, expires_at, reviewed_at FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
       [id, user.id]
     );
     const row = (rows as Array<Record<string, unknown>>)[0];
@@ -294,11 +321,30 @@ export async function getDocument(req: Request, res: Response, next: NextFunctio
       return;
     }
     const refine = await latestRefineStatus(parsed.data, user.id);
+    const [crows] = await pool.query(
+      'SELECT confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
+      [parsed.data]
+    );
+    const confidence =
+      (crows as Array<{ confidence: number }>)[0] &&
+      Number.isFinite((crows as Array<{ confidence: number }>)[0].confidence)
+        ? (crows as Array<{ confidence: number }>)[0].confidence
+        : null;
+    const data = parseDataField(row as { data: string | null });
+    const needs = needsReview({
+      reviewed_at: (row.reviewed_at as string | null) ?? null,
+      confidence,
+      data,
+      refine_status: refine.status,
+    });
     res.json({
       ...row,
-      data: parseDataField(row as { data: string | null }),
+      data,
       refine_status: refine.status,
       refine_error: refine.error,
+      confidence,
+      reviewed_at: (row.reviewed_at as string | null) ?? null,
+      needs_review: needs,
     });
   } catch (err) {
     next(err);
@@ -588,6 +634,8 @@ export async function correctField(req: Request, res: Response, next: NextFuncti
 
     // UPDATE documents.data and INSERT corrections atomically so a crash
     // cannot leave corrected data without a correction history record.
+    // A correction after approval clears reviewed_at so the document
+    // re-enters the needs-review set.
     let method: string | null = null;
     let confidence: number | null = null;
     await withTransaction(async conn => {
@@ -595,6 +643,7 @@ export async function correctField(req: Request, res: Response, next: NextFuncti
         JSON.stringify(data),
         parsed.data,
       ]);
+      await conn.query('UPDATE documents SET reviewed_at = NULL WHERE id=?', [parsed.data]);
       const [arows] = await conn
         .query(
           'SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
@@ -806,6 +855,68 @@ export async function exportDocuments(req: Request, res: Response, next: NextFun
     res.setHeader('Content-Disposition', `attachment; filename="parsetrail-export-${date}.csv"`);
     res.setHeader('Cache-Control', 'no-store');
     res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Approve a document: sets reviewed_at = NOW() and returns the updated
+ * document. Requires ownership; a correction after approval clears
+ * reviewed_at (see correctField).
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
+export async function approveDocument(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const user = getUser(req);
+    if (!user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    // validateIdParam guarantees a valid UUID is on req.parsedId.
+    const id = req.parsedId as string;
+    const [rows] = await pool.query(
+      'SELECT id, reviewed_at FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [id, user.id]
+    );
+    const row = (rows as Array<{ id: string; reviewed_at: Date | null }>)[0];
+    if (!row) {
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+    await pool.query('UPDATE documents SET reviewed_at = NOW() WHERE id=?', [id]);
+    const [updatedRows] = await pool.query(
+      'SELECT id, name, status, document_type, document_category, data, error, created_at, updated_at, expires_at, reviewed_at FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      [id, user.id]
+    );
+    const updated = (updatedRows as Array<Record<string, unknown>>)[0];
+    const data = parseDataField(updated as { data: string | null });
+    const [crows] = await pool.query(
+      'SELECT confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
+      [id]
+    );
+    const confidence =
+      (crows as Array<{ confidence: number }>)[0] &&
+      Number.isFinite((crows as Array<{ confidence: number }>)[0].confidence)
+        ? (crows as Array<{ confidence: number }>)[0].confidence
+        : null;
+    const refine = await latestRefineStatus(id, user.id);
+    res.status(200).json({
+      ...updated,
+      data,
+      refine_status: refine.status,
+      refine_error: refine.error,
+      confidence,
+      reviewed_at: (updated.reviewed_at as string | null) ?? null,
+      needs_review: false, // just approved
+    });
   } catch (err) {
     next(err);
   }

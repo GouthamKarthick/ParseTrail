@@ -229,6 +229,7 @@ async function migrateDocuments(): Promise<void> {
       'extracted_text',
       'ALTER TABLE documents ADD COLUMN extracted_text MEDIUMTEXT NULL AFTER data',
     ],
+    ['reviewed_at', 'ALTER TABLE documents ADD COLUMN reviewed_at DATETIME NULL AFTER updated_at'],
   ];
   for (const [col, sql] of colChecks) {
     const [cols] = await pool.query(
