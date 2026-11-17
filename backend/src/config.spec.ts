@@ -8,6 +8,7 @@ import fs from 'fs';
 vi.mock('dotenv', () => ({ default: { config: vi.fn() } }));
 
 const baseEnv = { ...process.env };
+const realExistsSync = fs.existsSync.bind(fs);
 const mockExistsSync = vi.spyOn(fs, 'existsSync');
 
 afterEach(() => {
@@ -33,7 +34,7 @@ async function importConfig(
     if (str === '/etc/secrets/ai-keys.json' || str.endsWith('/secrets/ai-keys.json')) {
       return false;
     }
-    return fs.existsSync(p);
+    return realExistsSync(p);
   });
   for (const [key, value] of Object.entries(overrides)) {
     if (value === undefined) {
