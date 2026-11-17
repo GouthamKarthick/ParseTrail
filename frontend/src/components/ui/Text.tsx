@@ -14,14 +14,20 @@ interface Props {
   headingLevel?: 1 | 2 | 3;
   /** Visual text style. Default: 'body'. */
   textStyle?: TextStyle;
+  /** Visual text style variant (alias for textStyle). Default: 'body'. */
+  variant?: TextStyle;
   /** Element tag to render. Ignored when headingLevel is set. Default: 'p'. */
   htmlTag?: HtmlTag;
+  /** Element tag alias (alias for htmlTag). */
+  as?: HtmlTag;
   /** Optional muted suffix text rendered as a trailing span. */
   mutedText?: string;
   /** Text content to display. */
   children: ReactNode;
   /** Additional CSS class. */
   extraClass?: string;
+  /** Additional CSS class alias (alias for extraClass). */
+  className?: string;
 }
 
 /**
@@ -31,7 +37,7 @@ interface Props {
  * @param props.htmlTag - Element tag to render (used only when headingLevel is not set)
  * @param props.mutedText - Optional muted suffix text
  * @param props.children - Text content to display
- * @param props.extraClass - Additional CSS class
+ * @param props.extraClass - Additional CSS class.
  * @returns Text element
  * @example <TextBlock textStyle="body">Hello</TextBlock>
  * @example <TextBlock headingLevel={1} mutedText="3 total">Documents</TextBlock>
@@ -40,16 +46,25 @@ interface Props {
 export function TextBlock({
   headingLevel,
   textStyle = 'body',
+  variant,
   htmlTag: htmlTagProp,
+  as: htmlTagAlias,
   mutedText,
   children,
   extraClass,
+  className,
 }: Props) {
-  const HtmlTag = headingLevel ? (`h${headingLevel}` as 'h1' | 'h2' | 'h3') : (htmlTagProp ?? 'p');
+  // Resolve textStyle from either textStyle or variant prop
+  const textStyleProp = textStyle ?? variant ?? 'body';
+  // Resolve className from either extraClass or className prop
+  const classNameProp = extraClass ?? className;
+  const HtmlTag = headingLevel
+    ? (`h${headingLevel}` as 'h1' | 'h2' | 'h3')
+    : (htmlTagProp ?? htmlTagAlias ?? 'p');
   const cssClasses = [
     styles.text,
-    headingLevel ? styles[`text-h${headingLevel}`] : styles[`text-${textStyle}`],
-    extraClass,
+    headingLevel ? styles[`text-h${headingLevel}`] : styles[`text-${textStyleProp}`],
+    classNameProp,
   ]
     .filter(Boolean)
     .join(' ');
@@ -61,3 +76,9 @@ export function TextBlock({
     </HtmlTag>
   );
 }
+
+/**
+ * Text — alias for TextBlock for backward compatibility.
+ * @deprecated Use TextBlock instead.
+ */
+export const Text = TextBlock;

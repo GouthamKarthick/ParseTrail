@@ -10,11 +10,14 @@ import { z } from 'zod';
 import { pool, withTransaction } from '../db/pool.js';
 import { logger } from '../config/logger.js';
 import { config } from '../config.js';
-import { extract } from '../services/extraction.service.js';
+import { extractDocumentData } from '../services/extraction.service.js';
 import { isValidDate } from '../services/confidence.service.js';
-import { normalizeCurrency } from '../utils/currency.js';
+import { standardizeCurrency } from '../utils/currency.js';
 import { parseAmount } from '../utils/amount.js';
-import { applyConversion, clearConversion } from '../utils/conversion.js';
+import {
+  applyCurrencyConversion as applyConversion,
+  clearConversion,
+} from '../utils/conversion.js';
 import { parseJsonColumn } from '../utils/json.js';
 import { needsReview } from '../utils/review.js';
 import { enqueueRefineJob, retryRefineJobNow } from '../jobs/refine.js';
@@ -55,7 +58,7 @@ async function latestRefineStatus(
   return { status: row?.status ?? null, error: row?.error ?? null };
 }
 
-type ExtractOutcome = NonNullable<Awaited<ReturnType<typeof extract>>>;
+type ExtractOutcome = NonNullable<Awaited<ReturnType<typeof extractDocumentData>>>;
 
 function respondDuplicate(
   res: Response,
@@ -555,7 +558,7 @@ function normalizeCorrection(field: string, value: unknown): string | number | n
     const s = String(value ?? '').trim();
     return isValidDate(s) ? s : null;
   }
-  if (field === 'currency') return normalizeCurrency(value);
+  if (field === 'currency') return standardizeCurrency(value);
   const s = String(value ?? '')
     .trim()
     .slice(0, 500);

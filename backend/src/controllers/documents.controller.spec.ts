@@ -32,7 +32,7 @@ vi.mock('../db/pool.js', () => {
   };
 });
 vi.mock('../services/extraction.service.js', () => ({
-  extract: vi.fn(),
+  extractDocumentData: vi.fn(),
   recordAttempts: vi.fn(),
 }));
 vi.mock('../services/dedup.service.js', () => ({
@@ -47,7 +47,7 @@ vi.mock('../utils/conversion.js', () => ({
 
 import { pool } from '../db/pool.js';
 import fs from 'fs/promises';
-import { extract } from '../services/extraction.service.js';
+import { extractDocumentData } from '../services/extraction.service.js';
 import { findDuplicateByHash } from '../services/dedup.service.js';
 import {
   uploadDocument,
@@ -114,7 +114,7 @@ describe('controller — uploadDocument', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ id: expect.any(String), status: 'pending' })
     );
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
     expect(fs.readFile).toHaveBeenCalledOnce();
     expect(findDuplicateByHash).toHaveBeenCalledTimes(1);
   });
@@ -145,7 +145,7 @@ describe('controller — uploadDocument', () => {
         duplicateOf: 'existing-id',
       })
     );
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
     expect(pool.query).not.toHaveBeenCalled();
     expect(fs.unlink).toHaveBeenCalledWith('/tmp/dup');
   });
@@ -171,7 +171,7 @@ describe('controller — uploadDocument', () => {
 
     await uploadDocument(req, res, vi.fn());
 
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
     expect(pool.query).not.toHaveBeenCalled();
     expect(fs.unlink).toHaveBeenCalledWith('/tmp/same');
     expect(res.status).toHaveBeenCalledWith(409);
@@ -201,7 +201,7 @@ describe('controller — uploadDocument', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'INVALID_FILE_CONTENT' })
     );
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
     expect(fs.unlink).toHaveBeenCalledWith('/tmp/bad');
   });
 
@@ -219,7 +219,7 @@ describe('controller — uploadDocument', () => {
     const res = mockRes();
     await uploadDocument(req, res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
     expect(fs.unlink).toHaveBeenCalledWith('/tmp/empty');
   });
 
@@ -242,7 +242,7 @@ describe('controller — uploadDocument', () => {
     const res = mockRes();
     await uploadDocument(req, res, next);
     expect(next).toHaveBeenCalledTimes(1);
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
     expect(fs.unlink).toHaveBeenCalledWith('/tmp/boom');
   });
 
@@ -270,7 +270,7 @@ describe('controller — uploadDocument', () => {
     const res = mockRes();
     await uploadDocument(req, res, next);
     expect(next).toHaveBeenCalledTimes(1);
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
     expect(fs.unlink).toHaveBeenCalledWith('/tmp/boom2');
   });
 });
@@ -585,7 +585,7 @@ describe('controller — listDocuments / getDocument', () => {
         enqueued: true,
       })
     );
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
   });
 
   it('reprocessDocument 404 when missing', async () => {
