@@ -33,15 +33,20 @@ async function serializeWorker<T>(operation: () => Promise<T>): Promise<T> {
 
 /**
  * Gets or creates Tesseract worker.
- * @param lang Language
+ * The worker language string comes from config.ocrLangs (env OCR_LANGS,
+ * default eng+deu) instead of a hardcoded value, so EU languages are
+ * opt-in via configuration. The `lang` hint is kept for signature
+ * compatibility but no longer selects the worker language.
+ * @param _lang Language hint (unused; config.ocrLangs is authoritative)
  * @returns Worker
  */
-async function getWorker(lang: string) {
+async function getWorker(_lang: string) {
+  const langs = config.ocrLangs;
   if (tesseractWorker) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const curLangs: string = (tesseractWorker as any)._langs ?? '';
-      if (curLangs.includes(lang)) return tesseractWorker;
+      if (curLangs === langs) return tesseractWorker;
       await tesseractWorker.terminate();
     } catch (error) {
       logger.warn('Tesseract worker termination failed', {
@@ -51,7 +56,6 @@ async function getWorker(lang: string) {
     tesseractWorker = null;
   }
   const { createWorker } = await import('tesseract.js');
-  const langs = lang === 'eng' ? 'eng' : `eng+${lang}`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const worker: any = await createWorker(langs, 1, {
     langPath: process.cwd(),

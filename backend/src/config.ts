@@ -34,6 +34,52 @@ function parsePositiveInt(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/**
+ * Allowed OCR language codes (tesseract traineddata bundled in the image).
+ * `eng` is always included first by buildOcrLangs.
+ */
+const OCR_LANG_ALLOW_LIST = new Set(['eng', 'deu', 'fra', 'spa', 'ita', 'nld', 'por']);
+
+/**
+ * Builds the OCR worker language string from the OCR_LANGS env var.
+ * - Validates each part against the allow-list; unknown parts are dropped
+ *   and a single warning is logged.
+ * - Always includes 'eng' first.
+ * - Falls back to 'eng+deu' when no valid language remains (empty or all-invalid input).
+ * @param raw Raw OCR_LANGS env value
+ * @returns Language string such as "eng+deu+fra"
+ */
+function buildOcrLangs(raw: string | undefined): string {
+  const parts = (raw || '')
+    .split(/[+,]/)
+    .map(p => p.trim().toLowerCase())
+    .filter(Boolean);
+  const valid = parts.filter(p => OCR_LANG_ALLOW_LIST.has(p));
+  const droppedUnknown = valid.length !== parts.length;
+  if (valid.length === 0) return 'eng+deu';
+  const seen = new Set<string>();
+  const langs: string[] = [];
+  for (const p of ['eng', ...valid]) {
+    if (p === 'eng') {
+      if (!seen.has('eng')) {
+        seen.add('eng');
+        langs.push('eng');
+      }
+      continue;
+    }
+    if (!seen.has(p)) {
+      seen.add(p);
+      langs.push(p);
+    }
+  }
+  if (droppedUnknown) {
+    console.warn(
+      `OCR_LANGS: unknown language code(s) dropped, using ${langs.join('+')} (allowed: ${[...OCR_LANG_ALLOW_LIST].sort().join(', ')})`
+    );
+  }
+  return langs.join('+');
+}
+
 const supportedProviders = new Set(['gemini', 'groq', 'openrouter', 'anthropic']);
 
 function normalizeProviderName(p: string): string {
@@ -151,6 +197,7 @@ export const config = {
   localLlmEnabled: process.env.LOCAL_LLM_ENABLED !== 'false',
   localLlmModel: process.env.LOCAL_LLM_MODEL || 'Xenova/LaMini-Flan-T5-77M',
   ocrMaxPages: parsePositiveInt(process.env.OCR_MAX_PAGES, 3),
+  ocrLangs: buildOcrLangs(process.env.OCR_LANGS),
   logs: {
     dir: './logs',
     level: process.env.LOG_LEVEL || 'debug',
