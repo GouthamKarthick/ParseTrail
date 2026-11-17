@@ -381,6 +381,50 @@ describe('controller — listDocuments / getDocument', () => {
     expect(res.json.mock.calls[0][0]).not.toHaveProperty('path');
   });
 
+  it('getDocument uses highest seq when created_at ties', async () => {
+    vi.mocked(pool.query)
+      .mockResolvedValueOnce([
+        [
+          {
+            id: '550e8400-e29b-41d4-a716-446655440000',
+            name: 'x',
+            data: JSON.stringify({ vendor: 'V' }),
+            status: 'done',
+          },
+        ],
+      ] as any) // documents SELECT
+      .mockResolvedValueOnce([[]] as any) // refine_jobs SELECT (latestRefineStatus)
+      .mockResolvedValueOnce([
+        [
+          {
+            document_id: '550e8400-e29b-41d4-a716-446655440000',
+            confidence: 0.95,
+            seq: 2,
+            created_at: '2026-01-01 10:00:00',
+          },
+          {
+            document_id: '550e8400-e29b-41d4-a716-446655440000',
+            confidence: 0.5,
+            seq: 1,
+            created_at: '2026-01-01 10:00:00',
+          },
+        ],
+      ] as any); // confidence SELECT: DB returns ORDER BY seq DESC, higher seq first
+
+    const res: any = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+    await getDocument(
+      {
+        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        user: { id: 'test-user', email: 'test@example.com' },
+      } as any,
+      res,
+      vi.fn()
+    );
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ confidence: 0.95 }));
+    const confidenceSql = vi.mocked(pool.query).mock.calls[2][0] as unknown as string;
+    expect(confidenceSql).toContain('ORDER BY seq DESC');
+  });
+
   describe('controller — deleteDocument', () => {
     beforeEach(() => vi.clearAllMocks());
 

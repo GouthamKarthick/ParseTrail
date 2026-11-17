@@ -255,7 +255,7 @@ export async function listDocuments(req: Request, res: Response, next: NextFunct
         refineByDoc[r.document_id] = { status: r.status, error: r.error };
       // Latest extraction-attempt confidence per document (single batch query).
       const [crows] = await pool.query(
-        `SELECT document_id, confidence FROM extraction_attempts WHERE document_id IN (${placeholders}) ORDER BY created_at DESC, id DESC`,
+        `SELECT document_id, confidence FROM extraction_attempts WHERE document_id IN (${placeholders}) ORDER BY seq DESC`,
         ids
       );
       const seenConf = new Set<string>();
@@ -322,7 +322,7 @@ export async function getDocument(req: Request, res: Response, next: NextFunctio
     }
     const refine = await latestRefineStatus(parsed.data, user.id);
     const [crows] = await pool.query(
-      'SELECT confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
+      'SELECT confidence FROM extraction_attempts WHERE document_id=? ORDER BY seq DESC LIMIT 1',
       [parsed.data]
     );
     const confidence =
@@ -429,7 +429,7 @@ export async function getAttempts(req: Request, res: Response, next: NextFunctio
       return;
     }
     const [rows] = await pool.query(
-      'SELECT method, predicted_type, confidence, latency_ms, cost_estimate, input_tokens, output_tokens, succeeded, fallback_reason, created_at FROM extraction_attempts WHERE document_id=? ORDER BY created_at ASC, id ASC',
+      'SELECT method, predicted_type, confidence, latency_ms, cost_estimate, input_tokens, output_tokens, succeeded, fallback_reason, created_at FROM extraction_attempts WHERE document_id=? ORDER BY seq ASC',
       [id]
     );
     res.json({ attempts: rows });
@@ -646,7 +646,7 @@ export async function correctField(req: Request, res: Response, next: NextFuncti
       await conn.query('UPDATE documents SET reviewed_at = NULL WHERE id=?', [parsed.data]);
       const [arows] = await conn
         .query(
-          'SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
+          'SELECT method, confidence FROM extraction_attempts WHERE document_id=? ORDER BY seq DESC LIMIT 1',
           [parsed.data]
         )
         .catch(error => {
@@ -899,7 +899,7 @@ export async function approveDocument(
     const updated = (updatedRows as Array<Record<string, unknown>>)[0];
     const data = parseDataField(updated as { data: string | null });
     const [crows] = await pool.query(
-      'SELECT confidence FROM extraction_attempts WHERE document_id=? ORDER BY created_at DESC, id DESC LIMIT 1',
+      'SELECT confidence FROM extraction_attempts WHERE document_id=? ORDER BY seq DESC LIMIT 1',
       [id]
     );
     const confidence =
