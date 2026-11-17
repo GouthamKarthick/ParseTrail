@@ -381,6 +381,32 @@ describe('Detail page', () => {
     expect(screen.getByText(/Correct fields manually/i)).toBeTruthy();
     expect(screen.getByText(/provider quota exceeded/i)).toBeTruthy();
   });
+
+  it('Correct fields manually opens editor on vendor when no fields extracted', async () => {
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'dead.pdf',
+        status: 'done',
+        document_type: 'invoice',
+        document_category: 'financial',
+        data: {},
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        refine_status: 'dead',
+        refine_error: 'provider quota exceeded',
+      } as any)
+    );
+
+    renderAt('/documents/d1', <Detail />);
+
+    await vi.waitFor(() => expect(screen.getAllByText(/Retry AI/i).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText(/Correct fields manually/i));
+    await vi.waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Correct vendor' })).toBeTruthy()
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

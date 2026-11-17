@@ -58,7 +58,10 @@ export default function Detail() {
   const editingField = editing?.field;
   const extractedFields =
     Object.keys(baseFields).length > 0 || editingField
-      ? { ...baseFields, ...(editingField && !(editingField in baseFields) ? { [editingField]: null } : {}) }
+      ? {
+          ...baseFields,
+          ...(editingField && !(editingField in baseFields) ? { [editingField]: null } : {}),
+        }
       : {};
   const visibleAttempts = attempts.slice(-5);
   const displayRefineStatus =
@@ -151,8 +154,7 @@ export default function Detail() {
 
   function handleCorrectFirstField() {
     if (!doc) return;
-    const field =
-      Object.keys(doc.data ?? {}).find(k => CORRECTABLE.includes(k)) ?? 'vendor';
+    const field = Object.keys(doc.data ?? {}).find(k => CORRECTABLE.includes(k)) ?? 'vendor';
     setEditing({ field, draft: '' });
   }
 
@@ -369,11 +371,7 @@ export default function Detail() {
             <Button variant="ghost" size="sm" onClick={() => nav('/')}>
               Upload a clearer file
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleCorrectFirstField}
-            >
+            <Button variant="ghost" size="sm" onClick={handleCorrectFirstField}>
               Correct fields manually
             </Button>
           </div>
