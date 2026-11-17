@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import fs from 'fs/promises';
 import { createApp } from '../app.js';
 import { config } from '../config.js';
 import { pool } from '../db/pool.js';
+import { logger } from '../config/logger.js';
 
 vi.mock('../db/pool.js', () => ({
   pool: { query: vi.fn() },
@@ -146,5 +148,92 @@ describe('routes — documents', () => {
     const app = createApp();
     const res = await request(app).get('/api/documents/export');
     expect(res.status).toBe(401);
+  });
+
+  const DOC_ID = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+
+  it('GET /api/documents/:id/file 200 with the right content type for an owned doc', async () => {
+    const app = createApp();
+    const testFile = 'uploads/preview-test.pdf';
+    await fs.writeFile(testFile, '%PDF-1.4 test');
+    try {
+      (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+        const s = String(sql);
+        if (s.includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+          return [[{ id: 'test-user', password_changed_at: null }]];
+        }
+        if (s.includes('FROM documents WHERE id=? AND user_id=?')) {
+          return [[{ id: DOC_ID, name: 'preview-test.pdf', path: testFile }]];
+        }
+        return [[]];
+      });
+
+      const res = await request(app).get(`/api/documents/${DOC_ID}/file`).set(authHeader());
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+      expect(res.headers['content-disposition']).toContain('inline');
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['cache-control']).toContain('no-store');
+    } finally {
+      await fs.unlink(testFile).catch(() => {});
+    }
+  });
+
+  it('GET /api/documents/:id/file 404 for another user\u2019s doc', async () => {
+    const app = createApp();
+    (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+      const s = String(sql);
+      if (s.includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+        return [[{ id: 'other-user', password_changed_at: null }]];
+      }
+      if (s.includes('FROM documents WHERE id=? AND user_id=?')) {
+        return [[]];
+      }
+      return [[]];
+    });
+
+    const res = await request(app).get(`/api/documents/${DOC_ID}/file`).set(authHeader());
+    expect(res.status).toBe(404);
+  });
+
+  it('GET /api/documents/:id/file 404 when the stored file is missing', async () => {
+    const app = createApp();
+    (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+      const s = String(sql);
+      if (s.includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+        return [[{ id: 'test-user', password_changed_at: null }]];
+      }
+      if (s.includes('FROM documents WHERE id=? AND user_id=?')) {
+        return [[{ id: DOC_ID, name: 'missing.pdf', path: 'uploads/missing-test.pdf' }]];
+      }
+      return [[]];
+    });
+
+    const res = await request(app).get(`/api/documents/${DOC_ID}/file`).set(authHeader());
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Original file is no longer available');
+  });
+
+  it('GET /api/documents/:id/file 404 when the stored path is outside the upload dir', async () => {
+    const app = createApp();
+    const warn = vi.spyOn(logger, 'warn');
+    (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+      const s = String(sql);
+      if (s.includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+        return [[{ id: 'test-user', password_changed_at: null }]];
+      }
+      if (s.includes('FROM documents WHERE id=? AND user_id=?')) {
+        return [[{ id: DOC_ID, name: 'evil.pdf', path: '/etc/passwd' }]];
+      }
+      return [[]];
+    });
+
+    const res = await request(app).get(`/api/documents/${DOC_ID}/file`).set(authHeader());
+    expect(res.status).toBe(404);
+    expect(warn).toHaveBeenCalledWith(
+      'Original file path outside upload directory',
+      expect.objectContaining({ documentId: DOC_ID })
+    );
+    warn.mockRestore();
   });
 });

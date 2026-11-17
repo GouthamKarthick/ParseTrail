@@ -3,9 +3,9 @@
  */
 
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { upload } from '../middleware/upload.js';
-import { validatePagination } from '../middleware/validate.js';
+import { validatePagination, validateIdParam } from '../middleware/validate.js';
 import {
   uploadDocument,
   listDocuments,
@@ -20,6 +20,7 @@ import {
   getSummary,
   exportSummary,
   exportDocuments,
+  getDocumentFile,
 } from '../controllers/documents.controller.js';
 import { requireUser } from '../middleware/auth.js';
 
@@ -34,7 +35,8 @@ const expensiveRouteLimit = rateLimit({
   keyGenerator(req) {
     const userId = (req as { user?: { id?: string } }).user?.id;
     if (userId) return `user:${userId}`;
-    return `ip:${(req as { ip?: string }).ip || 'unknown'}`;
+    const ip = (req as { ip?: string }).ip || 'unknown';
+    return `ip:${ipKeyGenerator(ip)}`;
   },
   handler(_req, res) {
     res.status(429).json({ error: 'Too many requests', code: 'RATE_LIMITED' });
@@ -54,6 +56,9 @@ router.get('/documents/corrections/stats', correctionStats);
 // One row per document: CSV export. Registered before /documents/:id so
 // "export" is never mistaken for a document id.
 router.get('/documents/export', requireUser, expensiveRouteLimit, exportDocuments);
+// Original file preview: one path segment under :id, so it never collides
+// with /documents/:id (which matches exactly two segments).
+router.get('/documents/:id/file', requireUser, validateIdParam, getDocumentFile);
 router.get('/documents/:id', getDocument);
 router.delete('/documents/:id', deleteDocument);
 

@@ -24,6 +24,7 @@ import {
   deleteDocument,
   listDocuments,
   exportDocuments,
+  getDocumentFileBlob,
 } from './api/client.ts';
 
 const NodeRequest = globalThis.Request;
@@ -46,6 +47,7 @@ vi.mock('./api/client.ts', () => ({
   deleteDocument: vi.fn(),
   listDocuments: vi.fn(),
   exportDocuments: vi.fn().mockResolvedValue(new Blob(['id,name\n'])),
+  getDocumentFileBlob: vi.fn().mockResolvedValue(null),
   me: vi.fn().mockResolvedValue({
     id: 'u1',
     email: 'user@example.com',
@@ -64,6 +66,7 @@ const mockGetDocument = vi.mocked(getDocument);
 const mockDeleteDocument = vi.mocked(deleteDocument);
 const mockListDocuments = vi.mocked(listDocuments);
 const mockExportDocuments = vi.mocked(exportDocuments);
+const mockGetDocumentFileBlob = vi.mocked(getDocumentFileBlob);
 
 function providers(children: ReactNode) {
   return (
@@ -395,6 +398,60 @@ describe('Detail page', () => {
     expect(screen.getByText(/Upload a clearer file/i)).toBeTruthy();
     expect(screen.getByText(/Correct fields manually/i)).toBeTruthy();
     expect(screen.getByText(/provider quota exceeded/i)).toBeTruthy();
+  });
+
+  it('shows the original file preview for an image doc', async () => {
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'receipt.png',
+        status: 'done',
+        document_type: 'receipt',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 10, currency: 'USD' },
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
+    mockGetDocumentFileBlob.mockResolvedValue(new Blob(['fake-png'], { type: 'image/png' }));
+
+    // jsdom in this vitest setup lacks URL.createObjectURL; real browsers have it.
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    (URL as any).createObjectURL = () => 'mocked-object-url';
+    (URL as any).revokeObjectURL = () => {};
+
+    renderAt('/documents/d1', <Detail />);
+
+    await vi.waitFor(() => expect(screen.getByRole('img')).toBeTruthy());
+    expect(mockGetDocumentFileBlob).toHaveBeenCalledWith('d1');
+
+    (URL as any).createObjectURL = origCreate ?? (() => {});
+    (URL as any).revokeObjectURL = origRevoke ?? (() => {});
+  });
+
+  it('shows the muted fallback when the original file is unavailable (404)', async () => {
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'invoice.pdf',
+        status: 'done',
+        document_type: 'invoice',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 10, currency: 'USD' },
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
+    mockGetDocumentFileBlob.mockResolvedValue(null);
+
+    renderAt('/documents/d1', <Detail />);
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/Original file is no longer available/i)).toBeTruthy()
+    );
   });
 });
 

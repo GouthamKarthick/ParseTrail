@@ -394,6 +394,27 @@ export async function getDocument(id: string) {
 }
 
 /**
+ * Fetch a document's original file for preview.
+ * The endpoint is cookie-authenticated (credentials: 'include'), so no extra
+ * headers are needed.
+ * @param id - Document identifier
+ * @returns Blob of the file, or null when the original is no longer available (404)
+ * @throws {ApiError} on other non-ok responses
+ * @example const blob = await getDocumentFileBlob("abc-123");
+ */
+export async function getDocumentFileBlob(id: string): Promise<Blob | null> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/${id}/file`, {
+    credentials: 'include',
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(body.error || 'Preview failed', res.status);
+  }
+  return await res.blob();
+}
+
+/**
  * Re-run local extraction on a document and enqueue cloud refinement.
  * @param id - Document identifier
  * @returns Reprocess outcome

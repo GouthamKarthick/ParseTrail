@@ -2,7 +2,7 @@
  * @fileoverview Detail page — polls document status and displays extracted data.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { usePolling } from '../hooks/usePolling';
 import { useToastContext } from '../context/ToastContext';
@@ -12,6 +12,7 @@ import {
   getAttempts,
   submitCorrection,
   listCorrections,
+  getDocumentFileBlob,
 } from '../api/client';
 import type { ExtractionAttempt, Correction } from '../types';
 import { Heading } from '../components/ui/Heading';
@@ -50,6 +51,9 @@ export default function Detail() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUnavailable, setPreviewUnavailable] = useState(false);
+  const previewUrlRef = useRef<string | null>(null);
   const latestLlmAttempt = [...attempts].reverse().find(attempt => attempt.method === 'llm');
   const latestLlmFailure =
     latestLlmAttempt && !latestLlmAttempt.succeeded && latestLlmAttempt.fallback_reason
@@ -78,6 +82,101 @@ export default function Detail() {
     }
   };
 
+  /**
+   * Decides how to render the original file based on its file name extension.
+   * @returns 'image' | 'pdf' | null
+   */
+  const previewKind = (() => {
+    const name = doc?.name ?? '';
+    if (/\.(jpg|jpeg|png)$/i.test(name)) return 'image';
+    if (/\.pdf$/i.test(name)) return 'pdf';
+    return null;
+  })();
+
+  // Extracted-fields content, shared by the single-column and two-column layouts.
+  const fieldsContent = (
+    <>
+      {extractedFields && (
+        <table className={styles['detail-table']}>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Value</th>
+              <th aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(extractedFields).map(([k, v]) => (
+              <tr key={k}>
+                <td>{k.replace(/([A-Z])/g, ' $1')}</td>
+                <td>
+                  {editing?.field === k ? (
+                    <span className={styles['detail-edit']}>
+                      <Input
+                        value={editing.draft}
+                        onChange={e => setEditing({ field: k, draft: e.target.value })}
+                        aria-label={`Correct ${k}`}
+                      />
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => saveCorrection(k)}
+                        disabled={saving}
+                      >
+                        {saving ? 'Saving…' : 'Save'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditing(null)}
+                        disabled={saving}
+                      >
+                        Cancel
+                      </Button>
+                    </span>
+                  ) : (
+                    <>{v == null ? '—' : String(v)}</>
+                  )}
+                </td>
+                <td>
+                  {CORRECTABLE.includes(k) && editing?.field !== k && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={styles['detail-edit-button']}
+                      aria-label={`Correct ${k}`}
+                      onClick={() =>
+                        setEditing({
+                          field: k,
+                          draft: v == null ? '' : String(v),
+                        })
+                      }
+                    >
+                      <i className="bi bi-pencil" aria-hidden />
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {!extractedFields && doc && (doc.status === 'done' || doc.status === 'failed') && (
+        <EmptyState
+          icon="file-earmark-text"
+          title="No data extracted"
+          message={
+            latestLlmFailure
+              ? 'No fields were extracted. Cloud refinement failed; check the provider quota, then retry or upload a clearer image.'
+              : 'Confidence was too low to fill any fields. Try re-uploading a clearer scan.'
+          }
+          actionTo="/"
+          actionLabel="Upload again"
+        />
+      )}
+    </>
+  );
+
   const docId = doc?.id;
   const docStatus = doc?.status;
   const docRefine = doc?.refine_status;
@@ -99,6 +198,48 @@ export default function Detail() {
       cancelled = true;
     };
   }, [docId, docStatus, docRefine]);
+
+  // Fetch the original file for preview when the document resolves. The
+  // endpoint is cookie-authenticated, so credentials are sent automatically.
+  // A 404 means the uploaded file is no longer on disk (e.g. after a Render
+  // redeploy wiped the ephemeral upload directory).
+  useEffect(() => {
+    if (!docId) return;
+    let cancelled = false;
+    // Revoke the previously created object URL so it is not leaked.
+    const previous = previewUrlRef.current;
+    previewUrlRef.current = null;
+    if (previous && typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(previous);
+    }
+
+    getDocumentFileBlob(docId)
+      .then(blob => {
+        if (cancelled) return;
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          previewUrlRef.current = url;
+          setPreviewUrl(url);
+          setPreviewUnavailable(false);
+        } else {
+          setPreviewUrl(null);
+          setPreviewUnavailable(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreviewUrl(null);
+          setPreviewUnavailable(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+      const current = previewUrlRef.current;
+      if (current && typeof URL.revokeObjectURL === 'function') {
+        URL.revokeObjectURL(current);
+      }
+    };
+  }, [docId]);
 
   async function retryDocumentRefinement() {
     if (!id || retrying) return;
@@ -223,85 +364,32 @@ export default function Detail() {
             Error: {doc.error}
           </Text>
         )}
-        {extractedFields && (
-          <table className={styles['detail-table']}>
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Value</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(extractedFields).map(([k, v]) => (
-                <tr key={k}>
-                  <td>{k.replace(/([A-Z])/g, ' $1')}</td>
-                  <td>
-                    {editing?.field === k ? (
-                      <span className={styles['detail-edit']}>
-                        <Input
-                          value={editing.draft}
-                          onChange={e => setEditing({ field: k, draft: e.target.value })}
-                          aria-label={`Correct ${k}`}
-                        />
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => saveCorrection(k)}
-                          disabled={saving}
-                        >
-                          {saving ? 'Saving…' : 'Save'}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditing(null)}
-                          disabled={saving}
-                        >
-                          Cancel
-                        </Button>
-                      </span>
-                    ) : (
-                      <>{v == null ? '—' : String(v)}</>
-                    )}
-                  </td>
-                  <td>
-                    {CORRECTABLE.includes(k) && editing?.field !== k && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={styles['detail-edit-button']}
-                        aria-label={`Correct ${k}`}
-                        onClick={() =>
-                          setEditing({
-                            field: k,
-                            draft: v == null ? '' : String(v),
-                          })
-                        }
-                      >
-                        <i className="bi bi-pencil" aria-hidden />
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {!extractedFields && (doc.status === 'done' || doc.status === 'failed') && (
-          <EmptyState
-            icon="file-earmark-text"
-            title="No data extracted"
-            message={
-              latestLlmFailure
-                ? 'No fields were extracted. Cloud refinement failed; check the provider quota, then retry or upload a clearer image.'
-                : 'Confidence was too low to fill any fields. Try re-uploading a clearer scan.'
-            }
-            actionTo="/"
-            actionLabel="Upload again"
-          />
-        )}
       </div>
+
+      {previewKind ? (
+        <div className={styles['detail-preview-wrapper']}>
+          {previewUrl && (
+            <div className={styles['detail-preview-card']}>
+              <Heading level={2}>Original document</Heading>
+              <div className={styles['detail-preview-content']}>
+                {previewKind === 'image' ? (
+                  <img src={previewUrl} alt={doc.name} title={doc.name} />
+                ) : (
+                  <iframe title="Original document" src={previewUrl} height="640" loading="lazy" />
+                )}
+              </div>
+            </div>
+          )}
+          <div className={styles['detail-card']}>
+            {fieldsContent}
+            {!previewUrl && previewUnavailable && (
+              <Text variant="muted">Original file is no longer available</Text>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className={styles['detail-card']}>{fieldsContent}</div>
+      )}
 
       {attempts.length > 0 && (
         <div className={styles['detail-card']}>
