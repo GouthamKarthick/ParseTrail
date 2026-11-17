@@ -327,6 +327,32 @@ describe('controller — listDocuments / getDocument', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ total: 2 }));
   });
 
+  it('listDocuments parses mixed object and string data', async () => {
+    const mockQuery = vi.mocked(pool.query);
+    mockQuery
+      .mockResolvedValueOnce([[{ cnt: 2 }]] as any)
+      .mockResolvedValueOnce([
+        [
+          { id: 'a', name: 'x', data: { vendor: 'Obj' } },
+          { id: 'b', name: 'y', data: JSON.stringify({ vendor: 'Str' }) },
+        ],
+      ] as any)
+      .mockResolvedValueOnce([[]] as any);
+    const req: any = {
+      user: { id: 'test-user', email: 'test@example.com' },
+      query: {},
+      _pagination: { limit: 10, offset: 0 },
+    };
+    const res: any = { json: vi.fn() };
+    await listDocuments(req, res, vi.fn());
+    const callArg = res.json.mock.calls[0][0];
+    expect(callArg.documents).toEqual([
+      expect.objectContaining({ id: 'a', data: { vendor: 'Obj' } }),
+      expect.objectContaining({ id: 'b', data: { vendor: 'Str' } }),
+    ]);
+    expect(callArg.total).toBe(2);
+  });
+
   it('getDocument uses parsedId from middleware', async () => {
     vi.mocked(pool.query).mockResolvedValue([[]] as any);
     const res = mockRes();
@@ -407,6 +433,30 @@ describe('controller — listDocuments / getDocument', () => {
       expect.objectContaining({ data: { vendor: 'V', totalAmount: 100 } })
     );
     expect(res.json.mock.calls[0][0]).not.toHaveProperty('path');
+  });
+
+  it('getDocument 200 returns null data for invalid JSON string', async () => {
+    vi.mocked(pool.query).mockResolvedValue([
+      [
+        {
+          id: '550e8400-e29b-41d4-a716-446655440000',
+          name: 'x',
+          data: 'not json',
+          status: 'done',
+        },
+      ],
+    ] as any);
+    const res: any = { json: vi.fn(), status: vi.fn().mockReturnThis() };
+    await getDocument(
+      {
+        params: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        parsedId: '550e8400-e29b-41d4-a716-446655440000',
+        user: { id: 'test-user', email: 'test@example.com' },
+      } as any,
+      res,
+      vi.fn()
+    );
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ data: null }));
   });
 
   describe('controller — deleteDocument', () => {
