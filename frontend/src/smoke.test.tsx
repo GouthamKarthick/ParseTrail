@@ -17,7 +17,14 @@ import Upload from './pages/Upload.tsx';
 import List from './pages/List.tsx';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { ToastProvider } from './context/ToastContext.tsx';
-import { login, uploadDocument, getDocument, deleteDocument, listDocuments } from './api/client.ts';
+import {
+  login,
+  uploadDocument,
+  getDocument,
+  deleteDocument,
+  listDocuments,
+  exportDocuments,
+} from './api/client.ts';
 
 const NodeRequest = globalThis.Request;
 globalThis.Request = class extends NodeRequest {
@@ -38,6 +45,7 @@ vi.mock('./api/client.ts', () => ({
   uploadDocument: vi.fn(),
   deleteDocument: vi.fn(),
   listDocuments: vi.fn(),
+  exportDocuments: vi.fn().mockResolvedValue(new Blob(['id,name\n'])),
   me: vi.fn().mockResolvedValue({
     id: 'u1',
     email: 'user@example.com',
@@ -55,6 +63,7 @@ const mockUpload = vi.mocked(uploadDocument);
 const mockGetDocument = vi.mocked(getDocument);
 const mockDeleteDocument = vi.mocked(deleteDocument);
 const mockListDocuments = vi.mocked(listDocuments);
+const mockExportDocuments = vi.mocked(exportDocuments);
 
 function providers(children: ReactNode) {
   return (
@@ -280,6 +289,13 @@ describe('List page', () => {
     const dialogButtons = dialogEl.querySelectorAll('button');
     await userEvent.click(dialogButtons[1]);
     await vi.waitFor(() => expect(mockDeleteDocument).toHaveBeenCalledWith('d1'));
+  });
+
+  it('Export CSV button renders and calls the endpoint with current filters', async () => {
+    renderAt('/', <List />);
+    await waitFor(() => expect(screen.getByText('invoice.pdf')).toBeTruthy());
+    await userEvent.click(screen.getByRole('button', { name: /Export CSV/i }));
+    await vi.waitFor(() => expect(mockExportDocuments).toHaveBeenCalled());
   });
 });
 

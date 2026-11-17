@@ -19,7 +19,9 @@ import {
   correctionStats,
   getSummary,
   exportSummary,
+  exportDocuments,
 } from '../controllers/documents.controller.js';
+import { requireUser } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -49,6 +51,9 @@ router.post('/documents/:id/reprocess', expensiveRouteLimit, reprocessDocument);
 router.post('/documents/:id/corrections', correctField);
 router.get('/documents/:id/corrections', listCorrections);
 router.get('/documents/corrections/stats', correctionStats);
+// One row per document: CSV export. Registered before /documents/:id so
+// "export" is never mistaken for a document id.
+router.get('/documents/export', requireUser, expensiveRouteLimit, exportDocuments);
 router.get('/documents/:id', getDocument);
 router.delete('/documents/:id', deleteDocument);
 

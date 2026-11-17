@@ -208,6 +208,37 @@ export async function exportSummary(format: 'pdf' | 'csv' = 'pdf', category?: st
   return await res.blob();
 }
 
+/**
+ * Export all owned documents as one CSV row per document, filtered by the
+ * same criteria as the document list.
+ * @param filters - List-style filters (q, document_type, document_category, date range)
+ * @returns CSV blob for download
+ * @example const blob = await exportDocuments({ q: "acme", document_type: "invoice" });
+ */
+export async function exportDocuments(filters: {
+  q?: string;
+  document_type?: string;
+  document_category?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<Blob> {
+  const params = new URLSearchParams();
+  if (filters.q) params.set('q', filters.q);
+  if (filters.document_type) params.set('document_type', filters.document_type);
+  if (filters.document_category) params.set('document_category', filters.document_category);
+  if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
+  if (filters.dateTo) params.set('dateTo', filters.dateTo);
+  const qs = params.toString();
+  const res = await fetchWithTimeout(`${API_BASE}/api/documents/export${qs ? `?${qs}` : ''}`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(body.error || 'Export failed', res.status);
+  }
+  return await res.blob();
+}
+
 // ---------------------------------------------------------------------------
 // Password Reset
 // ---------------------------------------------------------------------------
