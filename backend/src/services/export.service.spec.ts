@@ -124,6 +124,45 @@ describe('generateDocumentsCsv', () => {
     expect(mockQuery.mock.calls[0][1]).toEqual(['user-1', 'invoice']);
   });
 
+  it('uses highest seq when created_at ties in the confidence batch query', async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation(async (sql: string) => {
+      const s = String(sql);
+      if (s.includes('FROM documents'))
+        return [[documentsRow({ vendor: 'Acme', totalAmount: 10 })]];
+      if (s.includes('extraction_attempts')) {
+        // Same created_at, different seq; DB returns ORDER BY seq DESC so higher seq first.
+        return [
+          [
+            {
+              document_id: '11111111-1111-1111-1111-111111111111',
+              confidence: 0.95,
+              seq: 2,
+              created_at: '2026-01-01 10:00:00',
+            },
+            {
+              document_id: '11111111-1111-1111-1111-111111111111',
+              confidence: 0.5,
+              seq: 1,
+              created_at: '2026-01-01 10:00:00',
+            },
+          ],
+        ];
+      }
+      if (s.includes('refine_jobs'))
+        return [[{ document_id: '11111111-1111-1111-1111-111111111111', status: 'done' }]];
+      if (s.includes('corrections')) return [[]];
+      return [[]];
+    });
+    const csv = await generateDocumentsCsv('user-1', {});
+    const lines = csv.split('\r\n');
+    expect(lines[1]).toContain('0.95');
+    const attemptsSql = mockQuery.mock.calls.find(c =>
+      String(c[0]).includes('extraction_attempts')
+    )![0] as string;
+    expect(attemptsSql).toContain('ORDER BY seq DESC');
+  });
+
   it('returns only the header when there are no documents', async () => {
     mockQuery.mockReset();
     mockQuery.mockImplementation(async (sql: string) => {

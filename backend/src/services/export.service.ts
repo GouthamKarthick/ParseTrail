@@ -94,7 +94,7 @@ export async function generateDocumentsCsv(
   if (ids.length) {
     const placeholders = ids.map(() => '?').join(',');
     const [attempts] = await pool.query(
-      `SELECT document_id, confidence FROM extraction_attempts WHERE document_id IN (${placeholders}) ORDER BY created_at DESC, id DESC`,
+      `SELECT document_id, confidence FROM extraction_attempts WHERE document_id IN (${placeholders}) ORDER BY seq DESC`,
       ids
     );
     const seen = new Set<string>();
