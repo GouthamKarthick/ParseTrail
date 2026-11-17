@@ -223,6 +223,109 @@ describe('Upload page', () => {
     );
     expect(screen.getByRole('button', { name: /view document/i })).toBeTruthy();
   });
+
+  it('uploads three files sequentially in order', async () => {
+    mockUpload.mockClear();
+    mockUpload.mockResolvedValue({
+      id: 'd1',
+      name: 'a.pdf',
+      status: 'pending',
+      created_at: '2026-01-01T00:00:00Z',
+    } as any);
+
+    const { container } = renderAt('/', <Upload />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(['a'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['b'], 'b.pdf', { type: 'application/pdf' }),
+      new File(['c'], 'c.pdf', { type: 'application/pdf' }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    await userEvent.click(screen.getByRole('button', { name: /Upload/i }));
+
+    await vi.waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(3));
+    expect(mockUpload.mock.calls[0][0].name).toBe('a.pdf');
+    expect(mockUpload.mock.calls[1][0].name).toBe('b.pdf');
+    expect(mockUpload.mock.calls[2][0].name).toBe('c.pdf');
+  });
+
+  it('skips one invalid file and uploads the rest', async () => {
+    mockUpload.mockClear();
+    mockUpload.mockResolvedValue({
+      id: 'd1',
+      name: 'ok.pdf',
+      status: 'pending',
+      created_at: '2026-01-01T00:00:00Z',
+    } as any);
+
+    const { container } = renderAt('/', <Upload />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(['a'], 'ok.pdf', { type: 'application/pdf' }),
+      new File(['x'], 'script.exe', { type: 'application/x-msdownload' }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    await userEvent.click(screen.getByRole('button', { name: /Upload/i }));
+
+    await vi.waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
+    expect(mockUpload.mock.calls[0][0].name).toBe('ok.pdf');
+    expect(screen.getByText(/^Skipped$/)).toBeTruthy();
+  });
+
+  it('shows a 409 response as duplicate, not failure', async () => {
+    mockUpload.mockClear();
+    mockUpload.mockRejectedValueOnce({
+      status: 409,
+      code: 'DUPLICATE_CONTENT',
+      message: 'Duplicate document — already exists',
+      duplicateOf: 'dup-id',
+    } as any);
+
+    const { container } = renderAt('/', <Upload />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['a'], 'dup.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await userEvent.click(screen.getByRole('button', { name: /Upload/i }));
+
+    await vi.waitFor(() => expect(screen.getByText(/^Duplicate$/)).toBeTruthy());
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the queue on 429 and marks remaining not sent', async () => {
+    mockUpload.mockClear();
+    mockUpload
+      .mockResolvedValueOnce({
+        id: 'd1',
+        name: 'a.pdf',
+        status: 'pending',
+        created_at: '2026-01-01T00:00:00Z',
+      } as any)
+      .mockRejectedValueOnce({
+        status: 429,
+        code: 'RATE_LIMITED',
+        message: 'Too many requests',
+      } as any);
+
+    const { container } = renderAt('/', <Upload />);
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [
+      new File(['a'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['b'], 'b.pdf', { type: 'application/pdf' }),
+      new File(['c'], 'c.pdf', { type: 'application/pdf' }),
+    ];
+    fireEvent.change(input, { target: { files } });
+
+    await userEvent.click(screen.getByRole('button', { name: /Upload/i }));
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/Too many uploads, try again in a minute/i)).toBeTruthy()
+    );
+    expect(mockUpload).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/^Not sent$/)).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------
