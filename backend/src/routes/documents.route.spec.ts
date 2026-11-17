@@ -236,4 +236,78 @@ describe('routes — documents', () => {
     );
     warn.mockRestore();
   });
+
+  it('POST /api/documents/:id/approve 200 sets reviewed_at and returns needs_review false', async () => {
+    const app = createApp();
+    const updatedRow = {
+      id: DOC_ID,
+      name: 'x.pdf',
+      status: 'done',
+      document_type: 'invoice',
+      document_category: 'financial',
+      data: JSON.stringify({ vendor: 'V', totalAmount: 1850 }),
+      error: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      reviewed_at: '2026-01-02T00:00:00Z',
+    };
+    let approveCallCount = 0;
+    (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+      const s = String(sql);
+      if (s.includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+        return [[{ id: 'test-user', password_changed_at: null }]];
+      }
+      if (s.includes('FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()')) {
+        approveCallCount++;
+        if (approveCallCount === 1) {
+          // First call: ownership check returns minimal fields
+          return [[{ id: DOC_ID, reviewed_at: null }]];
+        }
+        // Second call: refetch returns full updated row
+        return [[updatedRow]];
+      }
+      if (s.includes('reviewed_at = NOW()')) {
+        return [[]];
+      }
+      if (s.includes('extraction_attempts')) {
+        return [[{ confidence: 0.95 }]];
+      }
+      if (s.includes('refine_jobs')) {
+        return [[]];
+      }
+      return [[]];
+    });
+
+    const res = await request(app).post(`/api/documents/${DOC_ID}/approve`).set(authHeader());
+    expect(res.status).toBe(200);
+    expect(res.body.needs_review).toBe(false);
+    expect(res.body.reviewed_at).toBe('2026-01-02T00:00:00Z');
+  });
+
+  it('POST /api/documents/:id/approve 404 for another user', async () => {
+    const app = createApp();
+    (pool.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: any) => {
+      const s = String(sql);
+      if (s.includes('SELECT id, password_changed_at FROM users WHERE id=?')) {
+        return [[{ id: 'other-user', password_changed_at: null }]];
+      }
+      if (s.includes('FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()')) {
+        return [[]];
+      }
+      return [[]];
+    });
+
+    const res = await request(app).post(`/api/documents/${DOC_ID}/approve`).set(authHeader());
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Document not found');
+  });
+
+  it('POST /api/documents/:id/approve 401 without a user', async () => {
+    const app = createApp();
+    // Origin header bypasses CSRF check so authenticate middleware returns 401.
+    const res = await request(app)
+      .post(`/api/documents/${DOC_ID}/approve`)
+      .set('Origin', config.corsOrigins[0]);
+    expect(res.status).toBe(401);
+  });
 });
