@@ -5,9 +5,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs/promises';
+import path from 'path';
 import { z } from 'zod';
 import { pool, withTransaction } from '../db/pool.js';
 import { logger } from '../config/logger.js';
+import { config } from '../config.js';
 import { extract } from '../services/extraction.service.js';
 import { isValidDate } from '../services/confidence.service.js';
 import { normalizeCurrency } from '../utils/currency.js';
@@ -807,4 +809,74 @@ export async function exportDocuments(req: Request, res: Response, next: NextFun
   } catch (err) {
     next(err);
   }
+}
+
+/**
+ * Mime types served for the original file preview, keyed by file extension.
+ * Only pdf/png/jpg are allowed (matching the upload file filter).
+ */
+const FILE_MIME_BY_EXT: Record<string, string> = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+};
+
+/**
+ * Serves the original uploaded file for a document owned by the caller.
+ * The stored path is resolved and verified to live inside the configured
+ * upload directory before the file is streamed back.
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
+export async function getDocumentFile(
+  req: Request,
+  res: Response,
+  _next: NextFunction
+): Promise<void> {
+  const user = getUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  const id = req.parsedId;
+  const [rows] = await pool.query(
+    'SELECT id, name, path FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+    [id, user.id]
+  );
+  const row = (rows as Array<{ id: string; name: string; path: string }>)[0];
+  if (!row) {
+    res.status(404).json({ error: 'Document not found' });
+    return;
+  }
+
+  const uploadDir = path.resolve(config.uploadDir);
+  const resolved = path.resolve(row.path);
+  if (!resolved.startsWith(uploadDir + path.sep) && resolved !== uploadDir) {
+    logger.warn('Original file path outside upload directory', { documentId: row.id });
+    res.status(404).json({ error: 'Document not found' });
+    return;
+  }
+
+  let exists = false;
+  try {
+    await fs.access(resolved);
+    exists = true;
+  } catch {
+    exists = false;
+  }
+  if (!exists) {
+    res.status(404).json({ error: 'Original file is no longer available' });
+    return;
+  }
+
+  const ext = row.name.slice(row.name.lastIndexOf('.') + 1).toLowerCase();
+  const mime = FILE_MIME_BY_EXT[ext] || 'application/octet-stream';
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(row.name)}"`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.sendFile(resolved);
 }
