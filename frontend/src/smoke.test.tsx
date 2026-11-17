@@ -25,6 +25,7 @@ import {
   listDocuments,
   exportDocuments,
   getDocumentFileBlob,
+  approveDocument,
 } from './api/client.ts';
 
 const NodeRequest = globalThis.Request;
@@ -48,6 +49,9 @@ vi.mock('./api/client.ts', () => ({
   listDocuments: vi.fn(),
   exportDocuments: vi.fn().mockResolvedValue(new Blob(['id,name\n'])),
   getDocumentFileBlob: vi.fn().mockResolvedValue(null),
+  approveDocument: vi
+    .fn()
+    .mockResolvedValue({ id: 'd1', needs_review: false, reviewed_at: '2026-01-02T00:00:00Z' }),
   me: vi.fn().mockResolvedValue({
     id: 'u1',
     email: 'user@example.com',
@@ -67,6 +71,7 @@ const mockDeleteDocument = vi.mocked(deleteDocument);
 const mockListDocuments = vi.mocked(listDocuments);
 const mockExportDocuments = vi.mocked(exportDocuments);
 const mockGetDocumentFileBlob = vi.mocked(getDocumentFileBlob);
+const mockApproveDocument = vi.mocked(approveDocument);
 
 function providers(children: ReactNode) {
   return (
@@ -300,6 +305,34 @@ describe('List page', () => {
     await userEvent.click(screen.getByRole('button', { name: /Export CSV/i }));
     await vi.waitFor(() => expect(mockExportDocuments).toHaveBeenCalled());
   });
+
+  it('Needs review badge shows when needs_review is true', async () => {
+    mockListDocuments.mockResolvedValue({
+      documents: [
+        {
+          id: 'd1',
+          name: 'invoice.pdf',
+          status: 'done',
+          document_type: 'invoice',
+          document_category: 'financial',
+          data: { vendor: 'Acme', totalAmount: 100, currency: 'USD' },
+          needs_review: true,
+          refine_status: null,
+          error: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        } as any,
+      ],
+      total: 1,
+      limit: 20,
+      offset: 0,
+    } as any);
+
+    renderAt('/', <List />);
+
+    await waitFor(() => expect(screen.getByText('invoice.pdf')).toBeTruthy());
+    expect(screen.getAllByText(/Needs review/i)).toHaveLength(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -452,6 +485,42 @@ describe('Detail page', () => {
     await vi.waitFor(() =>
       expect(screen.getByText(/Original file is no longer available/i)).toBeTruthy()
     );
+  });
+
+  it('Approve calls the endpoint and the needs-review banner disappears', async () => {
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'invoice.pdf',
+        status: 'done',
+        document_type: 'invoice',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 10, currency: 'USD' },
+        needs_review: true,
+        reviewed_at: null,
+        refine_status: null,
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
+    mockApproveDocument.mockResolvedValue({
+      id: 'd1',
+      needs_review: false,
+      reviewed_at: '2026-01-02T00:00:00Z',
+    });
+
+    renderAt('/documents/d1', <Detail />);
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/Needs review: check the highlighted fields/i)).toBeTruthy()
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Approve/i }));
+    await vi.waitFor(() => expect(mockApproveDocument).toHaveBeenCalledWith('d1'));
+    await vi.waitFor(() =>
+      expect(screen.queryByText(/Needs review: check the highlighted fields/i)).toBeNull()
+    );
+    expect(screen.getByText(/1\/2\/2026/)).toBeTruthy();
   });
 });
 

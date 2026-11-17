@@ -144,6 +144,23 @@
     color: $color-error;
   }
 
+  &-needs-review-banner {
+    @include card-base;
+    padding: 0.625rem 0.75rem;
+    margin-top: 0.5rem;
+    background: color-mix(in srgb, $color-warning 12%, transparent);
+    border: 1px solid color-mix(in srgb, $color-warning 40%, transparent);
+    color: $color-warning;
+    font-size: 0.8125em;
+    font-weight: 600;
+    border-radius: $radius-md;
+  }
+
+  &-field-missing {
+    color: $color-warning;
+    font-weight: 600;
+  }
+
   /* Table */
   &-table {
     @include table-base;

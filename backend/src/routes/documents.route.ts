@@ -21,6 +21,7 @@ import {
   exportSummary,
   exportDocuments,
   getDocumentFile,
+  approveDocument,
 } from '../controllers/documents.controller.js';
 import { requireUser } from '../middleware/auth.js';
 
@@ -59,6 +60,7 @@ router.get('/documents/export', requireUser, expensiveRouteLimit, exportDocument
 // Original file preview: one path segment under :id, so it never collides
 // with /documents/:id (which matches exactly two segments).
 router.get('/documents/:id/file', requireUser, validateIdParam, getDocumentFile);
+router.post('/documents/:id/approve', requireUser, validateIdParam, approveDocument);
 router.get('/documents/:id', getDocument);
 router.delete('/documents/:id', deleteDocument);
 

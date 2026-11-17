@@ -437,6 +437,21 @@ export async function retryDocumentRefinement(id: string) {
 }
 
 /**
+ * Approve a document: marks it as reviewed and clears the needs-review flag.
+ * A later correction clears the approval again.
+ * @param id - Document identifier
+ * @returns Updated document with reviewed_at and needs_review
+ * @example await approveDocument("abc-123");
+ */
+export async function approveDocument(id: string) {
+  return request<{
+    id: string;
+    needs_review: boolean;
+    reviewed_at: string | null;
+  }>('POST', `/api/documents/${id}/approve`);
+}
+
+/**
  * Delete a document and all its derived records.
  * @param id - Document identifier
  * @returns Void on success (204)

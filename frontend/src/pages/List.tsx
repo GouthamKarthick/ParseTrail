@@ -54,6 +54,8 @@ export default function List() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Client-side "Needs review" filter over the already-loaded page.
+  const [needsReviewFilter, setNeedsReviewFilter] = useState(false);
 
   const qParam = searchParams.get('q') ?? '';
   const typeParam = searchParams.get('type') ?? '';
@@ -72,6 +74,11 @@ export default function List() {
   const selectedLabels = useMemo(
     () => selectedTypes.map(v => DOC_TYPES.find(o => o.value === v)?.label ?? v),
     [selectedTypes]
+  );
+
+  const filteredDocs = useMemo(
+    () => (needsReviewFilter ? docs.filter(d => d.needs_review === true) : docs),
+    [docs, needsReviewFilter]
   );
 
   useEffect(() => {
@@ -169,7 +176,7 @@ export default function List() {
     }
   }
 
-  const hasFilters = Boolean(qParam || selectedTypes.length);
+  const hasFilters = Boolean(qParam || selectedTypes.length || needsReviewFilter);
 
   return (
     <div className="page">
@@ -215,6 +222,15 @@ export default function List() {
         <Button variant="secondary" size="sm" onClick={handleExport} disabled={loading}>
           Export CSV
         </Button>
+        <Button
+          variant={needsReviewFilter ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => setNeedsReviewFilter(!needsReviewFilter)}
+          className={styles['list-filter-chip']}
+          aria-pressed={needsReviewFilter}
+        >
+          Needs review
+        </Button>
       </div>
 
       {view === 'list' ? (
@@ -253,7 +269,7 @@ export default function List() {
                   </tr>
                 </thead>
                 <tbody>
-                  {docs.map(d => (
+                  {filteredDocs.map(d => (
                     <tr
                       key={d.id}
                       className={styles['list-row']}
@@ -284,6 +300,13 @@ export default function List() {
                               {b.label}
                             </span>
                           ))}
+                          {d.needs_review && (
+                            <span
+                              className={`${styles['list-status']} ${styles['list-status-needs-review']}`}
+                            >
+                              Needs review
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td>
