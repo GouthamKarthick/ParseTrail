@@ -3,10 +3,13 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import fs from 'fs';
 
 vi.mock('dotenv', () => ({ default: { config: vi.fn() } }));
 
 const baseEnv = { ...process.env };
+const realExistsSync = fs.existsSync.bind(fs);
+const mockExistsSync = vi.spyOn(fs, 'existsSync');
 
 afterEach(() => {
   for (const key of Object.keys(process.env)) {
@@ -15,6 +18,8 @@ afterEach(() => {
   for (const [key, value] of Object.entries(baseEnv)) {
     process.env[key] = value;
   }
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.resetModules();
 });
 
@@ -22,9 +27,21 @@ async function importConfig(
   overrides: Record<string, string | undefined>
 ): Promise<typeof import('./config.js')> {
   vi.resetModules();
+  // Stub fs.existsSync so loadAiProviders finds no local /etc/secrets or backend/secrets file,
+  // keeping the test independent of the developer's real secrets/ai-keys.json.
+  mockExistsSync.mockImplementation((p: any) => {
+    const str = String(p);
+    if (str === '/etc/secrets/ai-keys.json' || str.endsWith('/secrets/ai-keys.json')) {
+      return false;
+    }
+    return realExistsSync(p);
+  });
   for (const [key, value] of Object.entries(overrides)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      vi.stubEnv(key, value);
+    }
   }
   return import('./config.js');
 }

@@ -1,21 +1,18 @@
 /**
- * services/strategies.ts — Per-type extraction strategies (Phase 4).
+ * services/strategies.ts — Per-document-type extraction settings.
  *
- * One entry per financial document type: cloud prompt focus lines plus a
- * 1-shot example for the local Flan prompt. The invoice entry reproduces
- * the historical generic behavior exactly; other types specialize it.
- * Rollout is eval-guarded: a type keeps its strategy only while
- * eval/compare shows neutral-or-better accuracy for it.
+ * Each document type has cloud prompt instructions plus an example for the
+ * local model. Fallback to generic behavior for unknown types.
  */
 
 import type { DocumentType } from '../types/index.js';
-import { FINANCIAL_PROMPT } from '../prompts/financial.js';
+import { FINANCIAL_BASE_PROMPT } from '../prompts/financial.js';
 
-export interface TypeStrategy {
+export interface DocumentTypeStrategy {
   type: DocumentType | 'other' | 'unknown';
-  /** Extra focus lines appended to the shared cloud prompt. */
-  promptFocus: string;
-  /** 1-shot example shaping the local Flan prompt. */
+  /** Extra instructions added to the shared cloud prompt. */
+  cloudPromptFocus: string;
+  /** Example for the local model prompt. */
   localExample: { text: string; json: string };
 }
 
@@ -24,15 +21,16 @@ const INVOICE_EXAMPLE = {
   json: '{"vendor":"Acme Corp","invoiceNumber":"INV-123","invoiceDate":"2024-02-01","totalAmount":1300,"currency":"USD"}',
 };
 
-const STRATEGIES: Record<string, TypeStrategy> = {
+const DOCUMENT_TYPE_STRATEGIES: Record<string, DocumentTypeStrategy> = {
   invoice: {
     type: 'invoice',
-    promptFocus: 'Focus: invoices — final total due (not subtotal/tax); number is Invoice No/Ref.',
+    cloudPromptFocus:
+      'Focus: invoices — final total due (not subtotal/tax); number is Invoice No/Ref.',
     localExample: INVOICE_EXAMPLE,
   },
   receipt: {
     type: 'receipt',
-    promptFocus:
+    cloudPromptFocus:
       'Focus: narrow till receipts — vendor is the shop header; number is Bill No/Receipt No; total is GRAND TOTAL (not subtotal); date is the bill date.',
     localExample: {
       text: 'Chai Point\nBill No: CP-99\nDate: 14/08/2026\nGrand Total Rs 200',
@@ -41,7 +39,7 @@ const STRATEGIES: Record<string, TypeStrategy> = {
   },
   payment: {
     type: 'payment',
-    promptFocus:
+    cloudPromptFocus:
       'Focus: transfer/payment confirmations — vendor is the sender or bank; number is the UTR/reference/confirmation code (long digits allowed); total is the amount paid or credited; date is the transaction date. Nulls allowed when absent.',
     localExample: {
       text: 'MIGROS Genossenschafts-Bund\nPayment Advice Ref: 2025009519\nDate: 07.01.2021\nTransferred GBP 18.00',
@@ -50,7 +48,7 @@ const STRATEGIES: Record<string, TypeStrategy> = {
   },
   bill: {
     type: 'bill',
-    promptFocus:
+    cloudPromptFocus:
       'Focus: utility bills — vendor is the utility company; total is the amount due/total payable (not past balance or arrears); date is the bill date (not the period start); invoiceNumber is usually null.',
     localExample: {
       text: 'Con Edison\nMeter 12345\nBill date: 03/03/2024\nTotal amount due $90.15',
@@ -59,7 +57,7 @@ const STRATEGIES: Record<string, TypeStrategy> = {
   },
   payslip: {
     type: 'payslip',
-    promptFocus:
+    cloudPromptFocus:
       'Focus: salary slips — vendor is the employer; total is NET PAY (not gross earnings); invoiceNumber is usually null (EMPCODE is an employee code, not an invoice number); date is the pay date.',
     localExample: {
       text: 'ABC Corp\nPayslip\nPay Date: 06/04/2021\nNet Payment £478.48',
@@ -68,8 +66,8 @@ const STRATEGIES: Record<string, TypeStrategy> = {
   },
   settlement_slip: {
     type: 'settlement_slip',
-    promptFocus:
-      'Focus: settlement/contract/FnF statements — vendor is the broker or employer; total is the net payable/settlement amount; number is the settlement/contract number when printed; date may be absent (null is honest).',
+    cloudPromptFocus:
+      'Focus: settlement/contract statements — vendor is the broker or employer; total is the net payable/settlement amount; number is the settlement/contract number when printed; date may be absent.',
     localExample: {
       text: 'Northstar Analytics Ltd.\nSettlement Statement for August 2026\nNET PAY (₹) : 48,250.00',
       json: '{"vendor":"Northstar Analytics Ltd.","invoiceNumber":null,"invoiceDate":null,"totalAmount":48250,"currency":"INR"}',
@@ -78,29 +76,124 @@ const STRATEGIES: Record<string, TypeStrategy> = {
 };
 
 /**
- * Returns the strategy for a type, falling back to generic invoice behavior.
- * @param documentType Type hint
- * @returns Strategy entry
+ * Gets the strategy for a document type, falling back to generic behavior.
+ * @param documentType Document type hint
+ * @returns Strategy entry for the type
  */
-export function getStrategy(documentType: string): TypeStrategy {
+export function getDocumentTypeStrategy(documentType: string): DocumentTypeStrategy {
   const t = (documentType || 'unknown').toLowerCase();
   return (
-    STRATEGIES[t] ?? {
+    DOCUMENT_TYPE_STRATEGIES[t] ?? {
       type: 'unknown',
-      promptFocus: '',
+      cloudPromptFocus: '',
       localExample: INVOICE_EXAMPLE,
     }
   );
 }
 
 /**
- * Builds the cloud prompt for a type: shared schema plus focus lines.
- * Invoice returns the historical prompt verbatim (no behavior change).
- * @param documentType Type hint
- * @returns Prompt text
+ * Builds the cloud prompt for a document type.
+ * @param documentType Document type hint
+ * @returns Cloud prompt text
  */
-export function buildPromptForType(documentType: string): string {
+export function buildCloudPrompt(documentType: string): string {
   const t = (documentType || 'unknown').toLowerCase();
-  if (t === 'invoice' || !STRATEGIES[t]) return FINANCIAL_PROMPT;
-  return `${FINANCIAL_PROMPT}\n\n${STRATEGIES[t].promptFocus}`;
+  if (t === 'invoice' || !DOCUMENT_TYPE_STRATEGIES[t]) return FINANCIAL_BASE_PROMPT;
+  return `${FINANCIAL_BASE_PROMPT}\n\n${DOCUMENT_TYPE_STRATEGIES[t].cloudPromptFocus}`;
+}
+
+/**
+ * Per-type cloud prompt instructions, keyed by document type.
+ */
+export const DOCUMENT_TYPE_FOCUS: Record<DocumentType, string> = {
+  invoice: DOCUMENT_TYPE_STRATEGIES.invoice.cloudPromptFocus,
+  receipt: DOCUMENT_TYPE_STRATEGIES.receipt.cloudPromptFocus,
+  payment: DOCUMENT_TYPE_STRATEGIES.payment.cloudPromptFocus,
+  bill: DOCUMENT_TYPE_STRATEGIES.bill.cloudPromptFocus,
+  payslip: DOCUMENT_TYPE_STRATEGIES.payslip.cloudPromptFocus,
+  settlement_slip: DOCUMENT_TYPE_STRATEGIES.settlement_slip.cloudPromptFocus,
+  other:
+    'Type focus (other): Not one of the 6 core financial types. Only populate fields if clearly financial; otherwise return nulls and documentType="other".',
+  unknown:
+    'Classification guide (decide documentType from layout/headings):\n' +
+    '- invoice: Formal billing doc ("INVOICE", "TAX INVOICE", "RECHNUNG", GSTIN/VAT, Bill To + line items).\n' +
+    '- receipt: Narrow POS/order slip ("RECEIPT", "Bill No", "GRAND TOTAL", tendered/change).\n' +
+    '- payment: Confirmation of completed transfer ("Payment Successful", "Transaction ID", "UTR", "Paid").\n' +
+    '- bill: Recurring utility/telecom/statement ("Bill Date", "Due Date", "Account No", consumption/meter).\n' +
+    '- payslip: Salary statement ("Payslip", "Net Pay", "Gross Earnings", "Deductions", PF/Tax).\n' +
+    '- settlement_slip: Merchant/broker payout breakdown ("Settlement", "Payout", "Net Settled", fees).\n' +
+    '- other: Non-financial document.',
+};
+
+/**
+ * Context for building a cloud extraction prompt with optional data.
+ */
+export interface CloudPromptData {
+  /** Heuristic/model-predicted document type, defaults to "unknown". */
+  predictedType?: DocumentType;
+  /** Fields missing from local extraction that cloud should prioritize. */
+  missingFields?: Array<'vendor' | 'invoiceNumber' | 'invoiceDate' | 'totalAmount' | 'currency'>;
+  /** Fields where rules and local model disagreed, keyed by field name. */
+  conflicts?: Partial<
+    Record<
+      'invoiceNumber' | 'invoiceDate' | 'totalAmount' | 'currency',
+      { rulesValue: string | number | null; localModelValue: string | number | null }
+    >
+  >;
+}
+
+/**
+ * Builds the cloud extraction prompt with base instructions plus type focus.
+ * @param ctx Optional context with predicted type, missing fields, conflicts
+ * @returns Cloud prompt text
+ */
+export function buildCloudExtractionPrompt(ctx: CloudPromptData = {}): string {
+  const typeKey: DocumentType = ctx.predictedType ?? 'unknown';
+  const parts: string[] = [
+    FINANCIAL_BASE_PROMPT,
+    DOCUMENT_TYPE_FOCUS[typeKey] ?? DOCUMENT_TYPE_FOCUS.unknown,
+  ];
+
+  if (typeKey !== 'unknown') {
+    parts.push(
+      `Note: System suggested "${typeKey}", but verify against text and change documentType if text shows another type.`
+    );
+  }
+
+  if (ctx.conflicts && Object.keys(ctx.conflicts).length > 0) {
+    const conflictLines = Object.entries(ctx.conflicts).map(
+      ([field, values]) =>
+        `- ${field}: rules=${JSON.stringify(values?.rulesValue ?? null)} vs local_model=${JSON.stringify(values?.localModelValue ?? null)}`
+    );
+    parts.push(
+      `Arbitration context (local stages disagreed; verify from source text):\n${conflictLines.join('\n')}`
+    );
+  } else if (ctx.missingFields && ctx.missingFields.length > 0) {
+    parts.push(`Priority missing fields to check: ${ctx.missingFields.join(', ')}.`);
+  }
+
+  parts.push('Document text:');
+  return parts.join('\n\n');
+}
+
+/**
+ * Builds the compact local model prompt for core document fields.
+ * @param text Raw document text
+ * @param oneShotExample Compact "Text: ...\nJSON: ..." example for document type
+ * @param maxChars Max characters of text to include (default 1400)
+ * @returns Local model prompt text
+ */
+export function buildLocalModelPrompt(
+  text: string,
+  oneShotExample: string,
+  maxChars = 1400
+): string {
+  const snippet = text.replace(/\s+/g, ' ').trim().slice(0, maxChars);
+  return `Extract vendor, invoiceNumber, invoiceDate (YYYY-MM-DD), totalAmount (number), currency (3-letter code) as JSON. Use null if unknown. Never copy headings or payment labels as vendor.
+
+Example:
+${oneShotExample}
+
+Text: ${snippet}
+JSON:`;
 }

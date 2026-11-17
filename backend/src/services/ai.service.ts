@@ -6,9 +6,9 @@ import { config } from '../config.js';
 import { logger } from '../config/logger.js';
 import type { ExtractionResult, ExtractedData } from '../types/index.js';
 import { DOCUMENT_EXTRACTION_PROMPT } from '../prompts/index.js';
-import { getCategory } from './registry.js';
+import { getDocumentTypeCategory } from './registry.js';
 import { stripJsonFence } from '../utils/json.js';
-import { normalizeCurrency } from '../utils/currency.js';
+import { standardizeCurrency } from '../utils/currency.js';
 import { normalizeDateISO } from '../utils/date.js';
 import { parseAmount } from '../utils/amount.js';
 import { cleanVendorCandidate } from '../utils/regex-utils.js';
@@ -168,7 +168,7 @@ function validateAndNormalize(raw: unknown): {
     data.invoiceDate = normalizeDateISO(r.invoice_date as string);
   const amt = parseAmount((r.totalAmount ?? r.total_amount) as unknown);
   if (amt != null) data.totalAmount = amt;
-  const cur = normalizeCurrency(r.currency);
+  const cur = standardizeCurrency(r.currency);
   if (cur) data.currency = cur;
   if (Object.keys(data).length === 0) {
     let keyCount = 0;
@@ -336,7 +336,7 @@ async function callCompatibleProvider(
   if (!key) throw new Error(`${provider} API key is not configured`);
   const model =
     provider === 'groq'
-      ? providerModel('groq') || 'llama-3.3-70b-versatile'
+      ? providerModel('groq') || 'openai/gpt-oss-120b'
       : providerModel('openrouter') || 'meta-llama/llama-3.3-70b-instruct:free';
   const url =
     provider === 'groq'
@@ -429,7 +429,7 @@ export async function extractWithAI(
     } catch (error) {
       if (error instanceof ProviderError) {
         const status = error.status;
-        if (status === 401 || status === 403) {
+        if (status === 401 || status === 403 || status === 404) {
           skipProvider(candidate, SKIP_401_MS);
           errors.push(`${candidate} auth failed (status ${status})`);
           continue;
@@ -477,7 +477,7 @@ export async function extractWithAI(
     tokenUsage: response.tokenUsage,
     documentType: documentType as ExtractionResult['documentType'],
     documentTypeConfidence: confidence,
-    documentCategory: getCategory(documentType),
+    documentCategory: getDocumentTypeCategory(documentType),
   };
 }
 

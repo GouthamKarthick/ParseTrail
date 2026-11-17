@@ -7,10 +7,13 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { config } from '../config.js';
 import { logger } from '../config/logger.js';
 
 const execFileAsync = promisify(execFile);
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 export interface OcrResult {
   text: string;
@@ -58,7 +61,7 @@ async function getWorker(_lang: string) {
   const { createWorker } = await import('tesseract.js');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const worker: any = await createWorker(langs, 1, {
-    langPath: process.cwd(),
+    langPath: process.env.TESSDATA_PATH || path.resolve(here, '..', '..'),
     gzip: false,
   });
   worker._langs = langs;

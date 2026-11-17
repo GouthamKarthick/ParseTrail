@@ -8,7 +8,7 @@
 import { logger } from '../config/logger.js';
 import { config } from '../config.js';
 import { stripJsonFence } from '../utils/json.js';
-import { normalizeCurrency } from '../utils/currency.js';
+import { standardizeCurrency } from '../utils/currency.js';
 import { normalizeDateISO } from '../utils/date.js';
 import { parseAmount } from '../utils/amount.js';
 import {
@@ -20,7 +20,7 @@ import {
   extractInvoiceNumberFallback,
   firstVendorLine,
 } from '../utils/regex-utils.js';
-import { getStrategy } from './strategies.js';
+import { getDocumentTypeStrategy, buildLocalModelPrompt } from './strategies.js';
 import { localLlmConfidence, ruleBasedConfidence } from '../utils/confidence.js';
 
 type Text2TextPipeline = (
@@ -43,10 +43,19 @@ async function getLocalLLM(): Promise<Text2TextPipeline | null> {
   llmLoadPromise = (async () => {
     try {
       const mod: unknown = await import('@huggingface/transformers');
-      const fn = (mod as { default?: unknown }).default ?? mod;
+      const exports = mod as { pipeline?: unknown; default?: unknown };
+      const fn: Text2TextPipeline | undefined =
+        typeof exports.pipeline === 'function'
+          ? (exports.pipeline as Text2TextPipeline)
+          : (exports.default as Text2TextPipeline | undefined);
       if (typeof fn !== 'function') throw new Error('pipeline not found');
       const model = config.localLlmModel || 'Xenova/LaMini-Flan-T5-77M';
-      const p = await fn('text2text-generation', model, {
+      const invoke = fn as unknown as (
+        prompt: string,
+        model: string,
+        opts: { quantized: boolean; dtype: string }
+      ) => Promise<unknown>;
+      const p = await invoke('text2text-generation', model, {
         quantized: true,
         dtype: 'q8',
       });
@@ -104,11 +113,8 @@ export async function runLocalLLMExtraction(
   text: string,
   documentType: string
 ): Promise<{ data: Record<string, unknown>; confidence: number; documentType: string }> {
-  const ex = getStrategy(documentType).localExample;
-  const prompt =
-    `Task: extract ${documentType} as JSON only.\n` +
-    `Example:\nText: "${ex.text}"\nJSON: ${ex.json}\n\n` +
-    `Text: "${text.slice(0, 800).replace(/\n/g, ' ')}"\nJSON:`;
+  const ex = getDocumentTypeStrategy(documentType).localExample;
+  const prompt = buildLocalModelPrompt(text, `${ex.text}\nJSON: ${ex.json}`);
   try {
     const pipe = await getLocalLLM();
     if (!pipe) return { data: {}, confidence: 0, documentType };
@@ -152,7 +158,7 @@ export async function runLocalLLMExtraction(
       data.invoiceDate = normalizeDateISO(parsed.invoiceDate);
     const amt = parseAmount(parsed.totalAmount);
     if (amt != null) data.totalAmount = amt;
-    const cur = normalizeCurrency(parsed.currency);
+    const cur = standardizeCurrency(parsed.currency);
     if (cur) data.currency = cur;
     if (
       !data.vendor ||

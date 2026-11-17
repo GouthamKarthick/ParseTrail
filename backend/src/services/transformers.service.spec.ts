@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 const mockPipeline = vi.hoisted(() => vi.fn());
-vi.mock('@huggingface/transformers', () => ({ default: mockPipeline }));
+vi.mock('@huggingface/transformers', () => ({ default: mockPipeline, pipeline: mockPipeline }));
 import { config } from '../config.js';
 import {
   extractAmountFallback,
@@ -51,6 +51,41 @@ describe('transformers — local model loading', () => {
       await runLocalLLMExtraction('A sufficiently long invoice document', 'invoice');
       expect(mockPipeline).toHaveBeenCalledTimes(1);
     } finally {
+      (config as unknown as { localLlmEnabled: boolean }).localLlmEnabled = previous;
+    }
+  });
+
+  it('loads from the named pipeline export when default is absent', async () => {
+    const previous = config.localLlmEnabled;
+    const previousEnv = process.env.LOCAL_LLM_ENABLED;
+    process.env.LOCAL_LLM_ENABLED = 'true';
+    (config as unknown as { localLlmEnabled: boolean }).localLlmEnabled = true;
+    vi.resetModules();
+    vi.doMock('@huggingface/transformers', () => ({ pipeline: mockPipeline }));
+    const innerPipeline = vi.fn().mockResolvedValue([
+      {
+        generated_text:
+          '{ "vendor": "Acme", "invoiceNumber": "1", "invoiceDate": "2026-01-01", "totalAmount": 100, "currency": "USD" }',
+      },
+    ]);
+    mockPipeline.mockResolvedValue(innerPipeline);
+    try {
+      const { runLocalLLMExtraction: runLocal } = await import('./transformers.service.js');
+      const result = await runLocal('A sufficiently long invoice document', 'invoice');
+      expect(mockPipeline).toHaveBeenCalledWith(
+        'text2text-generation',
+        expect.any(String),
+        expect.objectContaining({ quantized: true, dtype: 'q8' })
+      );
+      expect(innerPipeline).toHaveBeenCalledTimes(1);
+      expect(result.data.vendor).toBe('Acme');
+    } finally {
+      vi.resetModules();
+      vi.doMock('@huggingface/transformers', () => ({
+        default: mockPipeline,
+        pipeline: mockPipeline,
+      }));
+      process.env.LOCAL_LLM_ENABLED = previousEnv;
       (config as unknown as { localLlmEnabled: boolean }).localLlmEnabled = previous;
     }
   });

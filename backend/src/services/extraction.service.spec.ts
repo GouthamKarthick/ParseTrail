@@ -11,7 +11,7 @@ vi.mock('fs/promises', async importOriginal => {
   };
 });
 vi.mock('./ocr.service.js', () => ({ ocrBuffer: vi.fn() }));
-vi.mock('./ai.service.js', () => ({ tryAI: vi.fn() }));
+vi.mock('./ai.service.js', () => ({ extractWithAI: vi.fn() }));
 vi.mock('./transformers.service.js', async importOriginal => {
   const orig = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -29,14 +29,14 @@ vi.mock('../config/logger.js', () => ({
 import fs from 'fs/promises';
 import fsCallback from 'fs';
 import { ocrBuffer } from './ocr.service.js';
-import { tryAI } from './ai.service.js';
+import { extractWithAI } from './ai.service.js';
 import { runLocalLLMExtraction } from './transformers.service.js';
-import { extract, parsePdfWithPdfjs } from './extraction.service.js';
+import { extractDocumentData, extractTextFromPdf } from './extraction.service.js';
 import { config } from '../config.js';
 const initialAiConfig = { ...config.ai };
 const mockReadFile = vi.mocked(fs.readFile);
 const mockOcr = vi.mocked(ocrBuffer);
-const mockTryAI = vi.mocked(tryAI);
+const mockExtractWithAI = vi.mocked(extractWithAI);
 const mockLocal = vi.mocked(runLocalLLMExtraction);
 const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
 function ocrText(t: string, c = 95, p = 1) {
@@ -66,15 +66,15 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.72,
       documentType: 'invoice',
     });
-    const r = await extract(pngBuffer, { order: 'model-first' });
+    const r = await extractDocumentData(pngBuffer, { order: 'model-first' });
     expect(r.data.invoiceNumber).toBe('INV-123');
     expect(r.method).toBe('local-llm');
-    expect(mockTryAI).not.toHaveBeenCalled();
+    expect(mockExtractWithAI).not.toHaveBeenCalled();
   });
   it('empty short -> unknown', async () => {
     (config as any).ai.providerKeys = {};
     mockOcr.mockResolvedValue(ocrText('hi'));
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('unknown');
     expect(r.method).toBe('local-llm');
   });
@@ -85,7 +85,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       documentType: 'receipt',
     });
     mockOcr.mockResolvedValue(ocrText('Chai Point\nBill No: CP-99\nGrand Total Rs 200'));
-    const r = await extract(pngBuffer, { order: 'model-first' });
+    const r = await extractDocumentData(pngBuffer, { order: 'model-first' });
     expect(r.documentType).toBe('receipt');
     expect(mockLocal).toHaveBeenCalled();
   });
@@ -97,7 +97,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.6,
       documentType: 'invoice',
     } as any);
-    const r = await extract(pdf);
+    const r = await extractDocumentData(pdf);
     expect(mockOcr).toHaveBeenCalled();
     expect(r.data.invoiceNumber).toBe('SCAN-1');
   });
@@ -114,16 +114,16 @@ describe('extraction.service — Flan local -> Gemini', () => {
       documentType: 'invoice',
     });
 
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: { vendor: 'AI Vendor' },
       confidence: 0.99,
       method: 'llm',
       documentType: 'invoice',
       documentTypeConfidence: 0.9,
     } as any);
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.data.vendor).not.toBe('AI Vendor');
-    expect(mockTryAI).not.toHaveBeenCalled();
+    expect(mockExtractWithAI).not.toHaveBeenCalled();
   });
   it('runs configured Groq when Gemini has no API key', async () => {
     (config as any).ai = {
@@ -137,7 +137,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0,
       documentType: 'invoice',
     });
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: { vendor: 'Example Co' },
       confidence: 0.8,
       method: 'llm',
@@ -146,9 +146,9 @@ describe('extraction.service — Flan local -> Gemini', () => {
       documentCategory: 'financial',
     } as any);
 
-    await extract(pngBuffer, { order: 'model-first' });
-    expect(mockTryAI).toHaveBeenCalled();
-    expect(mockTryAI.mock.calls[0]?.[2]).toBe('image/png');
+    await extractDocumentData(pngBuffer, { order: 'model-first' });
+    expect(mockExtractWithAI).toHaveBeenCalled();
+    expect(mockExtractWithAI.mock.calls[0]?.[1]?.mimeType).toBe('image/png');
   });
   it('low local confidence calls AI and prefers AI', async () => {
     (config as any).ai.providerKeys = {
@@ -164,15 +164,15 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.1,
       documentType: 'invoice',
     });
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: { vendor: 'AI Vendor', invoiceNumber: 'AI-123', totalAmount: 999 },
       confidence: 0.9,
       method: 'llm',
       documentType: 'invoice',
       documentTypeConfidence: 0.88,
     } as any);
-    const r = await extract(pngBuffer);
-    expect(mockTryAI).toHaveBeenCalled();
+    const r = await extractDocumentData(pngBuffer);
+    expect(mockExtractWithAI).toHaveBeenCalled();
     expect(r.data.vendor).toBe('AI Vendor');
     expect(r.method).toBe('llm');
   });
@@ -186,14 +186,14 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.3,
       documentType: 'invoice',
     });
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: { vendor: 'Acme Corp', totalAmount: 123.45, currency: 'INR' },
       confidence: 0.6,
       method: 'llm',
       documentType: 'invoice',
       documentTypeConfidence: 0.7,
     } as any);
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.data.vendor).toBe('Acme Corp');
   });
   it('file path uses readFile', async () => {
@@ -204,7 +204,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.6,
       documentType: 'invoice',
     } as any);
-    const r = await extract('/tmp/fake.png' as any);
+    const r = await extractDocumentData('/tmp/fake.png' as any);
     expect(mockReadFile).toHaveBeenCalledWith('/tmp/fake.png');
     expect(r.data.invoiceNumber).toBe('PATH-1');
   });
@@ -215,7 +215,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.6,
       documentType: 'invoice',
     } as any);
-    let r = await extract(pngBuffer);
+    let r = await extractDocumentData(pngBuffer);
     expect(r.data.currency).toBe('INR');
   });
   it('records heuristic-detect + local-llm attempts on short-circuit', async () => {
@@ -232,7 +232,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.72,
       documentType: 'invoice',
     });
-    const r = await extract(pngBuffer, { order: 'model-first' });
+    const r = await extractDocumentData(pngBuffer, { order: 'model-first' });
     expect(r.attempts.map(a => (a as { method: string }).method)).toEqual([
       'heuristic-detect',
       'local-llm',
@@ -254,14 +254,14 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.1,
       documentType: 'invoice',
     });
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: { vendor: 'AI Vendor', invoiceNumber: 'AI-123', totalAmount: 999 },
       confidence: 0.9,
       method: 'llm',
       documentType: 'invoice',
       documentTypeConfidence: 0.88,
     } as any);
-    const r = await extract(pngBuffer, { order: 'model-first' });
+    const r = await extractDocumentData(pngBuffer, { order: 'model-first' });
     const methods = r.attempts.map(a => (a as { method: string }).method);
     expect(methods).toEqual(['heuristic-detect', 'local-llm', 'llm']);
     expect((r.attempts[1] as { fallbackReason?: string }).fallbackReason).toMatch(
@@ -273,10 +273,10 @@ describe('extraction.service — Flan local -> Gemini', () => {
       gemini: { apiKey: 'fake-key', model: 'gemini-flash-latest' },
     };
     mockOcr.mockResolvedValue(ocrText('Acme Corp\nInvoice No: R-1\nDate: 2024-02-01\nTotal: $500'));
-    const r = await extract(pngBuffer, { order: 'rules-first' });
+    const r = await extractDocumentData(pngBuffer, { order: 'rules-first' });
     expect(r.method).toBe('rule-based');
     expect(r.data.invoiceNumber).toBe('R-1');
-    expect(mockTryAI).not.toHaveBeenCalled();
+    expect(mockExtractWithAI).not.toHaveBeenCalled();
     expect(r.attempts.map(a => (a as { method: string }).method)).toEqual([
       'heuristic-detect',
       'rule-based',
@@ -292,7 +292,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.8,
       documentType: 'invoice',
     });
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: {
         vendor: 'Acme Corp',
         invoiceNumber: 'R-1',
@@ -306,10 +306,10 @@ describe('extraction.service — Flan local -> Gemini', () => {
       documentTypeConfidence: 0.9,
     } as any);
 
-    const result = await extract(pngBuffer, { cloudOnly: true });
+    const result = await extractDocumentData(pngBuffer, { cloudOnly: true });
 
     expect(mockLocal).not.toHaveBeenCalled();
-    expect(mockTryAI).toHaveBeenCalledOnce();
+    expect(mockExtractWithAI).toHaveBeenCalledOnce();
     expect(result.data.invoiceDate).toBe('2024-02-01');
     expect(result.attempts.map(attempt => attempt.method)).toEqual(['heuristic-detect', 'llm']);
   });
@@ -331,7 +331,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.9,
       documentType: 'bill',
     } as any);
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: {
         vendor: 'Tata Power',
         invoiceDate: '2015-07-18',
@@ -342,8 +342,8 @@ describe('extraction.service — Flan local -> Gemini', () => {
       documentType: 'bill',
       documentTypeConfidence: 0.88,
     } as any);
-    const r = await extract(pngBuffer, { order: 'model-first' });
-    expect(mockTryAI).toHaveBeenCalled();
+    const r = await extractDocumentData(pngBuffer, { order: 'model-first' });
+    expect(mockExtractWithAI).toHaveBeenCalled();
     expect((r.attempts[1] as { fallbackReason?: string }).fallbackReason).toMatch(
       /disagree on invoiceDate/
     );
@@ -368,7 +368,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.9,
       documentType: 'bill',
     } as any);
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: {
         vendor: 'Tata Power',
         invoiceDate: '2015-07-19',
@@ -380,7 +380,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       documentTypeConfidence: 0.2,
     } as any);
 
-    const result = await extract(pngBuffer, { order: 'model-first' });
+    const result = await extractDocumentData(pngBuffer, { order: 'model-first' });
     expect(result.data.invoiceDate).toBe('2015-07-19');
     expect(result.data.invoiceNumber).toBe('B-1');
     expect(result.attempts[1]?.conflicts).toEqual(['invoiceDate']);
@@ -403,7 +403,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.9,
       documentType: 'bill',
     } as any);
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: {
         vendor: 'Tata Power',
         invoiceDate: '2015-07-19',
@@ -415,7 +415,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       documentTypeConfidence: 0.9,
     } as any);
 
-    const result = await extract(pngBuffer, { order: 'model-first' });
+    const result = await extractDocumentData(pngBuffer, { order: 'model-first' });
     expect(result.data.invoiceDate).toBe('2015-07-18');
     expect(result.attempts[1]?.conflicts).toEqual([]);
   });
@@ -435,7 +435,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.9,
       documentType: 'bill',
     } as any);
-    const r = await extract(pngBuffer, { order: 'model-first' });
+    const r = await extractDocumentData(pngBuffer, { order: 'model-first' });
     expect(r.data.invoiceDate).toBe('2015-07-18');
     expect(r.method).toBe('local-llm');
   });
@@ -453,15 +453,15 @@ describe('extraction.service — Flan local -> Gemini', () => {
       confidence: 0.1,
       documentType: 'invoice',
     });
-    mockTryAI.mockResolvedValue({
+    mockExtractWithAI.mockResolvedValue({
       data: { vendor: 'AI Vendor', totalAmount: 999 },
       confidence: 0.9,
       method: 'llm',
       documentType: 'invoice',
       documentTypeConfidence: 0.88,
     } as any);
-    const r = await extract(pngBuffer, { order: 'rules-first' });
-    expect(mockTryAI).toHaveBeenCalled();
+    const r = await extractDocumentData(pngBuffer, { order: 'rules-first' });
+    expect(mockExtractWithAI).toHaveBeenCalled();
     const methods = r.attempts.map(a => (a as { method: string }).method);
     expect(methods[0]).toBe('heuristic-detect');
     expect(methods[1]).toBe('rule-based');
@@ -473,7 +473,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
         'National Stock Exchange\nContract Note cum Tax Invoice\nSettlement No 2025149\nTrade Date 05/08/2025\nNet amount payable Rs 12,400'
       )
     );
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('settlement_slip');
   });
   it('utility bill with receipt-trap words light-detects as bill', async () => {
@@ -482,7 +482,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
         'Con Edison\nMeter readings\nTotal electricity 11 kWh\nTotal amount due $22.31\nPayment is due upon receipt of this bill'
       )
     );
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('bill');
   });
   it('electricity invoice wording light-detects as bill, not invoice', async () => {
@@ -491,7 +491,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
         'EDF Energy\nElectricity invoice: £1,342.74\nPayment due date: 15 Feb 21\nSupply address: 68 Sample Way'
       )
     );
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('bill');
   });
   it('zelle confirmation light-detects as payment, not receipt', async () => {
@@ -500,7 +500,7 @@ describe('extraction.service — Flan local -> Gemini', () => {
         'SAMPLE ZELLE RECEIPTS\nTransaction Status Successful\nAmount Rs 931\nTransaction ID NX21080620583725743445941'
       )
     );
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('payment');
   });
   it('rent receipt light-detects as payment', async () => {
@@ -509,21 +509,21 @@ describe('extraction.service — Flan local -> Gemini', () => {
         'RECEIPT FOR RENT MONEY\nTenant paid $800 in cash for rent on 12 Main St\nMoney Received By landlord'
       )
     );
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('payment');
   });
   it('plain invoice with due date but no utility stays invoice', async () => {
     mockOcr.mockResolvedValue(
       ocrText('Your Company Name\nInvoice # 12345\nDue date 02/01/2026\nTotal: $100.00')
     );
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('invoice');
   });
   it('pay stub / earnings statement variants light-detect as payslip', async () => {
     mockOcr.mockResolvedValue(
       ocrText('Sample Statement of Earnings\nEmployee Name:\nGross Pay\nNet Pay')
     );
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('payslip');
   });
   it('full and final statement light-detects as settlement_slip', async () => {
@@ -532,14 +532,14 @@ describe('extraction.service — Flan local -> Gemini', () => {
         'Full and Final Settlement Statement\nEmployee dues payable on exit\nNet Payable Rs 45,000\nNo other claims remain'
       )
     );
-    const r = await extract(pngBuffer);
+    const r = await extractDocumentData(pngBuffer);
     expect(r.documentType).toBe('settlement_slip');
   });
-  it('parsePdfWithPdfjs extracts text from a PDF via pdfjs-dist', async () => {
+  it('extractTextFromPdf extracts text from a PDF via pdfjs-dist', async () => {
     const pdfBuffer = fsCallback.readFileSync(
       new URL('./fixtures/test-document.pdf', import.meta.url)
     );
-    const text = await parsePdfWithPdfjs(pdfBuffer);
+    const text = await extractTextFromPdf(pdfBuffer);
     expect(text.length).toBeGreaterThan(0);
     expect(text).toContain('Hello World Test Document');
   });

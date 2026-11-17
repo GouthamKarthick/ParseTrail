@@ -3,7 +3,7 @@
  */
 
 import type { DocumentCategory } from '../types/index.js';
-import { buildPromptForType } from './strategies.js';
+import { buildCloudPrompt } from './strategies.js';
 
 export const CATEGORY_MAP: Record<string, DocumentCategory> = {
   invoice: 'financial',
@@ -21,7 +21,7 @@ export const CATEGORY_MAP: Record<string, DocumentCategory> = {
  * @param documentType Document type string
  * @returns Category
  */
-export function getCategory(documentType: string): DocumentCategory {
+export function getDocumentTypeCategory(documentType: string): DocumentCategory {
   const t = (documentType || 'unknown').toLowerCase();
   return CATEGORY_MAP[t] ?? 'unknown';
 }
@@ -33,5 +33,5 @@ export function getCategory(documentType: string): DocumentCategory {
  * @returns Prompt string
  */
 export function getPromptForType(documentType: string): string {
-  return buildPromptForType(documentType);
+  return buildCloudPrompt(documentType);
 }

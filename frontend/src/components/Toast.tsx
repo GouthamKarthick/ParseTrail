@@ -69,7 +69,7 @@ export function ToastContainer({
             }}
             className={styles['toast-dismiss']}
           >
-            ×
+            <i className="bi bi-x" aria-hidden />
           </button>
         </div>
       ))}

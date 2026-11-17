@@ -19,9 +19,8 @@ import {
   Legend,
 } from 'recharts';
 import { getSummary, exportSummary } from '../api/client';
-import { Heading } from '../components/ui/Heading';
+import { TextBlock } from '../components/ui/Text';
 import { Button } from '../components/ui/Button';
-import { Text } from '../components/ui/Text';
 import { useTheme } from '../context/ThemeContext';
 import { useToastContext } from '../context/ToastContext';
 import { useApi } from '../hooks/useApi';
@@ -50,6 +49,16 @@ const COLORS_DARK = ['#22d3ee', '#34d399', '#fcd34d', '#a78bfa', '#f9a8d4', '#67
  */
 function formatType(v: string) {
   return v.replace(/_/g, ' ');
+}
+
+/**
+ * Format x-axis tick label for the by-type chart.
+ * Shortens "settlement_slip" to "settle." for readability.
+ * @param value - Raw tick value
+ * @returns Formatted label
+ */
+function formatTickLabel(value: string) {
+  return value === 'settlement_slip' ? 'settle.' : formatType(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +115,7 @@ export default function Dashboard() {
     return (
       <div className="page">
         <div className={styles['dashboard-header']}>
-          <Heading level={1}>30-Day Summary</Heading>
+          <TextBlock headingLevel={1}>30-Day Summary</TextBlock>
         </div>
         <div className={styles['dashboard-stats']} aria-busy="true">
           <Skeleton lines={3} />
@@ -125,7 +134,7 @@ export default function Dashboard() {
   return (
     <div className="page">
       <div className={styles['dashboard-header']}>
-        <Heading level={1}>30-Day Summary</Heading>
+        <TextBlock headingLevel={1}>30-Day Summary</TextBlock>
         <div className={styles['dashboard-actions']}>
           <Button
             variant="secondary"
@@ -177,7 +186,7 @@ export default function Dashboard() {
         <div className={styles['dashboard-card']}>
           <div className={styles['dashboard-card-title']}>By Type — Count</div>
           {data.byType.length === 0 ? (
-            <Text variant="muted">No data</Text>
+            <TextBlock textStyle="muted">No data</TextBlock>
           ) : (
             <div className={styles['dashboard-chart']}>
               <ResponsiveContainer width="100%" height={230}>
@@ -198,12 +207,7 @@ export default function Dashboard() {
                       fill: theme === 'dark' ? '#94a3b8' : '#6b7280',
                     }}
                     interval={0}
-                    tickFormatter={
-                      ((value: string) =>
-                        value === 'settlement_slip' ? 'settle.' : formatType(value)) as unknown as (
-                        v: string
-                      ) => string
-                    }
+                    tickFormatter={formatTickLabel as unknown as (v: string) => string}
                     angle={0}
                     dy={8}
                     height={30}
@@ -230,7 +234,7 @@ export default function Dashboard() {
         <div className={styles['dashboard-card']}>
           <div className={styles['dashboard-card-title']}>By Type — Sum</div>
           {data.byType.length === 0 ? (
-            <Text variant="muted">No data</Text>
+            <TextBlock textStyle="muted">No data</TextBlock>
           ) : (
             <div className={styles['dashboard-chart']}>
               <ResponsiveContainer width="100%" height={250}>
@@ -276,7 +280,7 @@ export default function Dashboard() {
       <div className={styles['dashboard-card']}>
         <div className={styles['dashboard-card-title']}>Daily Trend (30 days)</div>
         {data.trend.length === 0 ? (
-          <Text variant="muted">No data</Text>
+          <TextBlock textStyle="muted">No data</TextBlock>
         ) : (
           <div className={styles['dashboard-chart']}>
             <ResponsiveContainer width="100%" height={220}>
@@ -333,7 +337,7 @@ export default function Dashboard() {
       <div className={styles['dashboard-card']}>
         <div className={styles['dashboard-card-title']}>Top Vendors</div>
         {data.topVendors.length === 0 ? (
-          <Text variant="muted">No data</Text>
+          <TextBlock textStyle="muted">No data</TextBlock>
         ) : (
           <table className={styles['dashboard-table']}>
             <thead>

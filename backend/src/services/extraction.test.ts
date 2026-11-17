@@ -1,7 +1,7 @@
 import assert from 'assert';
 import fs from 'fs';
 import path from 'path';
-import { extract } from './extraction.service.js';
+import { extractDocumentData } from './extraction.service.js';
 import { terminateOcr } from './ocr.service.js';
 
 const fixtures = path.resolve('fixtures');
@@ -15,7 +15,7 @@ function fixture(name: string): string {
 }
 
 async function testTextPdf() {
-  const r = await extract(fixture('text-invoice.pdf'));
+  const r = await extractDocumentData(fixture('text-invoice.pdf'));
   console.log('textPdf result:', r);
   assert.ok(r.data.totalAmount !== undefined, 'textPdf should extract totalAmount');
   assert.equal(r.data.currency, 'USD');
@@ -23,7 +23,7 @@ async function testTextPdf() {
 }
 
 async function testImagePng() {
-  const r = await extract(fixture('invoice-image.png'));
+  const r = await extractDocumentData(fixture('invoice-image.png'));
   console.log('imagePng result:', r);
   // OCR may extract 1300
   assert.ok(
@@ -34,7 +34,7 @@ async function testImagePng() {
 }
 
 async function testReceiptPng() {
-  const r = await extract(fixture('receipt-image.png'));
+  const r = await extractDocumentData(fixture('receipt-image.png'));
   console.log('receiptPng result:', r);
   assert.ok(r.data.totalAmount === 200, `receipt total 200 got ${r.data.totalAmount}`);
   assert.equal(r.data.currency, 'INR');
@@ -42,14 +42,14 @@ async function testReceiptPng() {
 }
 
 async function testScannedPdf() {
-  const r = await extract(fixture('scanned-invoice.pdf'));
+  const r = await extractDocumentData(fixture('scanned-invoice.pdf'));
   console.log('scannedPdf result:', r);
   assert.ok(r.data.totalAmount !== undefined, 'scannedPdf should extract via lib OCR rasterize');
   console.log('✓ scannedPdf rasterize+ocr');
 }
 
 async function testHindiMixed() {
-  const r = await extract(fixture('invoice-hindi-mixed.png'));
+  const r = await extractDocumentData(fixture('invoice-hindi-mixed.png'));
   console.log('hindiMixed result:', r);
   assert.ok(r.data.totalAmount === 4520, `hindi total 4520 got ${r.data.totalAmount}`);
   console.log('✓ hindiMixed');

@@ -12,9 +12,14 @@ import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import { pool } from '../db/pool.js';
 import type { PoolConnection } from 'mysql2/promise';
+import type { DocumentType, AttemptRecord } from '../types/index.js';
 import { config } from '../config.js';
 import { logger } from '../config/logger.js';
-import { extract, extractFromText, recordAttempts } from '../services/extraction.service.js';
+import {
+  extractDocumentData,
+  extractDataFromText,
+  saveExtractionAttempts,
+} from '../services/extraction.service.js';
 import { createContentFingerprint } from '../services/dedup.service.js';
 import { withCorrectionsReapplied } from '../services/corrections.js';
 import { needsRefinement } from '../services/confidence.service.js';
@@ -213,9 +218,9 @@ async function processInitialExtraction(
     throw error;
   }
   if (isStopping) return 'idle';
-  let r: Awaited<ReturnType<typeof extract>>;
+  let r: Awaited<ReturnType<typeof extractDocumentData>>;
   try {
-    r = await extract(doc.path, { allowCloud: false });
+    r = await extractDocumentData(doc.path, { allowCloud: false });
     r.data = await withCorrectionsReapplied(job.document_id, r.data as Record<string, unknown>);
   } catch (error) {
     const message = (error as Error).message;
@@ -242,7 +247,7 @@ async function processInitialExtraction(
       [r.extractedText, job.document_id]
     );
   }
-  await recordAttempts(job.document_id, r.attempts);
+  await saveExtractionAttempts(job.document_id, r.attempts);
   await pool.query(
     "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, content_fingerprint=?, error=NULL WHERE id=?",
     [
@@ -345,11 +350,23 @@ async function processRefineJob(): Promise<Outcome> {
       doc.data as string,
       {}
     );
-    let r: Awaited<ReturnType<typeof extract>>;
+    const coreFields = [
+      'vendor',
+      'invoiceNumber',
+      'invoiceDate',
+      'totalAmount',
+      'currency',
+    ] as const;
+    const missingFields = coreFields.filter(k => stored[k] == null);
+    let r: Awaited<ReturnType<typeof extractDocumentData>>;
     try {
       r = hasCachedText
-        ? await extractFromText(doc.extracted_text as string)
-        : await extract(doc.path, { cloudOnly: true });
+        ? await extractDataFromText(doc.extracted_text as string, {
+            predictedType: (stored.documentType ?? stored.document_type) as
+              DocumentType | undefined,
+            missingFields: missingFields.length > 0 ? missingFields : undefined,
+          })
+        : await extractDocumentData(doc.path, { cloudOnly: true });
     } catch (error) {
       if (!hasCachedText && (error as NodeJS.ErrnoException).code === 'ENOENT') {
         await finishJob(job, 'dead', 'source_unavailable');
@@ -364,8 +381,8 @@ async function processRefineJob(): Promise<Outcome> {
         [r.extractedText, job.document_id]
       );
     }
-    await recordAttempts(job.document_id, r.attempts);
-    const cloudOk = r.attempts.some(a => a.method === 'llm' && a.succeeded);
+    await saveExtractionAttempts(job.document_id, r.attempts);
+    const cloudOk = r.attempts.some((a: AttemptRecord) => a.method === 'llm' && a.succeeded);
     const merged: Record<string, unknown> = { ...stored };
     let filled = 0;
     for (const [k, v] of Object.entries(r.data as Record<string, unknown>)) {

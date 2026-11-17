@@ -9,8 +9,7 @@ import { getPasswordError } from '../utils/security';
 import { useToastContext } from '../context/ToastContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Heading } from '../components/ui/Heading';
-import { Text } from '../components/ui/Text';
+import { TextBlock } from '../components/ui/Text';
 import styles from './Upload.module.scss';
 import authStyles from './Auth.module.scss';
 
@@ -98,8 +97,8 @@ export default function Register() {
   return (
     <div className="page">
       <div className={styles['upload-card']}>
-        <Heading level={1}>Create account</Heading>
-        <Text variant="muted">Start organizing your invoices with ParseTrail.</Text>
+        <TextBlock headingLevel={1}>Create account</TextBlock>
+        <TextBlock textStyle="muted">Start organizing your invoices with ParseTrail.</TextBlock>
 
         <form onSubmit={handleSubmit} className={styles['upload-form']}>
           <div className={authStyles['auth-field']}>
@@ -260,12 +259,12 @@ export default function Register() {
           </Button>
 
           <div className={authStyles['auth-center']}>
-            <Text variant="small">
+            <TextBlock textStyle="small">
               Already have an account?{' '}
               <Link to="/login" className={authStyles['auth-link']}>
                 Login
               </Link>
-            </Text>
+            </TextBlock>
           </div>
         </form>
       </div>

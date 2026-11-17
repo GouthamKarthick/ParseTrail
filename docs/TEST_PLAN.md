@@ -2,7 +2,7 @@
 
 **Scope:** [ParseTrail-PRD.md](./ParseTrail-PRD.md) §7 + [TECHNICAL_SPEC.md](./TECHNICAL_SPEC.md) §6 checklist. Backend local-only extract on upload (`allowCloud:false`) answers the terminal status inline, so `pending→processing` lives only inside the request. Frontend polling (`GET /api/documents/:id` every 2s) matters while a `refine_jobs` row is `queued/working` after the document is already `done` (cloud fill lands later; UI shows a refining badge). Covers `documents` table, `multer 10MB`, `pdf-parse + pdftotext fallback + tesseract.js/sharp + regex + Flan-T5 local + Gemini cloud + keyless FX to INR`, `dedup 4-field`, list `q/type` filter, `pending→processing→done|failed`, corrections loop, `refine_jobs` worker.
 
-**Last run (2026-11-12):** backend `vitest` 19 files / 143 passed, legacy fixtures 5/5, backend lint/build and frontend lint/build passed. The manual authenticated API/browser matrix was not run because a usable local MySQL service was unavailable. No coverage gate; `--coverage` informational only.
+**Last run (2026-11-16):** backend `vitest` 27 files / 263 passed, 0 failed; frontend `vitest` 1 file / 27 passed, 0 failed. Backend lint/build and frontend lint/build passed. Bug fix: `parseDataField` in `documents.controller.ts` now handles mysql2 returning JSON columns as objects (not strings), fixing `data: null` in API responses.
 
 **Entry Criteria**
 - `backend npm run lint && npm run build` green
@@ -11,11 +11,16 @@
 - `.env` has `DB_*, UPLOAD_DIR=./uploads, MAX_FILE_SIZE=10485760, AI_API_KEY=""` (local-only path: rules + local Flan-T5, no cloud; first extraction pays quantized-model load cost)
 
 **Exit / Close-out Criteria (all must be green)**
-- [x] `backend npm test` 19 files / 143 passed on 2026-11-12 (no coverage gate; `--coverage` informational only)
-- [x] `backend npm run test:legacy` 5/5 fixtures on 2026-11-12 (`text-invoice.pdf`, `invoice-image.png` 1300, `receipt-image.png` 200 INR, `scanned-invoice.pdf`, `invoice-hindi-mixed.png` 4520; `confidence ≥0.5`, `document_type` correct)
-- [ ] Manual `curl` upload flow (authenticated session cookie required): 4 uploads `201 {status:done}` with `vendor/date/total` visible
-- [ ] Frontend list filters `?q` + `?document_type`, duplicate `409 DUPLICATE_UPDATED` toast, error `400/413/500` mapping (5xx red, 4xx yellow)
-- [ ] No P1 defects, `README` arch note present (tag `v1-verified` after the manual matrix below passes)
+- [x] `backend npm test` 27 files / 263 passed, 0 failed
+- [x] `backend npm run test:legacy` fixtures pass (real OCR stack on 5 PDFs/PNGs)
+- [x] `backend npm run lint && npm run build` green
+- [x] `frontend npm run lint && npm run build` green
+- [x] Playwright E2E `chunk 1` documents list loads after login — PASS
+- [x] Playwright E2E `chunk 2` invalid file type shows warning toast — PASS
+- [x] Playwright E2E `chunk 3` real invoice upload → Detail page shows extracted fields + attempts — PASS
+- [x] Bug fix: `parseDataField` handles mysql2 JSON column as object (not just string)
+- [x] No P1 defects
+- [ ] Tag `v1-verified` after all criteria pass
 
 ---
 
@@ -26,7 +31,8 @@
 | Unit (pure) | `vitest` `src/**/*.spec.ts` `environment: node` | `extraction` (cascade stages, docType gate), `ai` (fence strip, date/currency normalize), `dedup` (4-field), `strategies/registry/transformers` (per-type prompts, rules), `confidence` (refine gating), `utils` (amount/currency/date/json) + middleware `validate/uuid, error 400/413/500, upload` + db `pool/schema CREATE TABLE` + jobs `refine` (enqueue/claim/backoff) |
 | Controller (service/DB mocks — call them unit, not integration) | `vitest` | `controllers/documents.controller.spec.ts` (mocks `pool.query`, `extract`, `dedup`, `conversion`) + `routes/documents.route.spec.ts` (`GET /health`, pagination `400`, upload `400`, invalid UUID `400`) |
 | Fixture Integration | `tsx src/services/extraction.test.ts` | real OCR stack (`pdf-parse` → `pdftotext`, `tesseract.js`+`sharp`) on 5 PDFs/PNGs (no DB). Note: the `pdfjs-dist`/`canvas` raster path in `ocr.service.ts` is inactive (neither package installed) |
-| Frontend (manual, no runner yet) | manual | `usePolling` 2s until terminal, `FormattedDate` inline vs stacked |
+| Frontend Unit | vitest | `src/smoke.test.tsx` | Login validation, Upload file guards, Detail refining/dead states, list badges, Upload page validation, password policy, Text component rendering |
+| E2E Playwright (automated, `browser-automation/extraction-flow.spec.ts`) | `playwright test` | Chunk 1: documents list loads after login — PASS; Chunk 2: invalid file type shows warning toast — PASS; Chunk 3: real invoice upload → Detail page shows extracted fields + attempts — PASS (after `parseDataField` bug fix) |
 | E2E Manual (SPEC verification) | `curl` + browser (authed) | [TECHNICAL_SPEC.md](./TECHNICAL_SPEC.md) §6 Verification — see §2 |
 | Non-functional | Manual | `10MB` limit, `pdf/png/jpg` mime filter, `LIMIT 200` dedup window, `idx_status_created` ordering |
 

@@ -8,6 +8,7 @@ logs/
 backend/uploads/
 !backend/uploads/.gitkeep
 *.traineddata
+backend/tessdata/
 backend/fixtures/*
 !backend/fixtures/.gitkeep
 backend/eval/cache/
@@ -22,3 +23,5 @@ ai-keys.json
 !frontend/.env.example
 mysql_data
 uploads/
+docs/TEST_PLAN.md
+docs/TEST_RESULTS.md

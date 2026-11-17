@@ -5,7 +5,7 @@
 import { pool } from '../db/pool.js';
 import { createHash } from 'crypto';
 import type { ExtractedData } from '../types/index.js';
-import { normalizeCurrency } from '../utils/currency.js';
+import { standardizeCurrency } from '../utils/currency.js';
 import { parseJsonColumn } from '../utils/json.js';
 
 /**
@@ -35,7 +35,7 @@ function normInvoiceNo(v?: string): string | null {
  */
 function normCurrency(v?: string): string | null {
   if (!v) return null;
-  return normalizeCurrency(v);
+  return standardizeCurrency(v);
 }
 
 /**

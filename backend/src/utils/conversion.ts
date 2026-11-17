@@ -124,7 +124,7 @@ export interface ConvertibleData {
  * @param target Target display currency (defaults to configured target)
  * @returns void
  */
-export async function applyConversion(
+export async function applyCurrencyConversion(
   data: ConvertibleData,
   target: string = config.currencyConversion.targetCurrency
 ): Promise<void> {

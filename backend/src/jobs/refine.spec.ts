@@ -12,9 +12,9 @@ vi.mock('fs/promises', () => ({
   },
 }));
 vi.mock('../services/extraction.service.js', () => ({
-  extract: vi.fn(),
-  extractFromText: vi.fn(),
-  recordAttempts: vi.fn(),
+  extractDocumentData: vi.fn(),
+  extractDataFromText: vi.fn(),
+  saveExtractionAttempts: vi.fn(),
 }));
 vi.mock('../services/corrections.js', () => ({
   withCorrectionsReapplied: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('../services/corrections.js', () => ({
 
 import { pool } from '../db/pool.js';
 import fs from 'fs/promises';
-import { extract, extractFromText } from '../services/extraction.service.js';
+import { extractDocumentData, extractDataFromText } from '../services/extraction.service.js';
 import { withCorrectionsReapplied } from '../services/corrections.js';
 import {
   processOneRefineJob,
@@ -34,7 +34,7 @@ import {
   reserveRefineQuota,
   sweepStale,
 } from './refine.js';
-import { recordAttempts } from '../services/extraction.service.js';
+import { saveExtractionAttempts } from '../services/extraction.service.js';
 
 const mockQuery = () => vi.mocked(pool.query);
 
@@ -70,7 +70,7 @@ describe('jobs/refine — worker', () => {
   it('idle when no due jobs', async () => {
     baseSqlMock({ job: null });
     expect(await processOneRefineJob()).toBe('idle');
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
   });
 
   it('quota blocks cloud spend and releases the claimed job', async () => {
@@ -87,7 +87,7 @@ describe('jobs/refine — worker', () => {
     });
 
     expect(await processOneRefineJob()).toBe('quota');
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
   });
 
   it('does not reserve more than the daily cap under 20 parallel claims', async () => {
@@ -118,7 +118,7 @@ describe('jobs/refine — worker', () => {
         extracted_text: 'Invoice amount 99',
       },
     });
-    vi.mocked(extractFromText).mockResolvedValue({
+    vi.mocked(extractDataFromText).mockResolvedValue({
       data: { vendor: 'V', totalAmount: 99 },
       confidence: 0.8,
       method: 'local-llm+llm',
@@ -137,7 +137,12 @@ describe('jobs/refine — worker', () => {
       typeVotes: ['invoice'],
     } as any);
     expect(await processOneRefineJob()).toBe('done');
-    expect(extractFromText).toHaveBeenCalledWith('Invoice amount 99');
+    expect(extractDataFromText).toHaveBeenCalledWith(
+      'Invoice amount 99',
+      expect.objectContaining({
+        missingFields: ['invoiceNumber', 'invoiceDate', 'totalAmount', 'currency'],
+      })
+    );
     const updateCall = mockQuery().mock.calls.find(c =>
       String(c[0]).includes('UPDATE documents SET data=')
     );
@@ -159,7 +164,7 @@ describe('jobs/refine — worker', () => {
       },
     });
     vi.mocked(fs.access).mockResolvedValueOnce(undefined);
-    vi.mocked(extract).mockResolvedValue({
+    vi.mocked(extractDocumentData).mockResolvedValue({
       data: { vendor: 'V', totalAmount: 10 },
       confidence: 0.9,
       method: 'regex',
@@ -171,8 +176,8 @@ describe('jobs/refine — worker', () => {
       typeVotes: ['invoice'],
     } as any);
     expect(await processOneRefineJob()).toBe('done');
-    expect(extract).toHaveBeenCalledWith('/tmp/x.pdf', { allowCloud: false });
-    expect(recordAttempts).toHaveBeenCalledWith('d1', []);
+    expect(extractDocumentData).toHaveBeenCalledWith('/tmp/x.pdf', { allowCloud: false });
+    expect(saveExtractionAttempts).toHaveBeenCalledWith('d1', []);
     const doneCall = mockQuery().mock.calls.find(c =>
       String(c[0]).includes("UPDATE documents SET status='done'")
     );
@@ -194,7 +199,7 @@ describe('jobs/refine — worker', () => {
       },
     });
     vi.mocked(fs.access).mockResolvedValueOnce(undefined);
-    vi.mocked(extract).mockResolvedValue({
+    vi.mocked(extractDocumentData).mockResolvedValue({
       data: { vendor: 'V', totalAmount: 10 },
       confidence: 0.9,
       method: 'regex',
@@ -212,7 +217,7 @@ describe('jobs/refine — worker', () => {
     });
 
     expect(await processOneRefineJob()).toBe('done');
-    expect(extract).toHaveBeenCalledWith('/tmp/x.pdf', { allowCloud: false });
+    expect(extractDocumentData).toHaveBeenCalledWith('/tmp/x.pdf', { allowCloud: false });
     expect(withCorrectionsReapplied).toHaveBeenCalledWith('d1', {
       vendor: 'V',
       totalAmount: 10,
@@ -238,7 +243,7 @@ describe('jobs/refine — worker', () => {
       },
     });
     expect(await processOneRefineJob()).toBe('dead');
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
     const deadCall = mockQuery().mock.calls.find(call => String(call[0]).includes("status='dead'"));
     expect(deadCall).toBeDefined();
     expect(deadCall![1]).toContain('source_unavailable');
@@ -255,15 +260,15 @@ describe('jobs/refine — worker', () => {
         extracted_text: 'Invoice amount 99',
       },
     });
-    let finishExtraction!: (value: Awaited<ReturnType<typeof extractFromText>>) => void;
-    vi.mocked(extractFromText).mockReturnValue(
+    let finishExtraction!: (value: Awaited<ReturnType<typeof extractDataFromText>>) => void;
+    vi.mocked(extractDataFromText).mockReturnValue(
       new Promise(resolve => {
         finishExtraction = resolve;
       })
     );
 
     const firstTick = processOneRefineJob();
-    await vi.waitFor(() => expect(extractFromText).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(extractDataFromText).toHaveBeenCalledOnce());
     expect(await processOneRefineJob()).toBe('idle');
     finishExtraction({
       data: { totalAmount: 99 },
@@ -302,7 +307,7 @@ describe('jobs/refine — worker', () => {
         extracted_text: 'Invoice amount 99',
       },
     });
-    vi.mocked(extractFromText).mockResolvedValue({
+    vi.mocked(extractDataFromText).mockResolvedValue({
       data: { vendor: 'V' },
       confidence: 0.2,
       method: 'local-llm',
@@ -342,7 +347,7 @@ describe('jobs/refine — worker', () => {
         extracted_text: 'Invoice amount 99',
       },
     });
-    vi.mocked(extractFromText).mockRejectedValue(new Error('boom'));
+    vi.mocked(extractDataFromText).mockRejectedValue(new Error('boom'));
     expect(await processOneRefineJob()).toBe('retry');
     const finishCall = mockQuery().mock.calls.find(c =>
       String(c[0]).includes('UPDATE refine_jobs SET status=')
@@ -362,7 +367,7 @@ describe('jobs/refine — worker', () => {
         extracted_text: 'Invoice amount 99',
       },
     });
-    vi.mocked(extractFromText).mockRejectedValue(new Error('boom again'));
+    vi.mocked(extractDataFromText).mockRejectedValue(new Error('boom again'));
     expect(await processOneRefineJob()).toBe('dead');
     const finishCall = mockQuery().mock.calls.find(c => String(c[0]).includes("status='dead'"));
     expect(finishCall).toBeDefined();
@@ -390,7 +395,7 @@ describe('jobs/refine — worker', () => {
       String(call[0]).includes("status='dead'")
     );
     expect(deadUpdate?.[1]).toContain('source_unavailable');
-    expect(extract).not.toHaveBeenCalled();
+    expect(extractDocumentData).not.toHaveBeenCalled();
   });
 
   it('enqueueRefineJob dedupes pending jobs', async () => {
@@ -455,15 +460,15 @@ describe('jobs/refine — worker', () => {
         extracted_text: 'Invoice amount 99',
       },
     });
-    let finishExtraction!: (value: Awaited<ReturnType<typeof extractFromText>>) => void;
-    vi.mocked(extractFromText).mockReturnValue(
+    let finishExtraction!: (value: Awaited<ReturnType<typeof extractDataFromText>>) => void;
+    vi.mocked(extractDataFromText).mockReturnValue(
       new Promise(resolve => {
         finishExtraction = resolve;
       })
     );
 
     const activeTick = processOneRefineJob();
-    await vi.waitFor(() => expect(extractFromText).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(extractDataFromText).toHaveBeenCalledOnce());
     await releaseWorkingJobs();
     finishExtraction({
       data: { totalAmount: 99 },
@@ -478,7 +483,7 @@ describe('jobs/refine — worker', () => {
       extractedText: 'Invoice amount 99',
     });
     expect(await activeTick).toBe('idle');
-    expect(recordAttempts).not.toHaveBeenCalled();
+    expect(saveExtractionAttempts).not.toHaveBeenCalled();
     expect(
       mockQuery().mock.calls.some(call => String(call[0]).includes('UPDATE documents SET data='))
     ).toBe(false);
