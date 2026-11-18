@@ -85,4 +85,92 @@ describe('needsReview', () => {
   it('returns false when everything is present and not approved', () => {
     expect(needsReview({ ...base, reviewed_at: null })).toBe(false);
   });
+
+  it('returns true when data has a POSSIBLE_DUPLICATE alert', () => {
+    expect(
+      needsReview({
+        ...base,
+        reviewed_at: null,
+        data: {
+          vendor: 'Acme',
+          invoiceDate: '2026-01-01',
+          totalAmount: 10,
+          alerts: [{ code: 'POSSIBLE_DUPLICATE', message: 'x' }],
+        },
+      })
+    ).toBe(true);
+  });
+
+  it('returns true when data has a FUTURE_DATE alert', () => {
+    expect(
+      needsReview({
+        ...base,
+        reviewed_at: null,
+        data: {
+          vendor: 'Acme',
+          invoiceDate: '2026-01-01',
+          totalAmount: 10,
+          alerts: [{ code: 'FUTURE_DATE', message: 'x' }],
+        },
+      })
+    ).toBe(true);
+  });
+
+  it('returns true when data has a FUTURE_DATE alert even at high confidence', () => {
+    expect(
+      needsReview({
+        ...base,
+        reviewed_at: null,
+        confidence: 0.99,
+        data: {
+          vendor: 'Acme',
+          invoiceDate: '2026-01-01',
+          totalAmount: 10,
+          alerts: [{ code: 'FUTURE_DATE', message: 'x' }],
+        },
+      })
+    ).toBe(true);
+  });
+
+  it('returns false when data only has an AMOUNT_SPIKE alert', () => {
+    expect(
+      needsReview({
+        ...base,
+        reviewed_at: null,
+        confidence: 0.99,
+        data: {
+          vendor: 'Acme',
+          invoiceDate: '2026-01-01',
+          totalAmount: 10,
+          alerts: [{ code: 'AMOUNT_SPIKE', message: 'x' }],
+        },
+      })
+    ).toBe(false);
+  });
+
+  it('returns false when data only has a PAYSLIP_SHIFT alert', () => {
+    expect(
+      needsReview({
+        ...base,
+        reviewed_at: null,
+        confidence: 0.99,
+        data: {
+          vendor: 'Acme',
+          invoiceDate: '2026-01-01',
+          totalAmount: 10,
+          alerts: [{ code: 'PAYSLIP_SHIFT', message: 'x' }],
+        },
+      })
+    ).toBe(false);
+  });
+
+  it('returns false when alerts is empty', () => {
+    expect(
+      needsReview({
+        ...base,
+        reviewed_at: null,
+        data: { vendor: 'Acme', invoiceDate: '2026-01-01', totalAmount: 10, alerts: [] },
+      })
+    ).toBe(false);
+  });
 });

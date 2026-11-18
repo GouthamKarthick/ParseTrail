@@ -1,10 +1,10 @@
 # ParseTrail
 
-Drop in your bills, check only the doubtful fields, download one spreadsheet. Free.
+Drop in your bills, check only the doubtful fields, download one spreadsheet. Runs free locally; optional bring-your-own API key for cloud fallback.
 
 ParseTrail extracts structured fields from uploaded financial documents using rules, local Flan-T5 inference, and queued cloud refinement.
 
-**Live demo:** TODO: insert the deployed Render/Vercel URL (set `VITE_BACKEND_URL` to your Render backend).
+Run it locally (see Quick start below). There is no hosted demo; set `VITE_BACKEND_URL` to your own backend when deploying frontend and backend separately.
 
 ## Screenshots
 
@@ -20,11 +20,11 @@ ParseTrail extracts structured fields from uploaded financial documents using ru
 - Escalates selected rules/model field conflicts to cloud refinement; Gemini is the default provider.
 - Queues incomplete or conflicting local results in MySQL for an in-process worker with exponential retries.
 - Supports field corrections and correction history.
-- For the same user and document type, matches duplicates by vendor, invoice number, amount, and currency, then updates the existing record.
+- For the same user and document type, exact byte-hash duplicates are rejected with `409` without touching the existing record; near matches (same vendor + amount + invoice number + currency) attach a `POSSIBLE_DUPLICATE` guardrail alert to the new document and force review instead of overwriting the old row.
 - Filters the document list by type.
 - Shows a 30-day dashboard summary and exports it as CSV or PDF.
 - Shows a per-document extraction-attempt timeline (latest attempts in the UI).
-- Reads English and EU languages (French, Spanish, Italian, Dutch, Portuguese) via configurable, bundled OCR languages.
+- Reads English and EU languages (German, French, Spanish, Italian, Dutch, Portuguese) via configurable, bundled OCR languages (German is the default with English).
 - Shows the original uploaded file beside the extracted fields on the Detail page (image or PDF preview).
 - Flags documents that need review (low confidence or missing vendor/date/total) and lets you approve them.
 - Exports one row per document as CSV (UTF-8 BOM, Excel-friendly) with the same filters as the document list.
@@ -39,21 +39,19 @@ flowchart TD
     C --> E[Heuristic document-type detection]
     D --> E
     E --> F[Deterministic rules]
-    F -->|Pass| G[Save local extraction]
-    F -->|Continue| H[Local Flan-T5]
-    H -->|Pass| G
-    H -->|Missing fields, low confidence, or conflict| G
-    G --> J[Return local result]
+    F --> G[Save local extraction + guardrail alerts]
+    G --> H[Return 202 pending immediately]
     G --> I{Required fields missing or strategies disagree?}
-    I -->|No| J
+    I -->|No| J[Done — no cloud needed]
     I -->|Yes| K[Insert MySQL refine_jobs row]
     K --> L[In-process polling worker]
     L --> M[Configured cloud inference: Gemini by default]
-    M --> N[Fill missing fields and record attempts]
+    M --> N[Fill missing fields, re-run guardrails]
     N --> O[Update stored document]
+    O --> P[Done]
 ```
 
-Uploads run the local stages synchronously. A MySQL-backed worker performs a cloud pass only when required fields are missing or stages disagree; cloud results fill missing stored fields.
+Uploads return `202` immediately and run local extraction in the background via `refine_jobs`; a MySQL-backed polling worker performs a cloud pass only when required fields are missing or stages disagree, then fills missing stored fields and re-runs cross-document guardrails.
 
 ## AI provider privacy
 
@@ -143,7 +141,7 @@ On backend startup, `ensureSchema()` creates or migrates the application tables 
 
 ## Roadmap
 
-- **Planned — Phase 3:** move the database to AWS RDS.
+- **Planned — Phase 3:** move the database to a managed MySQL-compatible service (TiDB Cloud Starter recommended).
 - **✓ Built:** dead-letter queue (`refine_jobs` `dead` status) and dead-job reprocessing (`POST /documents/:id/refinement/retry`).
 - **✓ Done:** real provider token usage recorded per extraction attempt (no longer zero estimates).
 - **Not used (dropped):** S3/SQS/Lambda — extraction runs on local disk + the MySQL jobs table; no AWS infrastructure is required.

@@ -3,6 +3,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
+import type { ExtractedData } from '../types/index.js';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
@@ -20,11 +21,13 @@ import {
 } from '../utils/conversion.js';
 import { parseJsonColumn } from '../utils/json.js';
 import { needsReview } from '../utils/review.js';
+import { checkDocumentAlerts } from '../utils/audit-checks.js';
 import { enqueueRefineJob, retryRefineJobNow } from '../jobs/refine.js';
 import { findDuplicateByContent, findDuplicateByHash } from '../services/dedup.service.js';
 import { uuidSchema } from '../middleware/validate.js';
 import { getUser } from '../middleware/auth.js';
 import { getSummary as getSummaryData } from '../services/summary.service.js';
+import { getExtractionMetrics as getExtractionMetricsService } from '../services/summary.service.js';
 import {
   generateSummaryPdf,
   generateSummaryCsv,
@@ -600,10 +603,10 @@ export async function correctField(req: Request, res: Response, next: NextFuncti
       return;
     }
     const [rows] = await pool.query(
-      'SELECT id, data FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
+      'SELECT id, data, document_type FROM documents WHERE id=? AND user_id=? AND expires_at > NOW()',
       [parsed.data, user.id]
     );
-    const row = (rows as Array<{ id: string; data: string | null }>)[0];
+    const row = (rows as Array<{ id: string; data: string | null; document_type: string }>)[0];
     if (!row) {
       res.status(404).json({ error: 'Document not found' });
       return;
@@ -633,6 +636,21 @@ export async function correctField(req: Request, res: Response, next: NextFuncti
           docId: parsed.data,
         });
       }
+    }
+
+    // Recompute cross-document guardrails after a manual edit so a fixed field
+    // (e.g. a future date or a mis-OCR'd amount) clears its alert and the
+    // document can leave the needs-review set once approved.
+    const alerts = await checkDocumentAlerts(
+      data as ExtractedData,
+      user.id,
+      row.document_type,
+      parsed.data
+    );
+    if (alerts.length > 0) {
+      data.alerts = alerts;
+    } else {
+      delete data.alerts;
     }
 
     // UPDATE documents.data and INSERT corrections atomically so a crash
@@ -782,6 +800,36 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
           : undefined;
     const summary = await getSummaryData(user.id, 30, category ? { category } : undefined);
     res.json(summary);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Returns extraction pipeline efficiency metrics for the dashboard.
+ * @param req Express request
+ * @param res Express response
+ * @param next Next middleware
+ * @returns void
+ */
+export async function getExtractionMetrics(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = getUser(req);
+    if (!user) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    let days = 30;
+    if (req.query.days !== undefined) {
+      const parsed = Number.parseInt(String(req.query.days), 10);
+      if (!Number.isFinite(parsed)) {
+        res.status(400).json({ error: 'days must be an integer between 1 and 365' });
+        return;
+      }
+      days = Math.min(365, Math.max(1, parsed));
+    }
+    const metrics = await getExtractionMetricsService(user.id, days);
+    res.json(metrics);
   } catch (err) {
     next(err);
   }

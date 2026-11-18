@@ -4,6 +4,8 @@
 
 import { pool } from '../db/pool.js';
 import { config } from '../config.js';
+import { needsReview } from '../utils/review.js';
+import { parseJsonColumn } from '../utils/json.js';
 
 export interface Summary {
   totalDocs: number;
@@ -13,6 +15,18 @@ export interface Summary {
   byType: Array<{ document_type: string; cnt: number; sum: number }>;
   trend: Array<{ date: string; cnt: number; sum: number }>;
   topVendors: Array<{ vendor: string; cnt: number; sum: number }>;
+}
+
+/** Pipeline efficiency metrics surfaced on the dashboard (zero new tables). */
+export interface ExtractionMetrics {
+  /** % of completed docs handled by rules/Flan with zero cloud token spend */
+  localOnlyPercent: number;
+  /** Number of cloud LLM attempts in the window */
+  cloudCalls: number;
+  /** Sum of input + output tokens spent in the window */
+  totalTokens: number;
+  /** Completed docs not yet approved (awaiting review) */
+  needsReviewCount: number;
 }
 
 interface SummaryRow {
@@ -141,4 +155,82 @@ export async function getSummary(
         sum: Number(row.sum_total),
       })),
   };
+}
+
+/**
+ * Extraction pipeline efficiency metrics for the dashboard.
+ * Scoped to one user and a trailing window (default 30 days).
+ * @param userId Owner id
+ * @param days Trailing window in days
+ * @returns ExtractionMetrics
+ */
+export async function getExtractionMetrics(userId: string, days = 30): Promise<ExtractionMetrics> {
+  const [totalRows] = await pool.query(
+    `SELECT COUNT(*) AS cnt FROM documents
+     WHERE user_id=? AND status='done' AND expires_at > NOW()
+       AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
+    [userId, days]
+  );
+  const totalDocs = Number((totalRows as Array<{ cnt: number }>)[0]?.cnt ?? 0);
+
+  const [cloudRows] = await pool.query(
+    `SELECT COUNT(*) AS cloudCalls,
+            COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS totalTokens,
+            COUNT(DISTINCT document_id) AS docsWithCloud
+     FROM extraction_attempts ea
+     JOIN documents d ON d.id = ea.document_id
+     WHERE d.user_id=? AND d.status='done' AND d.expires_at > NOW()
+       AND ea.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) AND ea.method = 'llm'`,
+    [userId, days]
+  );
+  const cloud = (
+    cloudRows as Array<{
+      cloudCalls: number;
+      totalTokens: number | string;
+      docsWithCloud: number;
+    }>
+  )[0];
+  const cloudCalls = Number(cloud?.cloudCalls ?? 0);
+  const totalTokens = Number(cloud?.totalTokens ?? 0);
+  const docsWithCloud = Number(cloud?.docsWithCloud ?? 0);
+
+  // needs_review mirrors utils/review.ts (confidence < 0.8, missing
+  // vendor/date/total, dead refine job, or a POSSIBLE_DUPLICATE/FUTURE_DATE
+  // alert). These conditions can't all be expressed in SQL, so load the
+  // user's done, non-expired documents (capped at 1000) and count in code.
+  const [nrRows] = await pool.query(
+    `SELECT d.data, d.reviewed_at,
+            (SELECT r.status FROM refine_jobs r WHERE r.document_id = d.id ORDER BY r.created_at DESC LIMIT 1) AS refine_status,
+            (SELECT ea.confidence FROM extraction_attempts ea WHERE ea.document_id = d.id ORDER BY ea.seq DESC LIMIT 1) AS confidence
+     FROM documents d
+     WHERE d.user_id=? AND d.status='done' AND d.expires_at > NOW()
+     ORDER BY d.created_at DESC
+     LIMIT 1000`,
+    [userId]
+  );
+  const docs = nrRows as Array<{
+    data: string | null;
+    reviewed_at: string | null;
+    refine_status: string | null;
+    confidence: number | null;
+  }>;
+  let needsReviewCount = 0;
+  for (const doc of docs) {
+    const data = parseJsonColumn<Record<string, unknown> | null>(doc.data, null);
+    if (
+      needsReview({
+        reviewed_at: doc.reviewed_at,
+        confidence: doc.confidence,
+        data,
+        refine_status: doc.refine_status,
+      })
+    ) {
+      needsReviewCount++;
+    }
+  }
+
+  const localOnlyPercent =
+    totalDocs > 0 ? Math.round(((totalDocs - docsWithCloud) / totalDocs) * 100) : 0;
+
+  return { localOnlyPercent, cloudCalls, totalTokens, needsReviewCount };
 }

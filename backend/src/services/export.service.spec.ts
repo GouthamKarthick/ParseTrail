@@ -86,19 +86,27 @@ describe('generateDocumentsCsv', () => {
     expect(lines[1]).toContain("'=cmd");
   });
 
-  it('includes totalAmountINR column only when present in data', async () => {
-    mockQueries(documentsRow({ vendor: 'Acme', totalAmount: 10, totalAmountINR: 850 }));
+  it('includes totalAmountConverted column only when present in data', async () => {
+    mockQueries(
+      documentsRow({
+        vendor: 'Acme',
+        totalAmount: 10,
+        totalAmountConverted: 850,
+        currencyConverted: 'INR',
+      })
+    );
     const csv = await generateDocumentsCsv('user-1', {});
     const lines = csv.split('\r\n');
-    expect(lines[0]).toContain('totalAmountINR');
+    expect(lines[0]).toContain('totalAmountConverted');
+    expect(lines[0]).toContain('currencyConverted');
     expect(lines[1]).toContain('850');
   });
 
-  it('omits totalAmountINR column when absent in all data', async () => {
+  it('omits totalAmountConverted column when absent in all data', async () => {
     mockQueries(documentsRow({ vendor: 'Acme', totalAmount: 10 }));
     const csv = await generateDocumentsCsv('user-1', {});
     const lines = csv.split('\r\n');
-    expect(lines[0]).not.toContain('totalAmountINR');
+    expect(lines[0]).not.toContain('totalAmountConverted');
   });
 
   it('marks corrected=yes when the document has correction rows', async () => {

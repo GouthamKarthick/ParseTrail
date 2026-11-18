@@ -510,4 +510,124 @@ describe('jobs/refine — worker', () => {
     expect(deadCall).toBeDefined();
     expect(JSON.stringify(deadCall![1])).toContain('document gone');
   });
+
+  it('clears stale alerts in DB when cloud pass fills nothing new', async () => {
+    baseSqlMock({
+      job: { id: 'j1', document_id: 'd1', user_id: 'u1', attempts: 0 },
+      doc: {
+        id: 'd1',
+        path: '/tmp/x.pdf',
+        status: 'done',
+        data: JSON.stringify({
+          vendor: 'V',
+          totalAmount: 100,
+          alerts: [{ code: 'AMOUNT_SPIKE', message: 'spike' }],
+        }),
+        extracted_text: 'Invoice amount 100',
+      },
+    });
+    vi.mocked(extractDataFromText).mockResolvedValue({
+      data: { vendor: 'V', totalAmount: 100 }, // no new nulls filled
+      confidence: 0.9,
+      method: 'llm',
+      documentType: 'invoice',
+      documentTypeConfidence: 0.9,
+      documentCategory: 'financial',
+      attempts: [{ method: 'llm', confidence: 0.9, latencyMs: 1, cost: 0, succeeded: true }],
+      typeVotes: ['invoice'],
+      conflicts: [],
+      extractedText: 'Invoice amount 100',
+    } as any);
+    expect(await processOneRefineJob()).toBe('done');
+    const updateCall = mockQuery().mock.calls.find(c =>
+      String(c[0]).includes('UPDATE documents SET data=')
+    );
+    expect(updateCall).toBeDefined();
+    const storedData = JSON.parse((updateCall![1] as any)[0] as string);
+    expect(storedData.alerts).toBeUndefined();
+  });
+
+  it('pending doc with missing required fields requeues for cloud refinement', async () => {
+    baseSqlMock({
+      job: { id: 'j1', document_id: 'd1', user_id: 'u1', attempts: 0 },
+      doc: {
+        id: 'd1',
+        path: '/tmp/x.pdf',
+        status: 'pending',
+        data: null,
+        extracted_text: null,
+      },
+    });
+    vi.mocked(fs.access).mockResolvedValueOnce(undefined);
+    vi.mocked(extractDocumentData).mockResolvedValue({
+      data: { vendor: 'V' }, // missing totalAmount + invoiceDate
+      confidence: 0.5,
+      method: 'regex',
+      documentType: 'invoice',
+      documentTypeConfidence: 0.9,
+      documentCategory: 'financial',
+      attempts: [],
+      extractedText: 'Vendor V',
+      typeVotes: ['invoice'],
+    } as any);
+    expect(await processOneRefineJob()).toBe('done');
+    const doneCall = mockQuery().mock.calls.find(c =>
+      String(c[0]).includes("UPDATE documents SET status='done'")
+    );
+    expect(doneCall).toBeDefined();
+    const requeueCall = mockQuery().mock.calls.find(c =>
+      String(c[0]).includes("UPDATE refine_jobs SET status='queued', attempts=0")
+    );
+    expect(requeueCall).toBeDefined();
+    expect(String(requeueCall![0])).toContain('error=NULL');
+  });
+
+  it('cloud pass persists document_type, document_category and content_fingerprint alongside data', async () => {
+    baseSqlMock({
+      job: { id: 'j1', document_id: 'd1', user_id: 'u1', attempts: 0 },
+      doc: {
+        id: 'd1',
+        path: '/tmp/x.pdf',
+        status: 'done',
+        data: JSON.stringify({
+          vendor: 'V',
+          document_type: 'other',
+          invoiceNumber: 'INV-1',
+          currency: 'USD',
+        }),
+        extracted_text: 'Invoice amount 99',
+        document_type: 'other',
+      },
+    });
+    vi.mocked(extractDataFromText).mockResolvedValue({
+      data: { vendor: 'V', totalAmount: 99, invoiceNumber: 'INV-1', currency: 'USD' },
+      confidence: 0.8,
+      method: 'local-llm+llm',
+      documentType: 'invoice',
+      documentTypeConfidence: 0.8,
+      documentCategory: 'financial',
+      attempts: [
+        {
+          method: 'llm',
+          confidence: 0.9,
+          latencyMs: 100,
+          cost: 0,
+          succeeded: true,
+        },
+      ],
+      typeVotes: ['invoice'],
+    } as any);
+    expect(await processOneRefineJob()).toBe('done');
+    const updateCall = mockQuery().mock.calls.find(c =>
+      String(c[0]).includes('UPDATE documents SET data=')
+    );
+    expect(updateCall).toBeDefined();
+    const args = (updateCall as any)[1] as unknown[];
+    expect(args[1]).toBe('invoice');
+    expect(args[2]).toBe('financial');
+    const fingerprint = args[3] as string;
+    expect(typeof fingerprint).toBe('string');
+    expect(fingerprint.length).toBeGreaterThan(0);
+    expect(args[4]).toBe('d1');
+  });
 });

@@ -1,8 +1,8 @@
 # Test Plan — ParseTrail (Upload → Extract → View + Async Refine)
 
-**Scope:** [ParseTrail-PRD.md](./ParseTrail-PRD.md) §7 + [TECHNICAL_SPEC.md](./TECHNICAL_SPEC.md) §6 checklist. Backend local-only extract on upload (`allowCloud:false`) answers the terminal status inline, so `pending→processing` lives only inside the request. Frontend polling (`GET /api/documents/:id` every 2s) matters while a `refine_jobs` row is `queued/working` after the document is already `done` (cloud fill lands later; UI shows a refining badge). Covers `documents` table, `multer 10MB`, `pdf-parse + pdftotext fallback + tesseract.js/sharp + regex + Flan-T5 local + Gemini cloud + keyless FX to INR`, `dedup 4-field`, list `q/type` filter, `pending→processing→done|failed`, corrections loop, `refine_jobs` worker.
+**Scope:** [ParseTrail-PRD.md](./ParseTrail-PRD.md) §7 + [TECHNICAL_SPEC.md](./TECHNICAL_SPEC.md) §6 checklist. Upload returns `202 {status:'pending'}` immediately; local extraction and cloud refinement both run in the background `refine_jobs` worker. Frontend polling (`GET /api/documents/:id` every 2s) matters while status is `pending/processing` and while a `refine_jobs` row is `queued/working` after the document is already `done` (cloud fill lands later; UI shows a refining badge). Covers `documents` table (incl. `extracted_text`, `content_hash`, `content_fingerprint`, `reviewed_at`), `multer 10MB` + magic-byte sniff at upload, `pdfjs-dist + pdftotext fallback + tesseract.js OCR + regex + Flan-T5 local + Gemini cloud`, `audit-checks` guardrails (duplicate spike/payslip/future-date), `dedup 4-field`, list `q/type` filter, `pending→processing→done|failed`, corrections loop, `refine_jobs` worker, approve flow.
 
-**Last run (2026-11-16):** backend `vitest` 27 files / 263 passed, 0 failed; frontend `vitest` 1 file / 27 passed, 0 failed. Backend lint/build and frontend lint/build passed. Bug fix: `parseDataField` in `documents.controller.ts` now handles mysql2 returning JSON columns as objects (not strings), fixing `data: null` in API responses.
+**Last run (2026-11-17):** backend `vitest` 31 files / 340 passed, 0 failed; frontend `vitest` 1 file / 34 passed, 0 failed. Backend lint/build and frontend lint/build passed.
 
 **Entry Criteria**
 - `backend npm run lint && npm run build` green
@@ -11,7 +11,7 @@
 - `.env` has `DB_*, UPLOAD_DIR=./uploads, MAX_FILE_SIZE=10485760, AI_API_KEY=""` (local-only path: rules + local Flan-T5, no cloud; first extraction pays quantized-model load cost)
 
 **Exit / Close-out Criteria (all must be green)**
-- [x] `backend npm test` 27 files / 263 passed, 0 failed
+- [x] `backend npm test` 31 files / 340 passed, 0 failed
 - [x] `backend npm run test:legacy` fixtures pass (real OCR stack on 5 PDFs/PNGs)
 - [x] `backend npm run lint && npm run build` green
 - [x] `frontend npm run lint && npm run build` green
@@ -49,20 +49,20 @@
 curl http://localhost:4000/health → {"status":"ok"}
 
 # 1. happy PDF text layer
-curl -b cookies.txt -F file=@backend/fixtures/text-invoice.pdf http://localhost:4000/api/documents/upload → 201 {id, status:done} (terminal status; pending exists only transiently in the row)
+curl -b cookies.txt -F file=@backend/fixtures/text-invoice.pdf http://localhost:4000/api/documents/upload → 202 {id, status:pending} (terminal status reached via polling; background worker runs local extract then cloud refine if needed)
 curl -b cookies.txt http://localhost:4000/api/documents/<id> — poll 2s → status done, data.vendor, totalAmount, currency USD, document_type invoice
 
 # 2. image PNG (lib OCR)
-curl -b cookies.txt -F file=@backend/fixtures/invoice-image.png http://localhost:4000/api/documents/upload → 201 {status:done} totalAmount 1300 document_type invoice
+curl -b cookies.txt -F file=@backend/fixtures/invoice-image.png http://localhost:4000/api/documents/upload → 202 {status:pending} → poll → done totalAmount 1300 document_type invoice
 
 # 3. receipt narrow
-curl -b cookies.txt -F file=@backend/fixtures/receipt-image.png http://localhost:4000/api/documents/upload → done totalAmount 200 currency INR type receipt
+curl -b cookies.txt -F file=@backend/fixtures/receipt-image.png http://localhost:4000/api/documents/upload → 202 → done totalAmount 200 currency INR type receipt
 
 # 4. scanned PDF (image-wrapped, <20 chars → ocrBuffer application/pdf)
-curl -b cookies.txt -F file=@backend/fixtures/scanned-invoice.pdf http://localhost:4000/api/documents/upload → done data.vendor defined
+curl -b cookies.txt -F file=@backend/fixtures/scanned-invoice.pdf http://localhost:4000/api/documents/upload → 202 → done data.vendor defined
 
 # 5. duplicate — same content as #2 → 409 {code:"DUPLICATE_UPDATED", duplicateOf:"<first-id>"}
-# (409 because the content already exists; UPDATED because the new file is discarded and the ORIGINAL row is kept current instead — corrections re-applied, attempts recorded)
+# (409 because the exact byte-hash already exists; the existing row is NEVER updated — a new document row is created instead and content near-matches surface POSSIBLE_DUPLICATE alerts via audit-checks)
 curl -b cookies.txt -F file=@backend/fixtures/invoice-image.png http://localhost:4000/api/documents/upload → 409
 
 # 6. list + filters
@@ -80,7 +80,7 @@ curl -b cookies.txt http://localhost:4000/api/documents/550e8400-e29b-41d4-a716-
 curl -b cookies.txt "http://localhost:4000/api/documents?limit=9999" → 400 Invalid pagination
 
 # 8. frontend (authed session)
-# Upload page dropzone → Upload → toast green success → nav /documents/:id → lands on `done` (terminal status comes back inline); refining badge appears instead of `Processing…` if a refine job is queued
+# Upload page dropzone → Upload → toast green success → nav /documents/:id → poll until `done` (202 returned immediately; refine badge shows while `refine_status` is queued/working)
 # List header heading + List/Grid toggle same row (no Document|Created sub-header) → search debounce 300ms URL ?q= persists → type FilterDropdown → Clear
 # DocumentRow hover bg #f1f5f9, date 2 lines stacked (List) vs Detail header 1 line comma FormattedDate inline
 # Duplicate upload → toast warning dark yellow #ca8a04; 413/500 → red #dc2626
@@ -93,38 +93,17 @@ curl -b cookies.txt "http://localhost:4000/api/documents?limit=9999" → 400 Inv
 
 ---
 
-## 3. Automated Coverage Map (19 files, 143 tests)
+## 3. Automated Coverage Map
 
-```
-backend/src/services/extraction.service.spec.ts (24) — cascade stages with mocked ocrBuffer/tryAI: rules-first, local fill, cloud merge/keep, FX enrichment
-backend/src/services/ai.service.spec.ts (4) — Gemini fence strip → validateAndNormalize INR + DD/MM/YYYY→YYYY-MM-DD, settlement_slip/invoice types, 401 throw
-backend/src/services/transformers.service.spec.ts (25) — rule fallbacks via utils/regex-utils (amount/date/vendor/invoiceNumber/currency)
-backend/src/services/strategies.spec.ts (4) — per-type strategy registry + prompt selection
-backend/src/services/confidence.service.spec.ts (6) — needsRefinement on missing/invalid/disagreement, vendor-only gaps stay local
-backend/src/services/dedup.service.spec.ts (4) — 4-field null guard, case-insensitive vendor, upper invoiceNo, toFixed(2) rounding, skip invalid JSON
-backend/src/services/ocr.service.spec.ts (2) — exports, importable without side effects
-backend/src/utils/conversion.spec.ts (9) — mocked fetch: same-currency shortcut, input guards, primary/fallback/failure, cache, applyConversion, clearConversion
-backend/src/services/summary.service.spec.ts (3) — totals mapping, FX-preferring sums, empty-ledger defaults
-backend/src/services/email.service.spec.ts (3) — SMTP-unset skip, single code render, reset link
-backend/src/services/extraction.test.ts — legacy manual harness, NOT run by vitest (use npm run test:legacy)
-backend/src/utils/utils.spec.ts (6) — amount/currency/date/json helpers
-backend/src/jobs/refine.spec.ts (12) — enqueue/claim/quota/backoff, stale sweep
-backend/src/middleware/validate.spec.ts (6) — uuidSchema, q trim, pagination 400, document_type filter
-backend/src/middleware/error.spec.ts (4) — status 400, Invalid file type 400, LIMIT_FILE_SIZE 413, else 500
-backend/src/middleware/upload.spec.ts (1) — multer instance wiring smoke
-backend/src/db/pool.spec.ts (1) — pool query/execute present (smoke)
-backend/src/db/schema.spec.ts (2) — CREATE TABLE idx_status_created, migration catch
-backend/src/controllers/documents.controller.spec.ts (22) — upload 400 no file, local-only 201, duplicate 409 DUPLICATE_UPDATED + correction-preserving FX recompute, reprocess, correctField 400/404/200, corrections history/stats, list q escape %_ + type filter, get 400/404/200 parse
-backend/src/routes/documents.route.spec.ts (5) — GET /health, pagination 400, upload 400, invalid uuid 400, refinement retry 400
-++ legacy, not in vitest count: backend/src/services/extraction.test.ts (5 fixtures real OCR)
-```
-Total: 24+4+25+4+6+4+2+9+3+3+6+12+6+4+1+1+2+22+5 = 143. The smallest are wiring smokes, kept deliberately; the weight is in extraction/transformers/controller/refine/conversion.
+Backend: 31 files / 340 tests (vitest). Frontend: 1 file / 34 tests (Vitest + Testing Library in `smoke.test.tsx`).
+
+The per-file breakdown below is the v1 baseline (143 backend tests); the current suite adds `audit-checks.spec.ts`, `review.spec.ts`, `summary.service.spec.ts`, refined refine tests, and approve/export/summary route tests, bringing backend to 340 and frontend to 34.
 
 Dropped (no longer exist, do not look for them): `storage.service.spec.ts`, `queue.service.spec.ts` — S3/SQS adapters deleted with the AWS plan.
 
 ---
 
-## 4. Frontend Manual Checklist (no runner yet)
+## 4. Frontend Manual Checklist (Vitest + Testing Library — 32 tests in `src/smoke.test.tsx`)
 
 - [ ] Registration with SMTP disabled → account is verified and continues to optional profile setup; with SMTP enabled → email verification screen
 - [ ] Login → authenticated navigation; refresh → session restored; logout → guest navigation and protected routes return to login
@@ -147,7 +126,7 @@ Dropped (no longer exist, do not look for them): `storage.service.spec.ts`, `que
 - No real-DB tests: every DB test mocks `pool.query` (`schema.spec` asserts SQL strings). Add a small suite against a real MySQL container (Docker/Testcontainers) — it would also cover atomic `refine_jobs` claiming under concurrency
 - Dedup scope untested: `dedup.spec` covers the 4-field logic, but no test proves user A's upload never returns `duplicateOf` pointing at user B's document (code scopes `user_id=?` — assert it)
 - Untested features: retention purge (`purgeExpired`), attempts endpoint shape, summary CSV/PDF export bytes, avatar upload validation, cookie flags (HttpOnly/SameSite), single-use expiring reset/verify tokens, login rate limiting
-- Upload validation trusts the client-supplied mime only — no magic-byte sniff at upload (the `%PDF`/PNG/JPEG sniff exists solely for OCR routing in `getImageMime`). Spoofed content-type passes the filter; reuse the sniff at upload
+- Upload validation enforces magic-byte sniff at upload (`%PDF`/PNG/JPEG header must match the client mime — spoofed content-type is rejected `400 INVALID_FILE_CONTENT`); the sniff is not only for OCR routing.
 
 ---
 

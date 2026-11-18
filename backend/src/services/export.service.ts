@@ -137,8 +137,11 @@ export async function generateDocumentsCsv(
       {}) as Record<string, unknown>,
   }));
 
-  // The totalAmountINR column only exists when at least one document has it.
-  const hasInr = parsed.some(p => Object.prototype.hasOwnProperty.call(p.data, 'totalAmountINR'));
+  // The converted column only exists when at least one document has it.
+  // Conversion writes totalAmountConverted (+ currencyConverted), never totalAmountINR.
+  const hasConverted = parsed.some(p =>
+    Object.prototype.hasOwnProperty.call(p.data, 'totalAmountConverted')
+  );
 
   const header = [
     'id',
@@ -152,7 +155,7 @@ export async function generateDocumentsCsv(
     'date',
     'currency',
     'totalAmount',
-    ...(hasInr ? ['totalAmountINR'] : []),
+    ...(hasConverted ? ['totalAmountConverted', 'currencyConverted'] : []),
     'corrected',
     'refine_status',
   ];
@@ -173,7 +176,10 @@ export async function generateDocumentsCsv(
       docCell(String(data.currency ?? ''), false),
       docCell(String(data.totalAmount ?? ''), true),
     ];
-    if (hasInr) row.push(docCell(String(data.totalAmountINR ?? ''), true));
+    if (hasConverted) {
+      row.push(docCell(String(data.totalAmountConverted ?? ''), true));
+      row.push(docCell(String(data.currencyConverted ?? ''), false));
+    }
     row.push(docCell(correctedDocs.has(id) ? 'yes' : 'no', true));
     row.push(docCell(refineByDoc[id] ?? '', true));
     lines.push(row.join(','));

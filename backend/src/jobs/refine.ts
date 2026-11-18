@@ -24,6 +24,8 @@ import { createContentFingerprint } from '../services/dedup.service.js';
 import { withCorrectionsReapplied } from '../services/corrections.js';
 import { needsRefinement } from '../services/confidence.service.js';
 import { parseJsonColumn } from '../utils/json.js';
+import { checkDocumentAlerts, type Alert } from '../utils/audit-checks.js';
+import type { ExtractedData } from '../types/index.js';
 
 export const REFINE_MAX_ATTEMPTS = config.refine.maxAttempts;
 const POLL_MS = config.refine.pollMs;
@@ -205,6 +207,7 @@ async function processInitialExtraction(
     status: string;
     data: string | null;
     extracted_text: string | null;
+    user_id: string | null;
   }
 ): Promise<Outcome> {
   // Source file may have vanished on an ephemeral-disk restart.
@@ -248,6 +251,19 @@ async function processInitialExtraction(
     );
   }
   await saveExtractionAttempts(job.document_id, r.attempts);
+  // Cross-document guardrails: duplicate, amount spike, future date. Attach
+  // alerts to the stored data so the UI can surface them and force review.
+  if (doc.user_id) {
+    const alerts = await checkDocumentAlerts(
+      r.data as ExtractedData,
+      doc.user_id,
+      r.documentType,
+      job.document_id
+    );
+    if (alerts.length > 0) {
+      (r.data as Record<string, unknown>).alerts = alerts;
+    }
+  }
   await pool.query(
     "UPDATE documents SET status='done', document_type=?, document_category=?, data=?, extracted_text=?, content_fingerprint=?, error=NULL WHERE id=?",
     [
@@ -259,6 +275,23 @@ async function processInitialExtraction(
       job.document_id,
     ]
   );
+  // Local-only extraction may leave required fields missing or strategies
+  // conflicted — re-queue for a cloud pass instead of finishing as done.
+  const refinement = needsRefinement(r.data, r.documentType, r.attempts);
+  if (refinement.needed && job.attempts < REFINE_MAX_ATTEMPTS) {
+    await pool.query(
+      "UPDATE refine_jobs SET status='queued', attempts=0, error=NULL, next_retry_at=NOW() WHERE id=?",
+      [job.id]
+    );
+    logger.info('Initial extraction done — requeued for cloud refinement', {
+      jobId: job.id,
+      documentId: job.document_id,
+      reason: refinement.reason,
+      method: r.method,
+      confidence: r.confidence,
+    });
+    return 'done';
+  }
   await finishJob(job, 'done');
   logger.info('Initial extraction done', {
     jobId: job.id,
@@ -298,7 +331,7 @@ async function processRefineJob(): Promise<Outcome> {
   lastUserId = job.user_id;
   try {
     const [rows] = await pool.query(
-      'SELECT id, path, status, data, extracted_text FROM documents WHERE id=?',
+      'SELECT id, path, status, data, extracted_text, user_id, document_type FROM documents WHERE id=?',
       [job.document_id]
     );
     const doc = (
@@ -308,6 +341,8 @@ async function processRefineJob(): Promise<Outcome> {
         status: string;
         data: string | null;
         extracted_text: string | null;
+        user_id: string | null;
+        document_type: string | null;
       }>
     )[0];
     if (isStopping) return 'idle';
@@ -362,7 +397,7 @@ async function processRefineJob(): Promise<Outcome> {
     try {
       r = hasCachedText
         ? await extractDataFromText(doc.extracted_text as string, {
-            predictedType: (stored.documentType ?? stored.document_type) as
+            predictedType: (doc.document_type ?? stored.documentType ?? stored.document_type) as
               DocumentType | undefined,
             missingFields: missingFields.length > 0 ? missingFields : undefined,
           })
@@ -391,11 +426,36 @@ async function processRefineJob(): Promise<Outcome> {
         filled++;
       }
     }
-    if (filled > 0) {
-      await pool.query('UPDATE documents SET data=?, updated_at=NOW() WHERE id=?', [
-        JSON.stringify(merged),
-        job.document_id,
-      ]);
+    // Recompute cross-document guardrails on the cloud-enriched data. Always
+    // reset merged.alerts so a previously-raised alert that no longer applies
+    // is cleared rather than carried over from `stored`. Never store an empty
+    // alerts array so the fields table never renders an "alerts" row.
+    let alerts: Alert[] = [];
+    if (job.user_id) {
+      alerts = await checkDocumentAlerts(
+        merged as ExtractedData,
+        job.user_id,
+        r.documentType,
+        job.document_id
+      );
+      if (alerts.length > 0) {
+        merged.alerts = alerts;
+      } else {
+        delete merged.alerts;
+      }
+    }
+    const hadAlerts = Array.isArray(stored.alerts) && stored.alerts.length > 0;
+    if (filled > 0 || alerts.length > 0 || hadAlerts) {
+      await pool.query(
+        'UPDATE documents SET data=?, document_type=?, document_category=?, content_fingerprint=?, updated_at=NOW() WHERE id=?',
+        [
+          JSON.stringify(merged),
+          r.documentType,
+          r.documentCategory,
+          createContentFingerprint(merged, r.documentType as string),
+          job.document_id,
+        ]
+      );
     }
     const stillNeeded = needsRefinement(merged, r.documentType, r.attempts);
     if (!cloudOk && stillNeeded.needed) {

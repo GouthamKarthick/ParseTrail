@@ -44,11 +44,16 @@ vi.mock('../utils/conversion.js', () => ({
   applyConversion: vi.fn(),
   clearConversion: vi.fn(),
 }));
+vi.mock('../services/summary.service.js', () => ({
+  getSummary: vi.fn(),
+  getExtractionMetrics: vi.fn(),
+}));
 
 import { pool } from '../db/pool.js';
 import fs from 'fs/promises';
 import { extractDocumentData } from '../services/extraction.service.js';
 import { findDuplicateByHash } from '../services/dedup.service.js';
+import { getExtractionMetrics as getExtractionMetricsService } from '../services/summary.service.js';
 import {
   uploadDocument,
   listDocuments,
@@ -59,6 +64,7 @@ import {
   listCorrections,
   correctionStats,
   approveDocument,
+  getExtractionMetrics,
 } from './documents.controller.js';
 
 function mockRes() {
@@ -932,5 +938,60 @@ describe('controller — approveDocument', () => {
     );
     expect(res.status).toHaveBeenCalledWith(404);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: 'Document not found' }));
+  });
+});
+
+describe('controller — getExtractionMetrics', () => {
+  const user = { id: 'u1', email: 't@e.com' };
+  const metrics = { localOnlyPercent: 50, cloudCalls: 1, totalTokens: 100, needsReviewCount: 0 };
+
+  function mockRes() {
+    const res: any = {};
+    res.status = vi.fn().mockReturnValue(res);
+    res.json = vi.fn().mockReturnValue(res);
+    return res;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getExtractionMetricsService).mockResolvedValue(metrics);
+  });
+
+  it('defaults days to 30 when absent', async () => {
+    const res = mockRes();
+    await getExtractionMetrics({ user, query: {} } as any, res, vi.fn());
+    expect(res.json).toHaveBeenCalledWith(metrics);
+    expect(getExtractionMetricsService).toHaveBeenCalledWith('u1', 30);
+  });
+
+  it('clamps -5 to 1', async () => {
+    const res = mockRes();
+    await getExtractionMetrics({ user, query: { days: '-5' } } as any, res, vi.fn());
+    expect(res.json).toHaveBeenCalledWith(metrics);
+    expect(getExtractionMetricsService).toHaveBeenCalledWith('u1', 1);
+  });
+
+  it('clamps 99999 to 365', async () => {
+    const res = mockRes();
+    await getExtractionMetrics({ user, query: { days: '99999' } } as any, res, vi.fn());
+    expect(res.json).toHaveBeenCalledWith(metrics);
+    expect(getExtractionMetricsService).toHaveBeenCalledWith('u1', 365);
+  });
+
+  it('rejects non-numeric "abc" with 400', async () => {
+    const res = mockRes();
+    await getExtractionMetrics({ user, query: { days: 'abc' } } as any, res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining('days') })
+    );
+    expect(getExtractionMetricsService).not.toHaveBeenCalled();
+  });
+
+  it('parses "7" as 7', async () => {
+    const res = mockRes();
+    await getExtractionMetrics({ user, query: { days: '7' } } as any, res, vi.fn());
+    expect(res.json).toHaveBeenCalledWith(metrics);
+    expect(getExtractionMetricsService).toHaveBeenCalledWith('u1', 7);
   });
 });
