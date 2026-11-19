@@ -24,6 +24,7 @@ import { Input } from '../components/ui/Input';
 import { EmptyState, ErrorState } from '../components/Feedback';
 import { statusBadges } from '../utils/badges';
 import { FormattedDate } from '../components/FormattedDate';
+import { formatPercent01 } from '../utils/format';
 import styles from './Detail.module.scss';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,9 @@ export default function Detail() {
       ? latestLlmAttempt
       : null;
   const extractedFields = doc?.data && Object.keys(doc.data).length > 0 ? doc.data : null;
+
+  // Fields that have a human correction on record — used to tag "Corrected".
+  const correctedFields = useMemo(() => new Set(history.map(c => c.field)), [history]);
   const visibleAttempts = attempts.slice(-5);
   const displayRefineStatus =
     doc?.refine_status === 'queued' || doc?.refine_status === 'working'
@@ -112,6 +116,14 @@ export default function Detail() {
   const docNeedsReview = doc?.needs_review === true && !approvedAt;
   const isApproved = !!doc?.reviewed_at || !!approvedAt;
 
+  // All guardrail alerts (duplicate, amount spike, payslip shift, future date).
+  const alerts = useMemo<Array<{ code: string; message?: string; relatedDocId?: string }>>(() => {
+    const raw = (doc?.data as Record<string, unknown> | null | undefined)?.alerts;
+    return Array.isArray(raw)
+      ? (raw as Array<{ code: string; message?: string; relatedDocId?: string }>)
+      : [];
+  }, [doc?.data]);
+
   const isReviewFieldMissing = (k: string): boolean => {
     if (k === 'vendor') return missingReviewFields.includes('vendor');
     if (k === 'invoiceDate' || k === 'date') return missingReviewFields.includes('date');
@@ -132,60 +144,71 @@ export default function Detail() {
             </tr>
           </thead>
           <tbody>
-            {Object.entries(extractedFields).map(([k, v]) => (
-              <tr key={k}>
-                <td className={isReviewFieldMissing(k) ? styles['detail-field-missing'] : ''}>
-                  {k.replace(/([A-Z])/g, ' $1')}
-                </td>
-                <td>
-                  {editing?.field === k ? (
-                    <span className={styles['detail-edit']}>
-                      <Input
-                        value={editing.draft}
-                        onChange={e => setEditing({ field: k, draft: e.target.value })}
-                        aria-label={`Correct ${k}`}
-                      />
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => saveCorrection(k)}
-                        disabled={saving}
+            {Object.entries(extractedFields)
+              .filter(([k]) => k !== 'alerts')
+              .map(([k, v]) => (
+                <tr key={k}>
+                  <td className={isReviewFieldMissing(k) ? styles['detail-field-missing'] : ''}>
+                    {k.replace(/([A-Z])/g, ' $1')}
+                    {correctedFields.has(k) && (
+                      <span
+                        className={styles['detail-field-corrected']}
+                        title="Human-corrected"
+                        aria-label="Corrected"
                       >
-                        {saving ? 'Saving…' : 'Save'}
-                      </Button>
+                        Corrected
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {editing?.field === k ? (
+                      <span className={styles['detail-edit']}>
+                        <Input
+                          value={editing.draft}
+                          onChange={e => setEditing({ field: k, draft: e.target.value })}
+                          aria-label={`Correct ${k}`}
+                        />
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => saveCorrection(k)}
+                          disabled={saving}
+                        >
+                          {saving ? 'Saving…' : 'Save'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditing(null)}
+                          disabled={saving}
+                        >
+                          Cancel
+                        </Button>
+                      </span>
+                    ) : (
+                      <>{v == null ? '—' : String(v)}</>
+                    )}
+                  </td>
+                  <td>
+                    {CORRECTABLE.includes(k) && editing?.field !== k && (
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setEditing(null)}
-                        disabled={saving}
+                        className={styles['detail-edit-button']}
+                        aria-label={`Correct ${k}`}
+                        onClick={() =>
+                          setEditing({
+                            field: k,
+                            draft: v == null ? '' : String(v),
+                          })
+                        }
                       >
-                        Cancel
+                        <i className="bi bi-pencil" aria-hidden />
                       </Button>
-                    </span>
-                  ) : (
-                    <>{v == null ? '—' : String(v)}</>
-                  )}
-                </td>
-                <td>
-                  {CORRECTABLE.includes(k) && editing?.field !== k && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className={styles['detail-edit-button']}
-                      aria-label={`Correct ${k}`}
-                      onClick={() =>
-                        setEditing({
-                          field: k,
-                          draft: v == null ? '' : String(v),
-                        })
-                      }
-                    >
-                      <i className="bi bi-pencil" aria-hidden />
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                    )}
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       )}
@@ -302,6 +325,10 @@ export default function Detail() {
     try {
       const r = await submitCorrection(id, field, editing.draft);
       show('success', r.changed ? `Corrected ${field}` : 'No change');
+      // The backend clears reviewed_at when a correction is applied, so drop
+      // the local approvedAt flag so the Approve button can reappear without
+      // a page reload.
+      if (r.changed) setApprovedAt(null);
       setEditing(null);
       refresh();
       listCorrections(id)
@@ -423,6 +450,24 @@ export default function Detail() {
             Needs review: check the highlighted fields
           </div>
         )}
+        {alerts.length > 0 && (
+          <>
+            {alerts.map((alert, i) => (
+              <div key={`${alert.code}-${i}`} className={styles['detail-duplicate-pill']}>
+                <span>{String(alert.message ?? alert.code)}</span>
+                {alert.relatedDocId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => nav(`/documents/${alert.relatedDocId}`)}
+                  >
+                    View matching document →
+                  </Button>
+                )}
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       {previewKind ? (
@@ -463,6 +508,9 @@ export default function Detail() {
                 >
                   {attemptLabel(a.method)}
                 </span>
+                <Text variant="small" className={styles['detail-attempt-meta']}>
+                  {formatPercent01(a.confidence)} · {a.latency_ms}ms
+                </Text>
                 <Text variant="small">{a.succeeded ? 'Completed' : 'Unable to complete'}</Text>
                 {!a.succeeded && a.method === 'llm' && (
                   <Text variant="small" className={styles['detail-reason']}>

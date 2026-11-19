@@ -1,4 +1,4 @@
-# Test Results — ParseTrail (2026-11-16)
+# Test Results — ParseTrail (2026-11-17)
 
 This document summarizes all test results across unit, integration, and E2E layers.
 
@@ -6,8 +6,8 @@ This document summarizes all test results across unit, integration, and E2E laye
 
 | Layer | Runner | Files | Tests Passed | Tests Failed | Status |
 |-------|--------|-------|-------------|--------------|--------|
-| Backend Unit | vitest | 27 | 263 | 0 | Pass |
-| Frontend Unit | vitest | 1 | 27 | 0 | Pass |
+| Backend Unit | vitest | 31 | 340 | 0 | Pass |
+| Frontend Unit | vitest | 1 | 34 | 0 | Pass |
 | E2E Playwright | playwright | - | - | - | - |
 
 ---
@@ -15,7 +15,7 @@ This document summarizes all test results across unit, integration, and E2E laye
 ## 1. Backend Unit Tests
 
 **Command:** `cd backend && npx vitest run`  
-**Result:** 27 test files passed, 263 tests passed, 0 failed
+**Result:** 31 test files passed, 340 tests passed, 0 failed
 
 ### Test Coverage by File:
 
@@ -25,7 +25,7 @@ This document summarizes all test results across unit, integration, and E2E laye
 | `backend/src/config.spec.ts` | 11 | Pass |
 | `backend/src/controllers/documents.controller.spec.ts` | 37 | Pass |
 | `backend/src/jobs/cleanup.spec.ts` | 8 | Pass |
-| `backend/src/jobs/refine.spec.ts` | 20 | Pass |
+| `backend/src/jobs/refine.spec.ts` | 23 | Pass |
 | `backend/src/db/pool.spec.ts` | 3 | Pass |
 | `backend/src/db/schema.spec.ts` | 3 | Pass |
 | `backend/src/middleware/auth.spec.ts` | 5 | Pass |
@@ -45,24 +45,26 @@ This document summarizes all test results across unit, integration, and E2E laye
 | `backend/src/services/ocr.service.spec.ts` | 2 | Pass |
 | `backend/src/services/strategies.spec.ts` | 11 | Pass |
 | `backend/src/services/summary.service.spec.ts` | 3 | Pass |
+| `backend/src/services/review.spec.ts` | 14 | Pass |
 | `backend/src/services/transformers.service.spec.ts` | 27 | Pass |
+| `backend/src/utils/audit-checks.spec.ts` | 11 | Pass |
 | `backend/src/utils/conversion.spec.ts` | 9 | Pass |
 | `backend/src/utils/utils.spec.ts` | 6 | Pass |
-| **Total** | **263** | **Pass** |
+| **Total** | **340** | **Pass** |
 
 ---
 
 ## 2. Frontend Unit Tests
 
 **Command:** `cd frontend && npx vitest run`  
-**Result:** 1 test file passed, 27 tests passed, 0 failed
+**Result:** 1 test file passed, 34 tests passed, 0 failed
 
 ### Test Coverage:
 
 | Spec File (relative to repo root) | Tests | Status |
 |-----------------------------------|-------|--------|
-| `frontend/src/smoke.test.tsx` | 27 | Pass |
-| **Total** | **27** | **Pass** |
+| `frontend/src/smoke.test.tsx` | 34 | Pass |
+| **Total** | **34** | **Pass** |
 
 ---
 

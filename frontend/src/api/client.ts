@@ -189,6 +189,23 @@ export async function getSummary(category?: string) {
 }
 
 /**
+ * Fetch extraction pipeline efficiency metrics (zero-cloud %, cloud calls,
+ * tokens spent, docs awaiting review) for the dashboard.
+ * @param days - Trailing window in days
+ * @returns Extraction metrics
+ * @example const m = await getExtractionMetrics(30);
+ */
+export async function getExtractionMetrics(days = 30) {
+  const qs = days ? `?days=${encodeURIComponent(String(days))}` : '';
+  return request<{
+    localOnlyPercent: number;
+    cloudCalls: number;
+    totalTokens: number;
+    needsReviewCount: number;
+  }>('GET', `/api/documents/summary/metrics${qs}`);
+}
+
+/**
  * Export the summary report as a downloadable blob.
  * @param format - Export file type (pdf or csv)
  * @param category - Optional category filter

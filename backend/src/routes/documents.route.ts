@@ -22,6 +22,7 @@ import {
   exportDocuments,
   getDocumentFile,
   approveDocument,
+  getExtractionMetrics,
 } from '../controllers/documents.controller.js';
 import { requireUser } from '../middleware/auth.js';
 
@@ -46,6 +47,7 @@ const expensiveRouteLimit = rateLimit({
 
 router.post('/documents/upload', upload.single('file'), uploadDocument);
 router.get('/documents/summary', getSummary);
+router.get('/documents/summary/metrics', requireUser, getExtractionMetrics);
 router.get('/documents/summary/export', exportSummary);
 router.get('/documents', validatePagination, listDocuments);
 router.get('/documents/:id/attempts', getAttempts);

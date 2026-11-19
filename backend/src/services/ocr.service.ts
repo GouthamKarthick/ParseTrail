@@ -23,6 +23,7 @@ export interface OcrResult {
 
 let tesseractWorker: Awaited<ReturnType<(typeof import('tesseract.js'))['createWorker']>> | null =
   null;
+let workerDead = false;
 let workerQueue = Promise.resolve();
 
 async function serializeWorker<T>(operation: () => Promise<T>): Promise<T> {
@@ -32,6 +33,16 @@ async function serializeWorker<T>(operation: () => Promise<T>): Promise<T> {
     () => undefined
   );
   return result;
+}
+
+/**
+ * Marks the shared tesseract worker as unusable. The in-flight recognize()
+ * promise has already been rejected; the next job will terminate this
+ * worker and recreate it.
+ * @returns void
+ */
+function markWorkerDead(): void {
+  workerDead = true;
 }
 
 /**
@@ -47,9 +58,13 @@ async function getWorker(_lang: string) {
   const langs = config.ocrLangs;
   if (tesseractWorker) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const curLangs: string = (tesseractWorker as any)._langs ?? '';
-      if (curLangs === langs) return tesseractWorker;
+      if (workerDead) {
+        logger.warn('Recreating dead tesseract worker');
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const curLangs: string = (tesseractWorker as any)._langs ?? '';
+        if (curLangs === langs) return tesseractWorker;
+      }
       await tesseractWorker.terminate();
     } catch (error) {
       logger.warn('Tesseract worker termination failed', {
@@ -57,12 +72,21 @@ async function getWorker(_lang: string) {
       });
     }
     tesseractWorker = null;
+    workerDead = false;
   }
   const { createWorker } = await import('tesseract.js');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const worker: any = await createWorker(langs, 1, {
     langPath: process.env.TESSDATA_PATH || path.resolve(here, '..', '..'),
     gzip: false,
+    // Log OCR worker errors and mark the shared worker unusable so the
+    // in-flight recognize() promise rejects normally instead of throwing an
+    // uncaught exception that can kill the Node process. The next job will
+    // terminate and recreate the worker.
+    errorHandler: (error: unknown) => {
+      logger.warn('Tesseract worker error', { error });
+      markWorkerDead();
+    },
   });
   worker._langs = langs;
   tesseractWorker = worker;
@@ -107,9 +131,16 @@ async function ocrImageBuffer(imageBuffer: Buffer, hintLang: string): Promise<Oc
   const preprocessed = await preprocessWithSharp(imageBuffer);
   return serializeWorker(async () => {
     const worker = await getWorker(lang);
-    const { data } = await worker.recognize(preprocessed, {}, {
-      text: true,
-    } as never);
+    let result: { data: { text: string; confidence: number } };
+    try {
+      result = await worker.recognize(preprocessed, {}, { text: true } as never);
+    } catch (e) {
+      // Tesseract rejects with a string message on unreadable input. Wrap it in a
+      // normal Error so callers can catch it and the refine job is marked
+      // failed/dead instead of crashing the process.
+      throw new Error(String(e));
+    }
+    const { data } = result;
     const text = (data.text as string) || '';
     const confidence = typeof data.confidence === 'number' ? data.confidence : 0;
     logger.debug('tesseract ocrImage', {
@@ -183,15 +214,10 @@ export async function ocrBuffer(
   }
   const pngs = await rasterizePdfToPngs(buffer);
   if (pngs.length === 0) {
-    logger.warn('rasterize returned 0 pages, trying direct tesseract on PDF buffer');
-    try {
-      return await ocrImageBuffer(buffer, hintLang ?? 'eng');
-    } catch (e) {
-      logger.warn('direct pdf tesseract failed', {
-        error: (e as Error).message,
-      });
-      return { text: '', confidence: 0, pages: 0 };
-    }
+    // Tesseract cannot read PDFs. If pdftoppm fails or returns no pages,
+    // throw a normal Error so the refine job is marked failed/dead instead
+    // of crashing the process.
+    throw new Error('PDF rasterization returned no pages; document is not rasterizable');
   }
   let combined = '';
   let totalConf = 0;

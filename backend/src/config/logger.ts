@@ -4,10 +4,13 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { config } from '../config.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const logDir = path.resolve(__dirname, '..', config.logs.dir);
 if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 

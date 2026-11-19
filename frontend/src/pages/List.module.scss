@@ -1,5 +1,5 @@
-@use "../styles/variables" as *;
-@use "../styles/mixins" as *;
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
 
 /* Base layout */
 .list {
@@ -179,6 +179,17 @@
     .list-status-needs-review {
       color: $color-warning;
     }
+    .list-status-duplicate {
+      color: $color-warning;
+      border: 1px solid color-mix(in srgb, $color-warning 40%, transparent);
+      background: color-mix(in srgb, $color-warning 12%, transparent);
+      padding: 0.125rem 0.5rem;
+      border-radius: $radius-pill;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: inherit;
+      line-height: inherit;
+    }
   }
 }
 
@@ -216,7 +227,7 @@
         font-size: 1.25em;
       }
 
-      & [class*="heading-muted"] {
+      & [class*='heading-muted'] {
         font-size: 0.875em;
       }
     }

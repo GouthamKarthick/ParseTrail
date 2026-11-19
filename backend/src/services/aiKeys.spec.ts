@@ -3,26 +3,26 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const mockExistsSync = vi.hoisted(() => vi.fn());
-const mockReadFileSync = vi.hoisted(() => vi.fn());
-const realFsHolder = vi.hoisted(() => ({ current: null as typeof import('fs') | null }));
+const realExistsSync = fs.existsSync.bind(fs);
+const realReadFileSync = fs.readFileSync.bind(fs);
+const mockExistsSync = vi.spyOn(fs, 'existsSync');
+const mockReadFileSync = vi.spyOn(fs, 'readFileSync');
 
-vi.mock('fs', async importOriginal => {
-  realFsHolder.current = await importOriginal();
-  return {
-    ...realFsHolder.current,
-    existsSync: mockExistsSync,
-    readFileSync: mockReadFileSync,
-  };
-});
+// SpyOn mutates the shared fs module object, so aiKeys.ts's default import
+// (`import fs from 'fs'`) sees the same mock. This keeps the suite hermetic:
+// an untracked backend/secrets/ai-keys.json (or AI_KEYS_FILE in the shell)
+// must not leak into tests. Test-created files live under the OS temp dir,
+// so existsSync delegates to the real filesystem only there.
 
 const originalEnv = { ...process.env };
 
 beforeEach(() => {
-  mockExistsSync.mockImplementation((p: any) => realFsHolder.current!.existsSync(p));
-  mockReadFileSync.mockImplementation((p: any, ...rest: any[]) =>
-    realFsHolder.current!.readFileSync(p, ...rest)
-  );
+  mockExistsSync.mockImplementation((p: any) => {
+    const pStr = String(p);
+    if (pStr.startsWith(os.tmpdir())) return realExistsSync(p);
+    return false;
+  });
+  mockReadFileSync.mockImplementation((p: any, ...rest: any[]) => realReadFileSync(p, ...rest));
   for (const key of Object.keys(process.env)) {
     if (!(key in originalEnv)) delete process.env[key];
   }
@@ -45,7 +45,10 @@ afterEach(() => {
 });
 
 async function importAiKeys(): Promise<typeof import('./aiKeys.js')> {
-  vi.resetModules();
+  // NOTE: deliberately NOT calling vi.resetModules(). aiKeys.ts imports fs as a
+  // default import; spyOn mutates the shared fs module object so aiKeys.ts sees
+  // the same mock. Env is read at call time inside findKeysFile, so re-importing
+  // is not needed for env overrides.
   return import('./aiKeys.js');
 }
 
@@ -180,7 +183,7 @@ describe('aiKeys — loadAiProviders', () => {
           providers: [{ name: 'anthropic', apiKey: 'sk-123', model: 'claude-3-haiku' }],
         });
       }
-      return realFsHolder.current!.readFileSync(p, 'utf8');
+      return realReadFileSync(p, 'utf8');
     });
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-keys-'));

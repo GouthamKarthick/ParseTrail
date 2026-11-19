@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../db/pool.js', () => ({ pool: { query: vi.fn() } }));
 
 import { pool } from '../db/pool.js';
-import { getSummary } from './summary.service.js';
+import { getSummary, getExtractionMetrics } from './summary.service.js';
 
 describe('services/summary', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -104,5 +104,153 @@ describe('services/summary', () => {
       'financial',
       'INR',
     ]);
+  });
+
+  describe('getExtractionMetrics', () => {
+    it('computes local-only %, cloud calls, tokens and needs-review count', async () => {
+      const mockQuery = vi.mocked(pool.query) as any;
+      mockQuery.mockImplementation(async (sql: unknown) => {
+        const s = String(sql);
+        if (s.includes('COUNT(*) AS cnt FROM documents') && !s.includes('reviewed_at'))
+          return [[{ cnt: 10 }]];
+        if (s.includes("ea.method = 'llm'"))
+          return [[{ cloudCalls: 3, totalTokens: '4120', docsWithCloud: 4 }]];
+        // needs-review count query: per-document data + reviewed_at + refine_status + confidence
+        if (s.includes('d.data') && s.includes('refine_jobs r WHERE r.document_id = d.id'))
+          return [
+            [
+              {
+                data: JSON.stringify({ vendor: 'A', invoiceDate: '2026-01-01', totalAmount: 10 }),
+                reviewed_at: null,
+                refine_status: null,
+                confidence: 0.9,
+              },
+              {
+                data: JSON.stringify({ vendor: 'A', invoiceDate: '2026-01-01', totalAmount: 10 }),
+                reviewed_at: null,
+                refine_status: null,
+                confidence: 0.5,
+              },
+              {
+                data: JSON.stringify({ vendor: 'A', invoiceDate: '2026-01-01', totalAmount: 10 }),
+                reviewed_at: '2026-01-02',
+                refine_status: null,
+                confidence: 0.9,
+              },
+              {
+                data: JSON.stringify({ invoiceDate: '2026-01-01', totalAmount: 10 }),
+                reviewed_at: null,
+                refine_status: null,
+                confidence: 0.9,
+              },
+            ],
+          ];
+        return [[]];
+      });
+
+      const metrics = await getExtractionMetrics('u1', 30);
+      expect(metrics).toEqual({
+        localOnlyPercent: 60, // (10 - 4) / 10 * 100
+        cloudCalls: 3,
+        totalTokens: 4120,
+        needsReviewCount: 2, // low-confidence doc + missing-vendor doc
+      });
+      // needs-review query must not depend on days: only userId is passed
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('ORDER BY d.created_at DESC'),
+        ['u1']
+      );
+    });
+
+    it('with days=7 still counts an older unapproved document that needs review', async () => {
+      const mockQuery = vi.mocked(pool.query) as any;
+      mockQuery.mockImplementation(async (sql: unknown) => {
+        const s = String(sql);
+        if (s.includes('COUNT(*) AS cnt FROM documents') && !s.includes('reviewed_at'))
+          return [[{ cnt: 2 }]];
+        if (s.includes("ea.method = 'llm'"))
+          return [[{ cloudCalls: 0, totalTokens: 0, docsWithCloud: 0 }]];
+        // needs-review count query: per-document data + reviewed_at + refine_status + confidence
+        if (s.includes('d.data') && s.includes('refine_jobs r WHERE r.document_id = d.id'))
+          return [
+            [
+              // older doc (outside any days window) that still needs review
+              {
+                data: JSON.stringify({ invoiceDate: '2025-01-01', totalAmount: 10 }),
+                reviewed_at: null,
+                refine_status: null,
+                confidence: 0.9,
+              },
+              // approved doc -> not needs review
+              {
+                data: JSON.stringify({ vendor: 'A', invoiceDate: '2026-01-01', totalAmount: 10 }),
+                reviewed_at: '2026-01-02',
+                refine_status: null,
+                confidence: 0.5,
+              },
+            ],
+          ];
+        return [[]];
+      });
+
+      const metrics = await getExtractionMetrics('u1', 7);
+      expect(metrics.localOnlyPercent).toBe(100); // (2 - 0) / 2 * 100
+      expect(metrics.cloudCalls).toBe(0);
+      expect(metrics.totalTokens).toBe(0);
+      expect(metrics.needsReviewCount).toBe(1); // older unapproved doc still counts
+      // needs-review query must not depend on days: only userId is passed
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.stringContaining('ORDER BY d.created_at DESC'),
+        ['u1']
+      );
+    });
+
+    it('counts needs-review via needsReview() rule (alerts: only dup/future-date force)', async () => {
+      const mockQuery = vi.mocked(pool.query) as any;
+      mockQuery.mockImplementation(async (sql: unknown) => {
+        const s = String(sql);
+        if (s.includes('COUNT(*) AS cnt FROM documents') && !s.includes('reviewed_at'))
+          return [[{ cnt: 2 }]];
+        if (s.includes("ea.method = 'llm'"))
+          return [[{ cloudCalls: 0, totalTokens: 0, docsWithCloud: 0 }]];
+        if (s.includes('d.data') && s.includes('refine_jobs r WHERE r.document_id = d.id'))
+          return [
+            [
+              // approved -> not needs review
+              {
+                data: JSON.stringify({ vendor: 'A', invoiceDate: '2026-01-01', totalAmount: 10 }),
+                reviewed_at: '2026-01-02',
+                refine_status: null,
+                confidence: 0.5,
+              },
+              // amount spike alone does NOT force review
+              {
+                data: JSON.stringify({
+                  vendor: 'A',
+                  invoiceDate: '2026-01-01',
+                  totalAmount: 10,
+                  alerts: [{ code: 'AMOUNT_SPIKE', message: 'x' }],
+                }),
+                reviewed_at: null,
+                refine_status: null,
+                confidence: 0.9,
+              },
+            ],
+          ];
+        return [[]];
+      });
+
+      const metrics = await getExtractionMetrics('u1', 30);
+      expect(metrics.needsReviewCount).toBe(0);
+    });
+
+    it('returns zeros when there are no documents', async () => {
+      vi.mocked(pool.query).mockResolvedValue([[]] as any);
+      const metrics = await getExtractionMetrics('u1', 30);
+      expect(metrics.localOnlyPercent).toBe(0);
+      expect(metrics.cloudCalls).toBe(0);
+      expect(metrics.totalTokens).toBe(0);
+      expect(metrics.needsReviewCount).toBe(0);
+    });
   });
 });

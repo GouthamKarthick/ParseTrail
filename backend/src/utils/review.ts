@@ -43,5 +43,13 @@ export function needsReview(doc: {
 
   if (doc.refine_status === 'dead') return true;
 
+  // Only POSSIBLE_DUPLICATE and FUTURE_DATE force human review. Amount
+  // spikes and payslip shifts surface as alerts but do not block review.
+  const forcedReviewCodes = new Set(['POSSIBLE_DUPLICATE', 'FUTURE_DATE']);
+  const rawAlerts = (data as Record<string, unknown>).alerts;
+  const alerts = Array.isArray(rawAlerts) ? rawAlerts : null;
+  if (alerts?.some((a: Record<string, unknown>) => forcedReviewCodes.has(String(a.code))))
+    return true;
+
   return false;
 }

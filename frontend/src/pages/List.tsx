@@ -36,6 +36,20 @@ const DOC_TYPES: { value: string; label: string }[] = [
   { value: 'unknown', label: 'Unknown' },
 ];
 
+/**
+ * Returns the POSSIBLE_DUPLICATE guardrail alert for a document, if any.
+ * @param doc Document row
+ * @returns The duplicate alert or undefined
+ */
+function duplicatePill(
+  doc: Document
+): { code: string; message: string; relatedDocId?: string } | undefined {
+  const alerts = (doc.data as Record<string, unknown> | null)?.alerts;
+  if (!Array.isArray(alerts)) return undefined;
+  return alerts.find((a: Record<string, unknown>) => a.code === 'POSSIBLE_DUPLICATE') as
+    { code: string; message: string; relatedDocId?: string } | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -307,6 +321,23 @@ export default function List() {
                               Needs review
                             </span>
                           )}
+                          {(() => {
+                            const dup = duplicatePill(d);
+                            if (!dup) return null;
+                            return (
+                              <button
+                                type="button"
+                                className={`${styles['list-status']} ${styles['list-status-duplicate']}`}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  if (dup.relatedDocId) navigate(`/documents/${dup.relatedDocId}`);
+                                }}
+                                title={dup.message || 'View matching document'}
+                              >
+                                Possible duplicate
+                              </button>
+                            );
+                          })()}
                         </span>
                       </td>
                       <td>
@@ -343,7 +374,7 @@ export default function List() {
         </div>
       ) : (
         <DocumentList
-          documents={docs}
+          documents={filteredDocs}
           view={view}
           loading={loading}
           hasFilters={hasFilters}

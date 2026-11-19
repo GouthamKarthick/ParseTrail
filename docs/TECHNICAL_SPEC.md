@@ -72,9 +72,8 @@ interface ApiError {
   - Allowed mimes: `application/pdf`, `image/png`, `image/jpeg`
   - Max size: `10 MB` (configurable via `MAX_FILE_SIZE`)
   - Validation: `zod` + `multer` fileFilter
-- **Phase1 behavior:** Server generates `id` via `crypto.randomUUID()` (v4, 122 random bits, collision <1e-25 at 1M docs; `PRIMARY KEY` guards duplicates — `ER_DUP_ENTRY` → retry), save to `UPLOAD_DIR` (`./uploads`), insert `documents` row `pending`, immediately set `processing`, call `extractionService.extract(filePath)` in-process, update `done` + `data` or `failed` + `error`.
-- **Phase2 behavior (actual):** save to local `UPLOAD_DIR`, insert `pending`, run local-only extract (`allowCloud:false`), write `done`+`data` or `failed`+`error`. If the local result is incomplete or stages disagreed, insert a `refine_jobs` row (`status=queued`) and return. The in-process worker (`jobs/refine.ts`, `REFINE_POLL_MS=15s`) claims queued jobs, runs the cloud pass, null-fills `data`, and marks the job `done/retry/dead` under a rate bucket + daily cap. No S3/SQS/Lambda involved.
-- **Response 201 (both phases):**
+- **Phase2 behavior (actual):** save to local `UPLOAD_DIR`, sniff magic bytes (`%PDF`/PNG/JPEG — spoofed mime types are rejected with `400 INVALID_FILE_CONTENT`), compute a SHA-256 content hash, and reject exact byte duplicates with `409 {code:"DUPLICATE_UPDATED", duplicateOf}` **without touching the existing row**. Otherwise insert a `documents` row `pending`, mark `processing`, enqueue a `refine_jobs` row (`status=queued`), and return `202` immediately. Extraction runs in the background worker (`jobs/refine.ts`, `REFINE_POLL_MS=15s`): local-only extract first, then a cloud pass under a rate bucket + daily cap that null-fills `data`, re-runs cross-document guardrails (`audit-checks`: possible duplicate, amount spike, payslip shift, future date), and persists `document_type`, `document_category`, and `content_fingerprint`. No S3/SQS/Lambda involved.
+- **Response 202:**
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -84,7 +83,8 @@ interface ApiError {
 }
 ```
 - **Errors:**
-  - `400` — no file / invalid mime / zod fail `{error:"Invalid file type. Allowed: pdf,png,jpg"}`
+  - `400` — no file / invalid mime / invalid file content (magic-byte mismatch) / zod fail `{error:"Invalid file type. Allowed: pdf,png,jpg"}`
+  - `409` — exact byte-hash duplicate `{code:"DUPLICATE_UPDATED", duplicateOf}` (existing row untouched)
   - `413` — file too large
   - `500` — storage/DB/queue failure `{error:"Failed to process upload"}`
 
@@ -117,7 +117,7 @@ interface ApiError {
 ### 2.3 Shipped API deltas (supplement to §2.2 — code is source of truth)
 
 - Auth: all `/api/documents/*` require a logged-in JWT-cookie session (`401` otherwise). Auth surface in `auth.route.ts`: register/login/logout/me/profile/avatar/verify-email/resend-verification/forgot-password/reset-password.
-- `POST /upload` duplicate → `409 {code:"DUPLICATE_UPDATED", duplicateOf}` (not `DUPLICATE_CONTENT`); corrections are re-applied onto the surviving record.
+- `POST /upload` exact byte-hash duplicate → `409 {code:"DUPLICATE_UPDATED", duplicateOf}` — the existing row is **never updated**; content near-matches (same vendor + amount + invoice number + currency) attach a `POSSIBLE_DUPLICATE` guardrail alert in `data.alerts` on the new document and force review (see `audit-checks`).
 - `ExtractedData` = `{vendor?, invoiceNumber?, invoiceDate?, totalAmount?, currency?}` plus FX `totalAmountConverted?/currencyConverted?/conversionRate?/conversionAt?` (target `DISPLAY_CURRENCY`, default INR; wiped + recomputed when amount/currency is corrected).
 - Added since §2.2: `GET /:id/attempts` (cascade ledger), `POST /:id/reprocess` (local re-run + refine enqueue), `POST /:id/refinement/retry`, `POST|GET /:id/corrections`, `GET /corrections/stats`, `GET /summary`, `GET /summary/export?format=pdf|csv`. Summary sums prefer FX-converted amounts in the target currency.
 - `path` is always local disk (no S3-key variant).
@@ -126,9 +126,14 @@ interface ApiError {
 
 | Route | 2xx | 4xx | 5xx |
 |---|---|---|---|
-| `POST /upload` | 201 | 400,401,413 | 500 |
+| `POST /upload` | 202 | 400,401,409,413 | 500 |
 | `GET /documents` | 200 | 400,401 | 500 |
 | `GET /documents/:id` | 200 | 400,404 (+401 unauth) | 500 |
+| `GET /documents/summary/metrics` | 200 | 401 | 500 |
+| `GET /documents/export` | 200 | 401 | 500 |
+| `GET /documents/:id/file` | 200 | 401,404 | 500 |
+| `POST /documents/:id/approve` | 200 | 400,401,404 | 500 |
+| `DELETE /documents/:id` | 200 | 401,404 | 500 |
 | `POST /documents/:id/corrections` | 200 | 400,401,404 | 500 |
 | `POST /documents/:id/reprocess` | 200 | 400,401,404 | 500 |
 | `GET /health` | 200 | — | — |
@@ -139,7 +144,7 @@ Auth failures: unauthenticated → `401`; unverified login → `403 EMAIL_NOT_VE
 
 | Aspect | Phase1 (sync, local-only) | Phase2 (async, DB-backed refine) |
 |---|---|---|
-| `POST /upload` latency | Includes local extraction (no cloud call) | Same, plus a `refine_jobs` insert when the local result is incomplete |
+| `POST /upload` latency | Includes local extraction (no cloud call) | Same local save + hash + enqueue, returns `202` immediately; extraction + cloud refine run in the background worker |
 | `path` | Local `./uploads/<uuid>-<name>` | Same (local disk; cloud deploy uses `UPLOAD_DIR=/tmp/uploads`, rows in the MySQL-compatible DB are the source of truth) |
 | `status` lifecycle | `pending → processing → done/failed` in the request handler | Same, plus optional `refine_jobs queued → working → done/retry/dead` afterwards |
 | Queue | None | `refine_jobs` table + in-process worker (`REFINE_POLL_MS`, `REFINE_DAILY_CAP`) |
@@ -162,28 +167,34 @@ CREATE TABLE IF NOT EXISTS documents (
   name VARCHAR(255) NOT NULL,
   path VARCHAR(500) NOT NULL COMMENT 'local disk path; file bytes, not source of truth',
   status ENUM('pending','processing','done','failed') NOT NULL DEFAULT 'pending',
-  data JSON NULL COMMENT 'ExtractedData: vendor/invoiceNumber/invoiceDate/totalAmount/currency + totalAmountConverted/currencyConverted/conversionRate/conversionAt',
-  error TEXT NULL,
   document_type VARCHAR(50) NOT NULL DEFAULT 'unknown' COMMENT 'invoice|receipt|payment|bill|payslip|settlement_slip|other|unknown',
   document_category VARCHAR(20) NOT NULL DEFAULT 'unknown' COMMENT 'financial|unknown',
-  user_id CHAR(36) NULL COMMENT 'FK → users.id; app always sets it, every query scopes WHERE user_id=?',
+  data JSON NULL COMMENT 'ExtractedData: vendor/invoiceNumber/invoiceDate/totalAmount/currency + FX converted fields + data.alerts guardrail entries',
+  extracted_text MEDIUMTEXT NULL COMMENT 'cached OCR/PDF text so retries never re-OCR',
+  content_hash CHAR(64) NULL COMMENT 'SHA-256 of file bytes; exact duplicates rejected with 409',
+  content_fingerprint CHAR(64) NULL COMMENT 'normalized vendor+invoiceNo+amount+currency hash for content-dup alerts',
+  error TEXT NULL,
+  reviewed_at DATETIME NULL COMMENT 'set when approved; cleared when a correction is applied',
+  user_id CHAR(36) NULL COMMENT 'FK → users.id; migrated to NOT NULL in v6 once no NULL rows exist',
   expires_at DATETIME NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL 30 DAY) COMMENT 'hard-delete purge horizon',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_status_created (status, created_at),
-  INDEX idx_document_type (document_type),
   INDEX idx_type_status (document_type, status),
   INDEX idx_category (document_category),
   INDEX idx_user_created (user_id, created_at),
+  INDEX idx_user_fingerprint (user_id, content_fingerprint),
+  UNIQUE KEY uq_user_content_hash (user_id, content_hash),
   INDEX idx_expires (expires_at),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 **Notes:**
+- `user_id` is `NULL` in the base table and is made `NOT NULL` by migration v6 (after confirming no NULL rows exist), per the review note.
 - Short names: `name` (for `original_name`), `path` (for `stored_path`), `data` (for `extracted_data`), `error` (for `error_message`) per PRD §9.
 - `path` is always local disk. There is no S3 key variant (AWS plan dropped).
-- `data` JSON shape = `ExtractedData` (financial fields + FX `*Converted` fields + per-type extras). No generated columns in MVP.
+- `data` JSON shape = `ExtractedData` (financial fields + FX `*Converted` fields + `alerts` guardrail array). No generated columns in MVP.
 - `user_id` scoping is the authz boundary — every document query includes `WHERE user_id=?`.
 - `DATETIME` uses `CURRENT_TIMESTAMP` (MySQL 8). `updated_at` auto-updates on row change.
 
@@ -208,17 +219,21 @@ interface DocumentRow {
 -- extraction_attempts ledger: one row per cascade rung per document
 CREATE TABLE IF NOT EXISTS extraction_attempts (
   id CHAR(36) PRIMARY KEY,
-  document_id CHAR(36) NOT NULL,
-  method VARCHAR(50) NOT NULL COMMENT 'e.g. heuristic-detect, rule-based, local-llm, llm, fallback-merge',
-  predicted_type VARCHAR(50) NULL,
-  confidence FLOAT NOT NULL COMMENT '0-1',
-  latency_ms INT NOT NULL,
-  cost_estimate DECIMAL(10,6) NULL,
-  succeeded BOOLEAN NOT NULL,
+  seq INT NOT NULL AUTO_INCREMENT COMMENT 'insertion order for timeline',
+  document_id CHAR(36) NOT NULL COMMENT 'FK→documents.id',
+  method VARCHAR(50) NOT NULL COMMENT 'heuristic-detect|rule-based|local-llm|llm|fallback-merge',
+  predicted_type VARCHAR(50) NULL COMMENT 'what this stage voted',
+  confidence FLOAT NOT NULL DEFAULT 0 COMMENT '0-1',
+  latency_ms INT NOT NULL DEFAULT 0,
+  cost_estimate DECIMAL(10,4) NOT NULL DEFAULT 0 COMMENT 'USD, 0 for local/free-tier',
+  input_tokens INT NULL,
+  output_tokens INT NULL,
+  succeeded BOOLEAN NOT NULL DEFAULT FALSE,
   fallback_reason VARCHAR(255) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
-  INDEX idx_doc_id (document_id)
+  INDEX idx_attempt_doc (document_id),
+  UNIQUE KEY uq_attempt_seq (seq),
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
@@ -310,7 +325,7 @@ ParseTrail/
 │   │   ├── prompts/ + utils/ + types/ + middleware/  # as named
 │   │   └── uploads/              # gitignored, local Phase1
 ├── frontend/
-│   ├── package.json          # vite + react + TS (no test runner yet)
+│   ├── package.json          # vite + react + TS + Vitest + Testing Library (32 tests in smoke.test.tsx)
 │   ├── vite.config.ts
 │   ├── tsconfig.json
 │   ├── index.html

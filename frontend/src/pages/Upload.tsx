@@ -256,11 +256,9 @@ export default function Upload() {
               <option value="de">German</option>
               <option value="fr">French</option>
               <option value="es">Spanish</option>
-              <option value="hi">Hindi</option>
-              <option value="ta">Tamil</option>
-              <option value="ml">Malayalam</option>
-              <option value="kn">Kannada</option>
-              <option value="te">Telugu</option>
+              <option value="it">Italian</option>
+              <option value="nl">Dutch</option>
+              <option value="pt">Portuguese</option>
             </select>
             <Text variant="small" className={styles['upload-language-hint']}>
               Auto-detects the language. For scanned non-English documents pick the language

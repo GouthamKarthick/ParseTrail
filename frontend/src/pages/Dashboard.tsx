@@ -18,7 +18,7 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
-import { getSummary, exportSummary } from '../api/client';
+import { getSummary, exportSummary, getExtractionMetrics } from '../api/client';
 import { TextBlock } from '../components/ui/Text';
 import { Button } from '../components/ui/Button';
 import { useTheme } from '../context/ThemeContext';
@@ -77,6 +77,9 @@ export default function Dashboard() {
   const { show } = useToastContext();
   const [exporting, setExporting] = useState<null | 'pdf' | 'csv'>(null);
   const COLORS = theme === 'dark' ? COLORS_DARK : COLORS_LIGHT;
+
+  const fetchMetrics = useCallback(() => getExtractionMetrics(), []);
+  const { data: metrics, loading: metricsLoading } = useApi(fetchMetrics);
 
   const download = useCallback(
     async (fmt: 'pdf' | 'csv') => {
@@ -181,6 +184,27 @@ export default function Dashboard() {
           <span className={styles['dashboard-stat-sub']}>avg confidence</span>
         </div>
       </div>
+
+      {data && metrics && !metricsLoading && (
+        <div className={styles['dashboard-metrics']}>
+          <span className={styles['dashboard-metrics-label']}>AI Pipeline Efficiency</span>
+          <span className={styles['dashboard-metrics-value']}>
+            {formatPercent01(metrics.localOnlyPercent / 100)} Zero-Cloud
+          </span>
+          <span className={styles['dashboard-metrics-sep']}>·</span>
+          <span className={styles['dashboard-metrics-value']}>
+            {metrics.cloudCalls} Cloud Calls
+          </span>
+          <span className={styles['dashboard-metrics-sep']}>·</span>
+          <span className={styles['dashboard-metrics-value']}>
+            {metrics.totalTokens.toLocaleString()} Cloud Tokens
+          </span>
+          <span className={styles['dashboard-metrics-sep']}>·</span>
+          <span className={styles['dashboard-metrics-value']}>
+            {metrics.needsReviewCount} Docs Need Review
+          </span>
+        </div>
+      )}
 
       <div className={styles['dashboard-grid2']}>
         <div className={styles['dashboard-card']}>

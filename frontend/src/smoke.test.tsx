@@ -26,6 +26,7 @@ import {
   exportDocuments,
   getDocumentFileBlob,
   approveDocument,
+  submitCorrection,
 } from './api/client.ts';
 
 const NodeRequest = globalThis.Request;
@@ -52,6 +53,13 @@ vi.mock('./api/client.ts', () => ({
   approveDocument: vi
     .fn()
     .mockResolvedValue({ id: 'd1', needs_review: false, reviewed_at: '2026-01-02T00:00:00Z' }),
+  submitCorrection: vi.fn().mockResolvedValue({
+    id: 'd1',
+    field: 'vendor',
+    original: 'Acme',
+    corrected: 'Acme Corp',
+    changed: true,
+  }),
   me: vi.fn().mockResolvedValue({
     id: 'u1',
     email: 'user@example.com',
@@ -72,6 +80,7 @@ const mockListDocuments = vi.mocked(listDocuments);
 const mockExportDocuments = vi.mocked(exportDocuments);
 const mockGetDocumentFileBlob = vi.mocked(getDocumentFileBlob);
 const mockApproveDocument = vi.mocked(approveDocument);
+const mockSubmitCorrection = vi.mocked(submitCorrection);
 
 function providers(children: ReactNode) {
   return (
@@ -436,6 +445,70 @@ describe('List page', () => {
     await waitFor(() => expect(screen.getByText('invoice.pdf')).toBeTruthy());
     expect(screen.getAllByText(/Needs review/i)).toHaveLength(2);
   });
+
+  it('Needs review filter applies to Grid view (filteredDocs)', async () => {
+    mockListDocuments.mockResolvedValue({
+      documents: [
+        {
+          id: 'd1',
+          name: 'needs-review-1.pdf',
+          status: 'done',
+          document_type: 'invoice',
+          document_category: 'financial',
+          data: { vendor: 'Acme', totalAmount: 100, currency: 'USD' },
+          needs_review: true,
+          refine_status: null,
+          error: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        } as any,
+        {
+          id: 'd2',
+          name: 'ok.pdf',
+          status: 'done',
+          document_type: 'receipt',
+          document_category: 'financial',
+          data: { vendor: 'Best Shop', totalAmount: 50, currency: 'USD' },
+          needs_review: false,
+          refine_status: null,
+          error: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        } as any,
+        {
+          id: 'd3',
+          name: 'needs-review-2.pdf',
+          status: 'done',
+          document_type: 'bill',
+          document_category: 'financial',
+          data: { vendor: 'Acme', totalAmount: 200, currency: 'USD' },
+          needs_review: true,
+          refine_status: null,
+          error: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        } as any,
+      ],
+      total: 3,
+      limit: 20,
+      offset: 0,
+    } as any);
+
+    renderAt('/', <List />);
+
+    await waitFor(() => expect(screen.getByText('needs-review-1.pdf')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('ok.pdf')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('needs-review-2.pdf')).toBeTruthy());
+
+    // Enable Needs review filter
+    await userEvent.click(screen.getByRole('button', { name: /Needs review/i }));
+
+    // Switch to Grid view — only filtered (needs_review) documents should show
+    await userEvent.click(screen.getByRole('tab', { name: /Grid/i }));
+    await vi.waitFor(() => expect(screen.getByText('needs-review-1.pdf')).toBeTruthy());
+    await vi.waitFor(() => expect(screen.getByText('needs-review-2.pdf')).toBeTruthy());
+    expect(screen.queryByText('ok.pdf')).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -624,6 +697,56 @@ describe('Detail page', () => {
       expect(screen.queryByText(/Needs review: check the highlighted fields/i)).toBeNull()
     );
     expect(screen.getByText(/1\/2\/2026/)).toBeTruthy();
+  });
+
+  it('clears local approval when a correction changes a field so Approve reappears', async () => {
+    mockGetDocument.mockImplementation(() =>
+      Promise.resolve({
+        id: 'd1',
+        name: 'invoice.pdf',
+        status: 'done',
+        document_type: 'invoice',
+        document_category: 'financial',
+        data: { vendor: 'Acme', totalAmount: 10, currency: 'USD' },
+        needs_review: true,
+        reviewed_at: null,
+        refine_status: null,
+        error: null,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      } as any)
+    );
+    mockSubmitCorrection.mockResolvedValue({
+      id: 'd1',
+      field: 'vendor',
+      original: 'Acme',
+      corrected: 'Acme Corp',
+      changed: true,
+    });
+
+    renderAt('/documents/d1', <Detail />);
+
+    await vi.waitFor(() =>
+      expect(screen.getByText(/Needs review: check the highlighted fields/i)).toBeTruthy()
+    );
+    await userEvent.click(screen.getByRole('button', { name: /Approve/i }));
+    await vi.waitFor(() => expect(mockApproveDocument).toHaveBeenCalledWith('d1'));
+    await vi.waitFor(() =>
+      expect(screen.queryByText(/Needs review: check the highlighted fields/i)).toBeNull()
+    );
+    expect(screen.queryByRole('button', { name: /Approve/i })).toBeNull();
+    expect(screen.getByText(/1\/2\/2026/)).toBeTruthy();
+
+    // Correct the vendor field → local approval must be cleared so Approve returns.
+    await userEvent.click(screen.getByRole('button', { name: /Correct vendor/i }));
+    const vendorInput = screen.getByRole('textbox', { name: /Correct vendor/i });
+    await userEvent.clear(vendorInput);
+    await userEvent.type(vendorInput, 'Acme Corp');
+    await userEvent.click(screen.getByRole('button', { name: /Save/i }));
+    await vi.waitFor(() =>
+      expect(mockSubmitCorrection).toHaveBeenCalledWith('d1', 'vendor', 'Acme Corp')
+    );
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: /Approve/i })).toBeTruthy());
   });
 });
 

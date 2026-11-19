@@ -128,6 +128,44 @@ async function shutdown(signal: string): Promise<void> {
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 process.once('SIGINT', () => void shutdown('SIGINT'));
 
+/**
+ * Logs and continues: an unhandled promise rejection must not kill the
+ * process; the caller is responsible for handling the rejection.
+ */
+process.on('unhandledRejection', (reason: unknown) => {
+  logger.error('Unhandled promise rejection', {
+    error: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
+});
+
+/**
+ * Logs and shuts down: an uncaught exception means the process is in an
+ * unknown state. Close the server and exit so the platform (Render) can
+ * restart it. The OCR worker error handler above prevents uploads from
+ * reaching this handler.
+ */
+process.on('uncaughtException', (error: unknown) => {
+  const msg = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  logger.error('Uncaught exception', { error: msg, stack });
+  const forceExit = setTimeout(() => {
+    logger.error('Uncaught-exception shutdown timed out');
+    process.exit(1);
+  }, 10000);
+  forceExit.unref();
+  if (server) {
+    server.close(() => {
+      clearTimeout(forceExit);
+      process.exit(1);
+    });
+    server.closeAllConnections();
+  } else {
+    clearTimeout(forceExit);
+    process.exit(1);
+  }
+});
+
 server = app.listen(config.port, () => {
   logger.info(`API listening on http://localhost:${config.port}`, {
     port: config.port,

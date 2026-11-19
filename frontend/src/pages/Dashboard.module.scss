@@ -1,5 +1,5 @@
-@use "../styles/variables" as *;
-@use "../styles/mixins" as *;
+@use '../styles/variables' as *;
+@use '../styles/mixins' as *;
 
 /* Base layout */
 .dashboard {
@@ -54,6 +54,41 @@
     &-sub {
       font-size: 0.75em;
       color: $color-text-faint;
+    }
+  }
+
+  /* AI Pipeline Efficiency bar below the four KPI stat boxes. */
+  &-metrics {
+    @include card-base;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    border-left: 4px solid $color-ai;
+    margin-top: 0.5rem;
+    margin-bottom: 1rem;
+
+    &-label {
+      font-size: 0.75em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: $color-text-muted;
+      white-space: nowrap;
+    }
+
+    &-value {
+      font-size: 0.875em;
+      font-weight: 700;
+      color: $color-text;
+      white-space: nowrap;
+    }
+
+    &-sep {
+      color: $color-text-faint;
+      margin: 0 0.125rem;
+      white-space: nowrap;
     }
   }
 
@@ -232,6 +267,7 @@
   .dashboard {
     &-header,
     &-stats,
+    &-metrics,
     &-grid2,
     &-card {
       max-width: $content-max;
