@@ -1,10 +1,30 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ocrBuffer } from './ocr.service.js';
+import fs from 'fs';
+import path from 'path';
+
+const origExit = process.exit.bind(process);
+let exitCalls: Array<unknown> = [];
+
+function installExitSpy(): void {
+  (process.exit as unknown) = ((code?: unknown) => {
+    exitCalls.push(code);
+    throw new Error(
+      `process.exit must not be called during OCR tests; called with ${String(code)}`
+    );
+  }) as unknown as typeof process.exit;
+}
+
+function restoreExit(): void {
+  process.exit = origExit;
+}
 
 vi.mock('dotenv', () => ({ default: { config: vi.fn() } }));
 
 const baseEnv = { ...process.env };
 
 afterEach(() => {
+  restoreExit();
   for (const key of Object.keys(process.env)) {
     if (!(key in baseEnv)) delete process.env[key];
   }
@@ -77,5 +97,61 @@ describe('ocr.service — unit skips heavy deps', () => {
   it('module is importable without side effects', async () => {
     const mod2 = await import('./ocr.service.js');
     expect(mod2).toBeDefined();
+  });
+});
+
+describe('ocr.service — bad documents must not kill the process', () => {
+  // Resolve tessdata dynamically so the suite runs on any machine/CI.
+  const backendDir = path.join(__dirname, '..');
+  const envTessdata = process.env.TESSDATA_PATH;
+  const defaultTessdata = path.join(backendDir, 'tessdata');
+  const TESSDATA =
+    (envTessdata && fs.existsSync(path.join(envTessdata, 'eng.traineddata'))
+      ? envTessdata
+      : fs.existsSync(path.join(defaultTessdata, 'eng.traineddata'))
+        ? defaultTessdata
+        : undefined) ?? '';
+
+  const needsTessdata = Boolean(TESSDATA);
+
+  beforeEach(() => {
+    exitCalls = [];
+    installExitSpy();
+    if (needsTessdata) process.env.TESSDATA_PATH = TESSDATA;
+  });
+
+  afterEach(() => {
+    restoreExit();
+  });
+
+  it('rejects on a corrupt PNG with valid magic bytes and does not exit the process', async () => {
+    if (!needsTessdata) {
+      console.log(
+        'SKIP: tessdata/eng.traineddata not found; cannot exercise real tesseract worker'
+      );
+      return;
+    }
+    const corruptPng = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), // valid PNG magic bytes
+      Buffer.from('corrupt-png-body-that-is-not-a-valid-png-image'), // corrupt body
+    ]);
+
+    await expect(ocrBuffer(corruptPng, 'image/png')).rejects.toThrow(Error);
+    expect(exitCalls).toEqual([]);
+  });
+
+  it('rejects on a broken-xref PDF (pdftoppm cannot rasterise) and does not exit the process', async () => {
+    // Valid %PDF header but an invalid/corrupt xref that makes pdftoppm fail
+    // (exit 99: "Wrong page range given") with zero pages.
+    const brokenPdf = Buffer.from(
+      '%PDF-1.4\n' +
+        '% corrupt un-rasterizable pdf body\n' +
+        '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n' +
+        'trailer\n<< /Root 1 0 R >>\n' +
+        'startxref\n0\n%%%%EOF\n'
+    );
+
+    await expect(ocrBuffer(brokenPdf, 'application/pdf')).rejects.toThrow(Error);
+    expect(exitCalls).toEqual([]);
   });
 });
