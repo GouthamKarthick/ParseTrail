@@ -96,6 +96,19 @@
     .list-filter-chip {
       min-width: 6.5rem;
     }
+
+    &-actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      width: fit-content;
+      min-width: auto;
+
+      & > * {
+        width: auto;
+        min-width: auto;
+      }
+    }
   }
 
   &-table-wrap {

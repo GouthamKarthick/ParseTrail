@@ -231,6 +231,16 @@ export default function Detail() {
   const docId = doc?.id;
   const docStatus = doc?.status;
   const docRefine = doc?.refine_status;
+
+  // Whether the status card has any meaningful content to display.
+  const hasStatusContent =
+    docStatus === 'pending' ||
+    docStatus === 'processing' ||
+    docRefine === 'queued' ||
+    docRefine === 'working' ||
+    !!doc?.error ||
+    docNeedsReview ||
+    alerts.length > 0;
   useEffect(() => {
     if (!docId) return;
     if (docStatus !== 'done' && docStatus !== 'failed') return;
@@ -434,41 +444,43 @@ export default function Detail() {
         </div>
       </div>
 
-      <div className={styles['detail-card']}>
-        {doc.status === 'pending' && <Text variant="muted">Queued</Text>}
-        {doc.status === 'processing' && <Text variant="muted">Extracting…</Text>}
-        {(doc.refine_status === 'queued' || doc.refine_status === 'working') && (
-          <Text variant="muted">Improving with cloud AI…</Text>
-        )}
-        {doc.error && (
-          <Text as="p" variant="small" className={styles['detail-error']}>
-            Error: {doc.error}
-          </Text>
-        )}
-        {docNeedsReview && (
-          <div className={styles['detail-needs-review-banner']}>
-            Needs review: check the highlighted fields
-          </div>
-        )}
-        {alerts.length > 0 && (
-          <>
-            {alerts.map((alert, i) => (
-              <div key={`${alert.code}-${i}`} className={styles['detail-duplicate-pill']}>
-                <span>{String(alert.message ?? alert.code)}</span>
-                {alert.relatedDocId && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => nav(`/documents/${alert.relatedDocId}`)}
-                  >
-                    View matching document →
-                  </Button>
-                )}
-              </div>
-            ))}
-          </>
-        )}
-      </div>
+      {hasStatusContent && (
+        <div className={styles['detail-card']}>
+          {doc.status === 'pending' && <Text variant="muted">Queued</Text>}
+          {doc.status === 'processing' && <Text variant="muted">Extracting…</Text>}
+          {(doc.refine_status === 'queued' || doc.refine_status === 'working') && (
+            <Text variant="muted">Improving with cloud AI…</Text>
+          )}
+          {doc.error && (
+            <Text as="p" variant="small" className={styles['detail-error']}>
+              Error: {doc.error}
+            </Text>
+          )}
+          {docNeedsReview && (
+            <div className={styles['detail-needs-review-banner']}>
+              Needs review: check the highlighted fields
+            </div>
+          )}
+          {alerts.length > 0 && (
+            <>
+              {alerts.map((alert, i) => (
+                <div key={`${alert.code}-${i}`} className={styles['detail-duplicate-pill']}>
+                  <span>{String(alert.message ?? alert.code)}</span>
+                  {alert.relatedDocId && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => nav(`/documents/${alert.relatedDocId}`)}
+                    >
+                      View matching document →
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
 
       {previewKind ? (
         <div className={styles['detail-preview-wrapper']}>
