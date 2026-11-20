@@ -175,6 +175,59 @@ describe('register — no email enumeration', () => {
     expect(res.body.verification_email_sent).toBe(true);
   });
 
+  it('existing unverified email re-issues code with hashed token and resets attempts', async () => {
+    let updateParams: unknown[] | undefined;
+    mockQuery.mockImplementation(async (sql: unknown, params?: unknown[]) => {
+      const s = String(sql);
+      if (s.startsWith('INSERT INTO users')) {
+        throw { code: 'ER_DUP_ENTRY' };
+      }
+      if (
+        s.startsWith(
+          'SELECT id, email, first_name, last_name, email_verified FROM users WHERE email=?'
+        )
+      ) {
+        return [
+          [
+            {
+              id: 'existing-3',
+              email: 'unverified2@example.com',
+              first_name: 'Unverified',
+              last_name: 'User',
+              email_verified: 0,
+            },
+          ],
+        ];
+      }
+      if (
+        s.includes('UPDATE users SET verification_token=') &&
+        s.includes('verification_attempts=?')
+      ) {
+        updateParams = params;
+        console.log('DEBUG params:', params);
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app).post('/register').send({
+      first_name: 'Unverified',
+      last_name: 'User',
+      email: 'unverified2@example.com',
+      password: 'Password1!',
+    });
+
+    expect(res.status).toBe(201);
+    expect(updateParams).toBeDefined();
+    console.log('FINAL updateParams:', updateParams);
+    // The verification token should be stored as a hash (sha256 hex = 64 chars)
+    expect(typeof updateParams![0]).toBe('string');
+    expect(updateParams![0]).toMatch(/^[a-f0-9]{64}$/);
+    // verification_attempts should be reset to 0
+    expect(updateParams).toContain(0);
+  });
+
   it('new email still returns 201', async () => {
     mockQuery.mockResolvedValue([{ affectedRows: 1 }]);
 

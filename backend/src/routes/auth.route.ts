@@ -147,11 +147,12 @@ router.post('/register', async (req, res) => {
       if (!alreadyVerified && config.smtp.host) {
         // Re-issue verification code for an unverified existing account.
         const verificationToken = randomUUID();
+        const verificationTokenHash = hashResetToken(verificationToken);
         const verificationCode = randomInt(0, 1_000_000).toString().padStart(6, '0');
         const verificationExpires = new Date(Date.now() + 15 * 60 * 1000);
         await pool.query(
-          'UPDATE users SET verification_token=?, verification_code=?, verification_expires=? WHERE id=?',
-          [verificationToken, verificationCode, verificationExpires, user.id]
+          'UPDATE users SET verification_token=?, verification_code=?, verification_expires=?, verification_attempts=? WHERE id=?',
+          [verificationTokenHash, verificationCode, verificationExpires, 0, user.id]
         );
         try {
           await sendVerificationEmail(user.email, verificationToken, verificationCode);
@@ -459,8 +460,8 @@ router.post('/resend-verification', async (req, res) => {
     const verificationCode = randomInt(0, 1_000_000).toString().padStart(6, '0');
     const verificationExpires = new Date(Date.now() + 15 * 60 * 1000);
     await pool.query(
-      'UPDATE users SET verification_token=?, verification_code=?, verification_expires=?, verification_attempts=0 WHERE id=?',
-      [verificationTokenHash, verificationCode, verificationExpires, user.id]
+      'UPDATE users SET verification_token=?, verification_code=?, verification_expires=?, verification_attempts=? WHERE id=?',
+      [verificationTokenHash, verificationCode, verificationExpires, 0, user.id]
     );
     try {
       await sendVerificationEmail(email, verificationToken, verificationCode);
