@@ -63,11 +63,30 @@ export function ToastContainer({
           <button
             type="button"
             aria-label="Dismiss"
-            onClick={e => {
+            onClick={(e: { stopPropagation: () => void }) => {
               e.stopPropagation();
               onDismiss(t.id);
             }}
             className={styles['toast-dismiss']}
+            style={{
+              appearance: 'none',
+              backgroundColor: 'transparent',
+              border: '0',
+              color: '#fff',
+              cursor: 'pointer',
+              padding: '0.25rem',
+              fontSize: '1rem',
+              lineHeight: '1',
+              marginLeft: 'auto',
+              opacity: 1,
+              borderRadius: '6px',
+              width: '2rem',
+              height: '2rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
           >
             <i className="bi bi-x" aria-hidden />
           </button>

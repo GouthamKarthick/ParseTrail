@@ -175,6 +175,64 @@ describe('register — no email enumeration', () => {
     expect(res.body.verification_email_sent).toBe(true);
   });
 
+  it('existing unverified email re-issues code with hashed token and resets attempts', async () => {
+    let updateParams: unknown[] | undefined;
+    let sentToken: string | undefined;
+    const { sendVerificationEmail } = await import('../services/email.service.js');
+    const mockSend = vi.fn(async (_email: string, token: string, _code?: string) => {
+      sentToken = token;
+    });
+    vi.mocked(sendVerificationEmail).mockImplementation(mockSend);
+
+    mockQuery.mockImplementation(async (sql: unknown, params?: unknown[]) => {
+      const s = String(sql);
+      if (s.startsWith('INSERT INTO users')) {
+        throw { code: 'ER_DUP_ENTRY' };
+      }
+      if (
+        s.startsWith(
+          'SELECT id, email, first_name, last_name, email_verified FROM users WHERE email=?'
+        )
+      ) {
+        return [
+          [
+            {
+              id: 'existing-3',
+              email: 'unverified2@example.com',
+              first_name: 'Unverified',
+              last_name: 'User',
+              email_verified: 0,
+            },
+          ],
+        ];
+      }
+      if (
+        s.includes('UPDATE users SET verification_token=') &&
+        s.includes('verification_attempts=?')
+      ) {
+        updateParams = params;
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const app = express().use(express.json()).use(authRouter);
+    const res = await request(app).post('/register').send({
+      first_name: 'Unverified',
+      last_name: 'User',
+      email: 'unverified2@example.com',
+      password: 'Password1!',
+    });
+
+    expect(res.status).toBe(201);
+    expect(updateParams).toBeDefined();
+    expect(sentToken).toBeDefined();
+    const { createHash } = await import('crypto');
+    const expectedHash = createHash('sha256').update(sentToken!).digest('hex');
+    expect(updateParams![0]).toBe(expectedHash);
+    expect(updateParams![3]).toBe(0);
+  });
+
   it('new email still returns 201', async () => {
     mockQuery.mockResolvedValue([{ affectedRows: 1 }]);
 

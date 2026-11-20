@@ -233,18 +233,20 @@ export default function List() {
           active={hasFilters}
           onToggle={toggleType}
         />
-        <Button variant="secondary" size="sm" onClick={handleExport} disabled={loading}>
-          Export CSV
-        </Button>
-        <Button
-          variant={needsReviewFilter ? 'secondary' : 'ghost'}
-          size="sm"
-          onClick={() => setNeedsReviewFilter(!needsReviewFilter)}
-          className={styles['list-filter-chip']}
-          aria-pressed={needsReviewFilter}
-        >
-          Needs review
-        </Button>
+        <div className={styles['list-actions']}>
+          <Button variant="secondary" size="sm" onClick={handleExport} disabled={loading}>
+            Export CSV
+          </Button>
+          <Button
+            variant={needsReviewFilter ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setNeedsReviewFilter(!needsReviewFilter)}
+            className={styles['list-filter-chip']}
+            aria-pressed={needsReviewFilter}
+          >
+            Needs review
+          </Button>
+        </div>
       </div>
 
       {view === 'list' ? (

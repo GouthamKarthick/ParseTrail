@@ -25,7 +25,7 @@ Run it locally (see Quick start below). There is no hosted demo; set `VITE_BACKE
 - Shows a 30-day dashboard summary and exports it as CSV or PDF.
 - Shows a per-document extraction-attempt timeline (latest attempts in the UI).
 - Reads English and EU languages (German, French, Spanish, Italian, Dutch, Portuguese) via configurable, bundled OCR languages (German is the default with English).
-- Shows the original uploaded file beside the extracted fields on the Detail page (image or PDF preview).
+- Shows the original uploaded file above the extracted fields on the Detail page (image or PDF preview).
 - Flags documents that need review (low confidence or missing vendor/date/total) and lets you approve them.
 - Exports one row per document as CSV (UTF-8 BOM, Excel-friendly) with the same filters as the document list.
 
