@@ -177,6 +177,13 @@ describe('register — no email enumeration', () => {
 
   it('existing unverified email re-issues code with hashed token and resets attempts', async () => {
     let updateParams: unknown[] | undefined;
+    let sentToken: string | undefined;
+    const { sendVerificationEmail } = await import('../services/email.service.js');
+    const mockSend = vi.fn(async (_email: string, token: string, _code?: string) => {
+      sentToken = token;
+    });
+    vi.mocked(sendVerificationEmail).mockImplementation(mockSend);
+
     mockQuery.mockImplementation(async (sql: unknown, params?: unknown[]) => {
       const s = String(sql);
       if (s.startsWith('INSERT INTO users')) {
@@ -204,7 +211,6 @@ describe('register — no email enumeration', () => {
         s.includes('verification_attempts=?')
       ) {
         updateParams = params;
-        console.log('DEBUG params:', params);
         return [{ affectedRows: 1 }];
       }
       return [[]];
@@ -220,12 +226,11 @@ describe('register — no email enumeration', () => {
 
     expect(res.status).toBe(201);
     expect(updateParams).toBeDefined();
-    console.log('FINAL updateParams:', updateParams);
-    // The verification token should be stored as a hash (sha256 hex = 64 chars)
-    expect(typeof updateParams![0]).toBe('string');
-    expect(updateParams![0]).toMatch(/^[a-f0-9]{64}$/);
-    // verification_attempts should be reset to 0
-    expect(updateParams).toContain(0);
+    expect(sentToken).toBeDefined();
+    const { createHash } = await import('crypto');
+    const expectedHash = createHash('sha256').update(sentToken!).digest('hex');
+    expect(updateParams![0]).toBe(expectedHash);
+    expect(updateParams![3]).toBe(0);
   });
 
   it('new email still returns 201', async () => {
